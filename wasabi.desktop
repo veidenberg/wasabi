@@ -1,0 +1,10 @@
+[Desktop Entry]
+#Wasabi shortcut for Linux desktops. Goes to ~/Desktop or ~/.local/share/applications
+Name=Wasabi     
+GenericName=support server            
+Exec=/home/user/Desktop/Wasabi/wasabi_server.py
+Terminal=true               
+Icon=/home/user/Desktop/Wasabi/images/icon.png
+Type=Application            
+Categories=Application;Education;Utility     
+Comment=Web application for phylogenetic analyses

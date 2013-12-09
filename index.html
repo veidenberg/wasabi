@@ -1,0 +1,108 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<!-- HTML frame for Wasabi application. Andres Veidenberg 2012 (andres.veidenberg@helsinki.fi) -->
+<html>
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+	<meta http-equiv="content-script-type" content="text/javascript" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<title>Wasabi</title>
+	<link rel="icon" type="image/png" href="/images/icon_page.png" />
+	<link rel="apple-touch-icon" href="/images/icon.png" />
+	<link rel="stylesheet" type="text/css" media="screen" href="style.css" />
+	<script type="text/javascript" src="javascript/lib/jquery.js"></script>
+	<script type="text/javascript" src="javascript/lib/jquery.ui.js"></script>
+	<script type="text/javascript" src="javascript/lib/jquery.easing.js"></script>
+	<script type="text/javascript" src="javascript/lib/jquery.mousewheel.js"></script>
+	<script type="text/javascript" src="javascript/lib/scrollbars.js"></script>
+	<script type="text/javascript" src="javascript/lib/knockout.js"></script>
+	<script type="text/javascript" src="javascript/lib/knockout.mapping.mod.js"></script>
+	<script type="text/javascript" src="javascript/lib/raphael.mod.js"></script>
+	<script type="text/javascript" src="javascript/lib/jsphylosvg.rebuild.js"></script>
+	<script type="text/javascript" src="javascript/icons.js"></script>
+	<script type="text/javascript" src="javascript/script.js"></script>
+</head>
+<body data-bind="css:{hiddentop:settingsmodel.hidebar}">
+  <div id="page" data-bind="style:{minWidth:840+(statusbtn().replace(/<[^>]+>/g,'').length*13)+'px'}">
+    <noscript><div><img src="images/warning.png">You have disabled Javascript in your web browser.<br>Please turn on Javascript to use the Wasabi web application.</div></noscript>
+    
+    <div id="startup">Starting up...</div>
+    
+	<div id="top" class="away">
+	  <div id="toptitle" class="title" data-bind="visible:!offline()&&(seqsource()||treesource())" title="Analysis name. Click for more options">
+	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename,valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off"><span class="note" data-bind="fadevisible:unsaved" style="display:none">(unsaved)</span>
+	  </div>
+	  
+	  <div id="topcollapse" title="Click to toggle menubar collapse" onclick="toggletop()"><span>&#x25B2;<br>&#x25B2;</span><br>...</div>
+	  
+	  <div class="buttonblock" style="left:5%">
+	  	<a id="file" class="button transparent icon" onclick="topmenu(event,this)" title="Click for data menu"><img src="images/file.png"></a>
+	    <div class="toptext">Data</div>
+	  </div>
+	  
+	  <div class="buttonblock" style="left:12%">
+	  	<a id="tools" class="button transparent icon" onclick="topmenu(event,this)" title="Click for tools menu"><img src="images/run.png"></a>
+	    <div class="toptext">Tools</div>
+	  </div>
+	   
+	  <div class="buttonblock" style="left:20%">
+	    <div id="zoombtns" style="display:inline-block;position:relative;">
+	      <a id="zoomout" onclick="redraw({zoom:'out'});" class="button zoom" title="Zoom out">-</a> <a id="zoomin" onclick="redraw({zoom:'in'});" class="button zoom" title="Zoom in">+</a>
+	      <div class="toptext zoomperc" data-bind="text:zoomperc"></div>
+	      <div class="toptext">Zoom</div>
+	    </div>
+	  </div>
+	  
+	  <div class="buttonblock" style="left:30%" data-bind="visible:settingsmodel.undo">
+	    <a id="undobtn" class="button left" data-bind="html:svgicon('undo'),click:undo,css:{disabled:!activeundo.data()||activeundo.undone()}" title="Undo"></a>
+	    <a id="historybtn" class="button middle" onclick="topmenu(event,this,'undostack')" title="Click to see and select previous actions">
+	    	<span style="margin-top:0" data-bind="visible:!activeundo.data()">History</span>
+	    	<!-- ko foreach:{data:activeundo.name,afterRender:marginadd,beforeRemove:waitremove} --><span data-bind="fadeText:name"></span><!-- /ko -->
+	    </a>
+	    <a id="redobtn" class="button right" data-bind="html:svgicon('redo'),click:redo,css:{disabled:!activeundo.data()||!activeundo.undone()}" title="Redo"></a>
+	    <div class="toptext">Actions history</div>
+	  </div>
+	  
+	  <div class="buttonblock" style="left:40%;margin-left:80px;z-index:2;display:none" data-bind="fadevisible:statusbtn()!=''">
+	  	<a id="statusbtn" onclick="dialog('jobstatus')" class="button square" data-bind="html:statusbtn" title="Click for details"></a>
+	    <div class="toptext">Notifications</div>  
+	  </div>
+	  
+	  <div id="logo" class="buttonblock" stye="right:20px" onclick="dialog('about')" title="Click for more information">
+	  	<img src="images/wasabi_logo.png">
+	    <div class="toptext">About Wasabi</div>  
+	  </div>
+	   
+	</div><!--top buttons-->
+	<div id="left">
+		<div id="notree" data-bind="fadevisible:!treesource()">No tree data</div>
+		<div id="treewrap"><div id="tree"></div><div id="names"></div></div>
+		<div id="bottomfade"></div><div id="topfade"></div>
+		<div id="borderDrag" title="Drag to adjust sequence area width">&#x22EE;</div>
+	</div>
+	<div id="namesborderDragline" class="draggerline dragmode" data-bind="css:{'visible':treesource()||seqsource()}">
+	  <div id="namesborderDrag" class="dragger" title="Drag to adjust tree width">&#x22EE;</div>
+	</div>
+	<div id="right">
+	  <div id="seqwindow">
+		<div id="noseq" data-bind="fadevisible:!seqsource()">No sequence data</div>
+	    <div id="wrap">
+	      <div id="ruler"></div>
+	      <div id="seqwrap"><div id="seq"><div id="rborder" class="rowborder"></div></div></div>
+	    </div>
+	    <img id="leftshadow" src="images/shadow_left.png">
+	    <img id="rightshadow" src="images/shadow_right.png">
+	    <img id="spinner" style="height:36px" src="images/spinner.gif">
+	  </div>
+	  <div id="horizontalDragger" class="draggerline"><div class="scrollBtn scrollLeftBtn">&lt;</div><div class="dragger"></div><div class="scrollBtn scrollRightBtn">&gt;</div></div>
+	  <div id="verticalDragger" class="draggerline vertical"><div class="scrollBtn scrollUpBtn">&#x2227;</div><div class="dragger"></div><div class="scrollBtn scrollDownBtn">&#x2228;</div></div>
+	  <div id="treebin"><div></div></div>
+	</div>
+	<div id="namelabel"><span></span></div>
+	<div id="bottom">
+		Andres Veidenberg <span style="color:#ccc">|</span> University of Helsinki<br>
+		<a onclick="dialog('about');return false;" title="Click for more info">About Wasabi</a>
+	</div>
+  	<div id="backfade"></div>
+  </div>
+</body>
+</html>

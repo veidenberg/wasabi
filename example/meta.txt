@@ -1,0 +1,1 @@
+{"lasttime": "1363098781.24", "imported": "1369947430.39", "name": "example alignment", "parameters": "-d=input.fas,-o=out,-prunetree,-t=input.tree,-showxml,+F,-dots", "savetime": "1363098904.0", "status": "0", "aligner": "PRANK", "infile": "input.fas", "outfile": "out.xml", "starttime": "1363098781.24", "logfile": "out.log", "endtime": "1363098904.0", "id": "example"}
