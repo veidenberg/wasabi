@@ -7,7 +7,7 @@
 	<meta name="apple-mobile-web-app-capable" content="yes" />
 	<title>Wasabi</title>
 	<link rel="icon" type="image/png" href="/images/icon_page.png" />
-	<link rel="apple-touch-icon" href="/images/icon.png" />
+	<link rel="apple-touch-icon" href="/images/icon_ios.png" />
 	<link rel="stylesheet" type="text/css" media="screen" href="style.css" />
 	<script type="text/javascript" src="javascript/lib/jquery.js"></script>
 	<script type="text/javascript" src="javascript/lib/jquery.ui.js"></script>
@@ -29,7 +29,7 @@
     
 	<div id="top" class="away">
 	  <div id="toptitle" class="title" data-bind="visible:!offline()&&(seqsource()||treesource())" title="Analysis name. Click for more options">
-	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename,valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off"><span class="note" data-bind="fadevisible:unsaved" style="display:none">(unsaved)</span>
+	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename,valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off"><span class="note" data-bind="html:unsaved()?'(unsaved)':librarymodel.shareicon(librarymodel.openitem())"></span>
 	  </div>
 	  
 	  <div id="topcollapse" title="Click to toggle menubar collapse" onclick="toggletop()"><span>&#x25B2;<br>&#x25B2;</span><br>...</div>

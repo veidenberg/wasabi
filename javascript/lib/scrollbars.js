@@ -218,7 +218,7 @@ function mCustomScrollbar(){
 			if(target>0){ target = 0; } else if(Math.abs(target)>totalContentHeight-visibleHeight){ target = visibleHeight-totalContentHeight; }
 			dom.seq.css('margin-top',target);
 			dom.treewrap.css('top',target);
-			$.each([$("#namelabel"),$("#treemenu"),$("#namemenu")],function(m,menu){ //move tree tooltips
+			$.each([$("#namelabel"),$("#treemenu"),$("div.tooltip.leafmenu")],function(m,menu){ //move tree tooltips
 				if(menu.length) menu.css('top',menu.position().top+target-marginY);
 			});
 		}

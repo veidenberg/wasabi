@@ -263,6 +263,18 @@ a.button.blue:hover{
 	background: linear-gradient(#7DB7F0, #1874CD);
 }
 
+a.button.green{
+	color: white;
+	text-shadow: 0 -1px 0 #333;
+	box-shadow: 0 1px 2px -1px white inset;
+	background-color: #18AD14;
+	background: linear-gradient(#9FEA8E, #18AD14);
+}
+a.button.green:hover{
+	background-color: #28BD24;
+	background: linear-gradient(#AFFAAE, #28BD24);
+}
+
 a.button.disabled{ color: #888; }
 
 a.button.transparent, #top a.button.transparent{
@@ -1927,11 +1939,17 @@ div.itemdiv{
 	height: 55px;
 	padding: 5px 0 0 5px;
 	min-width: 370px;
+	border: 2px solid transparent;
+	border-radius: 3px;
 }
 #library .activeitem{
 	background: white;
 	box-shadow: 0 0 5px #999;
 	border-radius: 3px;
+}
+#library div.itemdiv.shared{
+	border-color: #8DB8C6;
+	border-style: dashed;
 }
 #library div.itemdiv.compact{
 	min-height: 24px;
@@ -1958,7 +1976,13 @@ div.itemdiv a.button.itembtn{
 	border-radius: 3px;
     color: red;
     padding: 3px 8px;
-    right: 20px;
+    right: 5px;
+    top: 60px;
+}
+#library div.itemdiv a.button.itembtn.movebtn{
+	border-radius: 3px;
+    padding: 3px 8px;
+    right: 80px;
     top: 60px;
 }
 #library div.itemdiv a.button.itembtn.childbtn{

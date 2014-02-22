@@ -39,8 +39,9 @@ if(os.path.isfile(os.path.join(appdir,'AppSettings.plist'))):
     osxbundle = True
 os.chdir(wasabidir)
 prankbin = os.path.join(appdir,'binaries','prank','prank')
-
+#for tracking library content
 job_queue = None
+libdirs = {}
 
 def getconf(opt='',vtype=''): #parse conf file values
     try:
@@ -85,12 +86,12 @@ gmail = getconf('gmail')
 browsername = getconf('browser') or 'default'
 userexpire = getconf('userexpire','int')
 userlog = os.path.join(datadir,'user.log')
-if useraccounts: open(userlog,'w').close()
+if useraccounts: open(userlog,'wb').close()
 linuxdesktop = getconf('linuxdesktop','bool')
 
 #set up logging
 logfile = os.path.join(dataroot,'server.log') if logtofile else False
-if logfile: open(logfile,'w').close()
+if logfile: open(logfile,'wb').close()
 loglevel = logging.DEBUG if(debug) else logging.INFO
 logging.basicConfig(level=loglevel, filename=logfile, format='%(asctime)s - %(message)s', datefmt='%d.%m.%y %H:%M:%S')
 
@@ -129,25 +130,73 @@ def userpath(path, uid=''): #gets path relative to user or library directory
     return path.split(os.path.join(datadir,uid,''))[-1]
 
 def write_file(filename, filecontents):
-    f = open(filename, 'w')
+    f = open(filename, 'wb')
     f.write(filecontents)
     f.close()
     return f.name
     
-def getlibrary(jobid='', uid='', skipmeta=''):
-    global datadir
-    if os.path.isabs(jobid): return jobid
-    toplevel = datadir if uid=='skip' else joinp(datadir,uid,uid=uid)
-    jobdirs = []
-    for (dirpath,dirs,files) in os.walk(toplevel):
-        if ('meta.txt' not in files and not skipmeta): continue
-        if (jobid):
-            if(jobid == os.path.basename(dirpath)): return dirpath
-        else: jobdirs.append(dirpath)
-    if(jobid and not jobdirs): raise IOError(404, "Getlib: Could not find job dir '%s' : %s" % (jobid,str(jobdirs)))
-    else: return jobdirs
+def maplibrary(libraryid=''): #index library directories
+    global libdirs
+    libdirs = {}
+    libroot = getlibrary(jobid=libraryid) if libraryid else datadir
+    for (dirpath,dirs,files) in os.walk(libroot,followlinks=False):
+        path = dirpath.split(os.path.sep)
+        if('meta.txt' not in files): Metadata.create(dirpath, imported=True)
+        libdirs[path[-1]] = {'parent':path[-2],'children':dirs}
+    if useraccounts: #remove reference to analysis root folder
+        try: del libdirs[os.path.basename(datadir)]
+        except KeyError: pass
 
-def create_job_dir(d = datadir, uid = '', newlibrary = False):
+def librarypath(jobid, getroot=False): #build directory path from library index
+    if(jobid not in libdirs): raise IOError(404, "Invalid library ID: "+jobid)
+    libpath = jobid
+    while jobid in libdirs:
+        libpath = libdirs[jobid]['parent']+os.path.sep+libpath
+        jobid = libdirs[jobid]['parent']
+    if getroot: return libpath.split(os.path.sep)[1] #just return libraryID
+    rootpath = os.path.dirname(datadir)
+    if not useraccounts: rootpath = os.path.dirname(rootpath)
+    dirpath = os.path.join(rootpath,libpath)
+    return dirpath
+
+def librarypaths(libraryid, inclroot=False): #get all subfolder paths
+    dirpaths = [librarypath(libraryid)] if inclroot else []
+    if libraryid in libdirs:
+        for childid in libdirs[libraryid]['children']:
+            dirpaths.append(librarypath(childid))
+            dirpaths += librarypaths(childid)
+    return dirpaths
+    
+def getlibrary(jobid='', uid='', checkowner=False): #search analyses library
+    if os.path.isabs(jobid): return jobid
+    if jobid: #return a directory path
+        if(uid and checkowner and uid!=librarypath(jobid,True)): raise IOError(404,'Permission denied for '+jobid)
+        if(jobid not in libdirs): maplibrary() #remap and try again
+        if(jobid not in libdirs): raise IOError(404, "Invalid library ID: "+jobid)
+        return librarypath(jobid)
+    else: return librarypaths(uid or os.path.basename(datadir)) #return all library paths
+
+def getmeta(dirpath, rootlevel, shareroot=None): #get processed metadata
+    try:
+        md = Metadata(dirpath)
+        if(not md['imported']): md.update_log()
+        dirid = md['id'] or os.path.basename(dirpath)
+        md['parentid'] = "" if libdirs[dirid]['parent'] == rootlevel else libdirs[dirid]['parent']
+        md['children'] = len(libdirs[dirid]['children'])
+        if md['shared'] and shareroot is None: #check shared IDs added to this libfolder
+            idlist = [d for d in md['shared'] if d in libdirs]
+            if len(idlist) is not len(md['shared']):
+                md.update({"shared":idlist})
+                md['shared'] = idlist
+            md['children'] += len(idlist)
+        elif shareroot is not None: #this is shared analysis
+            if not md['parentid']: md['parentid'] = shareroot
+            md['shared'] = "true"
+    except MetadataError as why:
+        logging.error('Metadata parsing error: %s' % why)
+    return md
+
+def create_job_dir(d = datadir, uid = '', newlibrary = False, newfolder = False):
     if(d is not datadir): d = apath(d,d=datadir,uid=uid)
     else:
         if(uid): d = joinp(d,uid,uid=uid)
@@ -159,24 +208,31 @@ def create_job_dir(d = datadir, uid = '', newlibrary = False):
             raise OSError(501,'Could not create a job folder to %s : %s' % (userpath(d), e.strerror))
                 
     newdir = tempfile.mkdtemp(prefix='', dir=d)
+    while(os.path.basename(newdir) in libdirs): #check for uniqueness
+        os.rmdir(newdir)
+        newdir = tempfile.mkdtemp(prefix='', dir=d)
     os.chmod(newdir,0775)
     
     if(newlibrary): #create library folder for a new user
-        try: shutil.copytree(joinp(datadir,'example'),joinp(newdir,'example'))
-        except shutil.Error: pass
+        md = Metadata.create(newdir, name="Library root folder", imported=True)
+        md.update({"shared":["example"]})
+        maplibrary()
         
-        if userexpire:  #cleanup old user libraries (default: >30 days)
+        if userexpire and useraccounts:  #cleanup old user libraries (default: >30 days)
             try:
                 for dname in os.listdir(datadir):
                     dpath = os.path.join(datadir,dname)
                     if(not os.path.isdir(dpath)): continue
                     lasttime = os.path.getmtime(dpath) #faulty in Windows?
-                    dirage = (time.time()-filetime)/86400
+                    dirage = (time.time()-lasttime)/86400
                     if(dirage > userexpire): os.rmtree(apath(dpath,datadir,uid='skip'))
             except (OSError, IOError) as why: logging.error('Library cleanup failed: '+str(why))
     else: #create files for keeping metadata
-        Metadata.create(newdir)
-        Metadata.create(newdir, filename="importmeta.txt")
+        if newfolder: Metadata.create(newdir, name="new folder", imported=True)
+        else:
+            Metadata.create(newdir)
+            Metadata.create(newdir, filename="importmeta.txt")
+        maplibrary(uid)
     return newdir
 
 def info(msg):
@@ -228,50 +284,57 @@ class WasabiServer(BaseHTTPRequestHandler):
     
     #serve files        
     def do_GET(self):
-        try:
-            url = self.path
-            urldir = ''
-            params = ''
-            filecontent = ''
-            userid = ''
-            filename = ''
+        url = self.path
+        urldir = ''
+        params = ''
+        filecontent = ''
+        userid = ''
+        filename = ''
             
-            if url.endswith("/"): url += "index.html"
-            url = url[1:] #remove leading /
-            if('?' in url):
-                urlarr = url.split('?')
-                url = urlarr[0]
-                params = dict([x.split('=') for x in urlarr[1].split('&')])
+        if url.startswith("/"): url = url[1:]
+        if url.endswith("/"): url += "index.html"
+        if('?' in url):
+            urlarr = url.split('?')
+            url = urlarr[0]
+            params = dict([x.split('=') for x in urlarr[1].split('&')])
                 
-            if("." not in url and "/" not in url):
-                if(os.path.isdir(joinp(datadir,url,uid='skip'))): #check user ID in url
-                    userid = url
-                url = "index.html"
+        if("." not in url and "/" not in url):
+            if(url in libdirs): userid = url #check user ID   
+            url = "index.html"
             
-            if params :
-                logging.debug("Get: userid=%s %s" % (userid, str(params)))
+        if params :
+            logging.debug("Get: userid=%s %s" % (userid, str(params)))
             
-            if 'type' in params:
-                ctype = 'text/plain' if(params['type'] is 'text') else 'application/octet-stream'
-            elif url.endswith(".html") | url.endswith(".css") | url.endswith(".js"): #send as text
-                ctype = 'text/css' if url.endswith(".css") else 'text/javascript' if url.endswith(".js") else 'text/html'
-            else: #send as binary
-                ctype = 'image' if url.endswith(".jpg")|url.endswith(".png")|url.endswith(".gif") else 'application/octet-stream'
+        if 'type' in params:
+            ctype = 'text/plain' if(params['type'] is 'text') else 'application/octet-stream'
+        elif 'file' in params or 'getlibrary' in params or 'getexport' in params:
+            ctype = 'text/plain'
+        elif url.endswith(".html") or url.endswith(".css") or url.endswith(".js"): #send as text
+            ctype = 'text/css' if url.endswith(".css") else 'text/javascript' if url.endswith(".js") else 'text/html'
+        else: #send as binary
+            ctype = 'image' if url.endswith(".jpg")|url.endswith(".png")|url.endswith(".gif") else 'application/octet-stream'
            
-            root = wasabidir  
-            if('file' in params and 'type' in params): #access datafiles from external directories
-                if 'getlibrary' in params and params['getlibrary']:
-                    if('share' in params): userid = 'skip'
-                    url = os.path.join(getlibrary(uid=userid,jobid=params['getlibrary']), params['file'])
-                    filename = params['file']
-                elif local: #local wasabi installation permits unrestricted file reading
-                    url = params['file']
-                    root = 'skip'
-                else: raise IOError(404,'faulty request')
-            elif 'getexport' in params:
-                url = joinp(exportdir, params['getexport'], d=exportdir)
-                filename = params['getexport']
-                
+        if 'getlibrary' in params and params['getlibrary']: #access datafiles from external directories
+            filename = params['file'] if 'file' in params else 'meta.txt'
+            if 'child' in params: #check requested ID
+                url = os.path.join(getlibrary(uid=userid,jobid=params['child']), filename)
+                if userid: #add shared ID to library
+                    md = Metadata(librarypath(userid))
+                    idlist = md['shared'] or [] 
+                    if params['getlibrary'] not in idlist: md.update({'shared':idlist+[params['getlibrary']]})
+            url = os.path.join(getlibrary(uid=userid,jobid=params['getlibrary']), filename)
+            root = datadir
+        elif 'file' in params and local: #local wasabi installation permits unrestricted file reading
+            url = params['file']
+            filename = os.path.basename(url)
+            root = 'skip'
+        elif 'getexport' in params:
+            url = joinp(exportdir, params['getexport'], d=exportdir)
+            filename = params['getexport']
+            root = exportdir
+        else: root = wasabidir
+            
+        try:    
             f = open(apath(url,root)) if 'text' in ctype else open(apath(url,root),'rb')
             filecontent = f.read()
             f.close()
@@ -311,6 +374,21 @@ class WasabiServer(BaseHTTPRequestHandler):
         if(userexpire): status["userexpire"] = userexpire
         self.sendOK()
         self.wfile.write(json.dumps(status))
+    
+    #send summary of entire analysis library
+    def post_getlibrary(self, form, userid):
+        rootlevel = userid or os.path.basename(datadir)
+        metadata = []
+        for path in librarypaths(rootlevel,inclroot=True):
+            md = getmeta(path,rootlevel)
+            if(md['id'] == rootlevel): md['parentid'] = ''
+            if md['shared']: #add shared analyses/folders
+                metadata += [str(getmeta(spath,libdirs[sid]['parent'],md['parentid'])) for sid in md['shared'] for spath in librarypaths(sid,True)]
+                del md['shared']
+            if(md['id'] != rootlevel): metadata.append(str(md))
+        rootmd = Metadata(getlibrary(jobid=rootlevel))
+        self.sendOK()
+        self.wfile.write('['+','.join(metadata)+']')
 
     #reflect uploaded file
     def post_echofile(self, form, userid):
@@ -331,7 +409,7 @@ class WasabiServer(BaseHTTPRequestHandler):
     #store form fields
     def _add_if_present(self, store, form, key):
         val = form.getvalue(key,'')
-        if val: store[key] = json.loads(val)
+        if val: store[key] = val
   
     #save files to libary
     def post_save(self, form, userid):
@@ -349,29 +427,29 @@ class WasabiServer(BaseHTTPRequestHandler):
         writemode = form.getvalue('writemode','') #infer target path in library
         name = form.getvalue('name','')
         odir = datadir
+        emptyfolder = True if action=='save' and 'file' not in form else False
         
         logging.debug("%s: userid=%s parentid=%s currentid=%s writemode=%s" % (action, userid, parentid, currentid, writemode))
         
         if(writemode=='child' or writemode=='sibling'):  #create a child job
             if writemode=='child': parentid = currentid
-            odir = create_job_dir(d=getlibrary(jobid=parentid,uid=userid), uid=userid)
+            odir = create_job_dir(d=getlibrary(jobid=parentid, uid=userid, checkowner=True), uid=userid, newfolder=emptyfolder)
         elif(writemode=='overwrite' and currentid):  #rerun of job, use same directory
-            odir = getlibrary(jobid=currentid, uid=userid)
-        else: odir = create_job_dir(uid=userid)  #create new top-level job directory
+            odir = getlibrary(jobid=currentid, uid=userid, checkowner=True)
+        else: odir = create_job_dir(uid=userid, newfolder=emptyfolder)  #create new top-level job directory
         
         jobid = os.path.basename(odir)
         response = {"id":jobid}
 
-        #metadata files
-        metadata = Metadata(jobid, uid=userid)
-        importdata = Metadata(jobid, filename="importmeta.txt", uid=userid)
         #store form info to metadata file
-        self._add_if_present(importdata, form, "idnames")
-        self._add_if_present(importdata, form, "ensinfo")
-        self._add_if_present(importdata, form, "nodeinfo")
-        self._add_if_present(importdata, form, "visiblecols")
-    
-        if action == 'startalign' : #start new alignment job
+        importdata = {}
+        for p in ["idnames","ensinfo","nodeinfo","visiblecols"]: self._add_if_present(importdata,form,p)
+        if len(importdata):
+            importmd = Metadata(jobid, filename="importmeta.txt", uid=userid)
+            importmd.update(importdata)
+        
+        metadata = Metadata(jobid, uid=userid)
+        if action == 'startalign': #start new alignment job
             infile = write_file(os.path.join(odir, 'input.fas'), form.getvalue('fasta',''))
             outfile = os.path.join(odir, 'out')
             treefile = None
@@ -386,17 +464,13 @@ class WasabiServer(BaseHTTPRequestHandler):
             job_queue.enqueue(jobid, job)
 
         elif action == 'save': #write files to library path
-            savename = "saved.xml"
-            response["name"] = savename
-            savefile = write_file(os.path.join(odir,savename), form.getvalue('file',''))
-            for p in ["name","source","parameters"]:
-                pval = form.getvalue(p,'')
-                if(pval): metadata[p] = pval
-            metadata["savetime"] = str(time.time())
-            metadata["outfile"] = os.path.basename(savefile)
-
-        metadata.flush()
-        importdata.flush()
+            for p in ["name","source","parameters"]: self._add_if_present(metadata,form,p)
+            if 'file' in form:
+                filename = form.getvalue('filename','saved.xml')
+                savefile = write_file(os.path.join(odir,filename), form.getvalue('file',''))
+                metadata["savetime"] = str(time.time())
+                response["outfile"] = metadata["outfile"] = filename
+            metadata.flush()
 
         self.sendOK()
         self.wfile.write(json.dumps(response))
@@ -422,7 +496,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         metadata["outfile"] = ''
         metadata["logfile"] = logfilename
         metadata.flush()
-        logfile = open(os.path.join(odir,logfilename), 'w')
+        logfile = open(os.path.join(odir,logfilename), 'wb')
         
         detach_flag = 0x00000008 if os.name is 'nt' else 0 #for windows
         popen = subprocess.Popen(params, stdout=logfile, stderr=logfile, creationflags=detach_flag, close_fds=True)
@@ -436,6 +510,7 @@ class WasabiServer(BaseHTTPRequestHandler):
     def post_writemeta(self, form, userid):
         jobid = form.getvalue('id', '')
         if(not jobid): raise IOError(404,'No jobID given for writemeta')
+        if(userid and userid!=librarypath(jobid,True)): raise IOError(404,'Permission denied')
         key = form.getvalue('key', 'imported')
         value = form.getvalue('value', str(time.time()))
         try :
@@ -444,39 +519,8 @@ class WasabiServer(BaseHTTPRequestHandler):
             md.flush()
             self.sendOK()
             self.wfile.write('['+str(md)+']')
-        except MetadataError as mde :
-            logging.error('Metadata write error: %s' % mde)
-            self.sendOK()
-            return
-    
-    #send summary of entire analysis library
-    def post_getlibrary(self, form, userid):
-        metadata = []
-        parent = ""
-        rootlevel = userid or os.path.basename(datadir)
-        for jobdir in getlibrary(uid=userid):
-            try :
-                md = Metadata(jobdir)
-                if(not md['imported']): md.update_log()
-                parent = os.path.basename(os.path.dirname(jobdir))
-                if(parent == rootlevel): parent = ""
-                md['parentid'] = parent
-                metadata.append(str(md))
-            except MetadataError as mde:
-                logging.error('Metadata read error: %s' % mde)
-        self.sendOK()
-        self.wfile.write('['+','.join(metadata)+']')
-
-    #send extra metadata for analysis import
-    def post_getimportmeta(self, form, userid):
-        jobid = form.getvalue('id','')
-        if(form.getvalue('share')): userid = 'skip'
-        self.sendOK()
-        try:
-            md = Metadata(jobid, filename="importmeta.txt", uid=userid)
-            self.wfile.write(str(md))
-        except MetadataError:
-            self.wfile.write("{}")
+        except MetadataError as why :
+            self.sendError(501, 'Metadata write error: %s' % why)
     
     #send a library directory filelist
     def post_getdir(self, form, userid):
@@ -497,29 +541,60 @@ class WasabiServer(BaseHTTPRequestHandler):
         self.sendOK()
         self.wfile.write(json.dumps(files))
 
-    #remove data dir
+    #remove data dir from library
     def post_rmdir(self, form, userid):
         global job_queue
         jobid = form.getvalue('id','')
+        if(not jobid): raise IOError(404,'No jobID given')
         
-        if jobid :
+        if(userid and userid!=librarypath(jobid,True)): #remove shared ID
+            md = Metadata(jobid)
+            if md['shared']: md['shared'].remove(jobid)
+            md.flush()
+        else: #remove real dir
             job_queue.terminate(jobid)
-            rmpath = getlibrary(jobid=jobid,uid='skip',skipmeta=True) if form.getvalue('reset','') else getlibrary(jobid=jobid,uid=userid)
-            shutil.rmtree(rmpath)
-        
+            shutil.rmtree(apath(getlibrary(jobid=jobid),d=datadir)) #check for valid library path
+            maplibrary(userid)
         self.sendOK('Deleted')
+        
+    #move/copy data in library
+    def post_movedir(self, form, userid):
+        jobid = form.getvalue('id','')
+        parentid = form.getvalue('parentid','')
+        targetid = form.getvalue('target','')
+        duplicate = form.getvalue('copy','')
+        if(not jobid or not targetid): raise IOError(404,'Source or target ID not given')
+        if(userid and userid!=librarypath(targetid,True)): raise IOError(404,'Permission denied')
+        sourcepath = librarypath(jobid)
+        targetpath = librarypath(targetid)
+        if(userid and userid!=librarypath(jobid,True)): #move shared dir
+            if parentid and not duplicate:
+                md = Metadata(parentid)
+                if md['shared']: md['shared'].remove(parentid)
+                md.flush()
+            md2 = Metadata(targetid)
+            idlist = md2['shared'] or []
+            idlist.append(jobid)
+            md2.update({'shared':idlist})
+        else: #move real dir
+            if duplicate: shutil.copytree(sourcepath, os.path.join(targetpath,jobid))
+            else: shutil.move(sourcepath, targetpath)
+            maplibrary(userid)
+        self.sendOK('Done')
+             
+         
 
     #kill a running job
     def post_terminate(self, form, userid):
         global job_queue
         jobid = form.getvalue('id','')
+        if(not jobid): raise IOError(404,'No jobID given')
+        if(userid and userid!=librarypath(jobid,True)): raise IOError(404,'Permission denied')
         
-        if jobid:
-            job_queue.terminate(jobid)
-            md = Metadata(jobid) #check result
-            if(md['status']=='queued' or md['status']=='running'):
-                md['status'] = '-15'
-                md.flush()
+        job_queue.terminate(jobid)
+        md = Metadata(jobid) #check result
+        if(md['status']=='queued' or md['status']=='running'):
+            md.update({'status':'-15'})
         
         self.sendOK('Terminated')
 
@@ -527,13 +602,14 @@ class WasabiServer(BaseHTTPRequestHandler):
     def post_makefile(self, form, userid):
         global exportdir
         filename = form.getvalue('filename','exported_data.txt')
-        if userid: filename = userid+'_'+filename
-        filedata = form.getvalue('filedata','')
         filepath = joinp(exportdir, filename, d=exportdir, uid=userid)
-        exportfile = open(filepath,'w')
+        if(os.path.isfile(filepath)):
+            filepath += '_'+len(os.listdir(exportdir))
+        filedata = form.getvalue('filedata','')
+        exportfile = open(filepath,'wb')
         exportfile.write(filedata)
         self.sendOK()
-        self.wfile.write(userid+'?type=binary&getexport='+filename)
+        self.wfile.write(userid+'?type=binary&getexport='+os.path.basename(filepath))
         
         for filename in os.listdir(exportdir): #cleanup old files (>2 days)
             filepath = os.path.join(exportdir,filename)
@@ -669,18 +745,20 @@ class WasabiServer(BaseHTTPRequestHandler):
             
             if(action!='getlibrary'): logging.debug("Post: %s, userid=%s" % (action, userid))
             if(useraccounts and action not in ['checkserver','errorlog','terminate']): #userid check
-                if(not userid or not os.path.isdir(joinp(datadir, userid, uid='skip'))) :
-                    raise IOError(404,'Post '+action+' => User folder "'+userid+'" does not exist')
+                if(not userid or userid not in libdirs) :
+                    raise IOError(404,'Post '+action+' => Invalid user ID "'+userid)
                     
             getattr(self, "post_%s" % action)(form, userid)
             
         except IOError as e:
-            if hasattr(e, 'reason'): self.sendError(404,'URL does not exist. %s' % e.reason, action)
+            if hasattr(e, 'reason'): self.sendError(404,"URL does not exist. %s" % e.reason, action)
             else: self.sendError(404, str(e), action)
+        except shutil.Error as why:
+            self.sendError(501,"File operation failed: %s" %why)
         except OSError as e:
             self.sendError(501,"System error. %s" % e.strerror, action)
         except AttributeError as e:
-            self.sendError(501, 'Invalid POST request. %s' % str(e), action)
+            self.sendError(501, "Invalid POST request. %s" % str(e), action)
             raise
 
 #HTTP server subclass for multithread requests
@@ -786,10 +864,15 @@ class Metadata(object):
         self.jobdir = getlibrary(jobid=jobid, uid=uid)
         self.md_file = os.path.join(self.jobdir, filename)
 
-        if not os.path.exists(self.md_file) :
-            raise MetadataError("file not found: %s" % self.md_file)
-
-        self.metadata = json.load(open(self.md_file))
+        if not os.path.exists(self.md_file):
+            self.create(self.jobdir, filename)
+            #raise MetadataError("File not found: %s" % self.md_file)
+            
+        try:
+            self.metadata = json.load(open(self.md_file))
+        except ValueError as why:
+            os.rename(self.md_file,self.md_file+".corrupted")
+            logging.error("Renamed corrupt metadata file: "+self.md_file)
 
     def __getitem__(self, key) :
         try: return self.metadata[key]
@@ -800,15 +883,22 @@ class Metadata(object):
     def __setitem__(self, key, value) :
         self.metadata[key] = value
     
+    def __delitem__(self, key):
+        del self.metadata[key]
+    
     def __len__(self):
         return len(self.metadata)
+    
+    def __iter__(self):
+        return iter(self.metadata)
     
     def __str__(self) :
         return json.dumps(self.metadata)
     
-    def update(self, d) :
-        for k in d :
-            self.metadata[k] = d[k]
+    def update(self, data) :
+        for k in data :
+            self.metadata[k] = data[k]
+        self.flush()
     
     def flush(self) :
         f = tempfile.NamedTemporaryFile(suffix=os.path.basename(self.md_file), prefix='', dir=self.jobdir, delete=False)
@@ -820,6 +910,8 @@ class Metadata(object):
         if(self['logfile']):
             self['log'] = self.last_log_line(self['logfile'])
             self['lasttime'] = os.stat(os.path.join(self.jobdir,self['logfile'])).st_mtime
+        elif(not self['imported']):
+            self.update({'imported':str(time.time())})
     
     def last_log_line(self, filename='output.log') :
         try:
@@ -841,11 +933,16 @@ class Metadata(object):
         return feedback
 
     @staticmethod
-    def create(d, filename="meta.txt") :
-        f = open(joinp(d, filename), 'w')
-        f.write('{"id":"'+os.path.basename(d)+'", "imported":"", "outfile":"", "starttime":"'+str(time.time())+'"}')
+    def create(dpath, filename="meta.txt", name="unnamed", imported="") :
+        f = open(joinp(dpath, filename), 'wb')
+        curtime = str(time.time())
+        if imported: imported = curtime
+        f.write('{"id":"'+os.path.basename(dpath)+'"')
+        if filename == "meta.txt":
+            f.write(', "imported":"'+imported+'", "outfile":"", "starttime":"'+curtime+'", "name":"'+name+'"')
+        f.write('}')
         f.close()
-        return Metadata(d, filename)
+        return Metadata(dpath, filename)
 
 #a job class for WorkQueue
 class Job(object):
@@ -920,8 +1017,7 @@ class Job(object):
         self.starttime = time.time()
         self.set_status(Job.RUNNING)
         md = Metadata(self.jobid())
-        md['status'] = self.status()
-        md.flush()
+        md.update({'status':self.status()})
     
     def end(self, rc) :
         self.endtime = time.time()
@@ -934,7 +1030,6 @@ class Job(object):
     
         md = Metadata(self.jobid())
         md.update(self.json())
-        md.flush()
     
     def imported(self): return ""
 
@@ -985,7 +1080,6 @@ class PrankJob(Job):
         
         super(PrankJob, self).__init__(key, name)
         
-        # in, out and log files should be defined in the Job superclass
         self.files = {
             'infile'   : infile,
             'outfile'  : outfile,
@@ -1035,14 +1129,16 @@ class PrankJob(Job):
     def outfile(self): return self.files['outfile']
 
     def logfile(self): return self.files['logfile']
-
+    
+    #select the correct Prank output file for import
     def _reset_results_file(self):
         out = self.files['outfile']
         for ver in ['.best','.2','.1','.0','']:
-            outfile = out + ver + '.xml'
-            if os.path.isfile(outfile):
-                self.files['outfile'] = outfile
-                break
+            for trans in ['.nuc','','.pep']:
+                outfile = out+ver+trans+'.xml'
+                if os.path.isfile(outfile):
+                    self.files['outfile'] = outfile
+                    return
 
     def process(self):
         self.lock_status()
@@ -1053,7 +1149,7 @@ class PrankJob(Job):
 
         self.begin()
 
-        logfile = open(self.files['logfile'], 'w')
+        logfile = open(self.files['logfile'], 'wb')
         #limit cpu load
         cputime = ['ulimit','-t',str(cpulimit*3600)+';'] if(cpulimit) else []
         self.popen = subprocess.Popen(cputime+['nice','-n','20']+self.params, stdout=logfile, stderr=logfile, close_fds=True)
@@ -1090,9 +1186,10 @@ def main():
     local = False if args.remote else args.local
     if not debug: logging.disable(logging.DEBUG)
 
-    info('Starting server...\n')
+    info('Starting server...\n') #start task queue
     job_queue = WorkQueue(num_workers)
     job_queue.start()
+    maplibrary() #build library index
 
     try:
         server = MultiThreadServer(('',serverport), WasabiServer)
