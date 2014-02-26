@@ -65,18 +65,56 @@ ko.extenders.enable = function(obsitem, bool){ //add filter to enable/disable an
  	return filtered;
 };
 
+ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
+	init: function(element, itemid){
+		$div = $(element);
+		var thisid = unwrap(itemid);
+    	$div.draggable({
+    		handle: 'div.draghandle',
+    		opacity: 0.9,
+    		helper: 'original',
+    		revert: 'invalid',
+    		revertDuration: 300,
+    		addClasses: false,
+    		zIndex: 50
+    	});
+    	$div.droppable({
+      		accept: function(el){ return thisid&&!unwrap(librarymodel.getitem(thisid).shared); },
+      		activeClass: '',
+      		addClasses: false,
+      		hoverClass: 'draghover',
+      		tolerance: 'pointer',
+      		drop: function(e,ui){
+      			var libid = ui.draggable.attr('itemid');
+      			librarymodel.moveitem(libid,'','',thisid);
+      			ui.draggable.remove();
+      		}
+    	});
+    }
+};
+
 /* KnockOut data models to keep the state of the system */
 //datamodel to represent analyses library (including running jobs)
 var koLibrary = function(){
 	var self = this;
 	
-	self.getitem = function(id){ //get library item by its ID
-		var item = ''; if(!id) return '';
+	self.getitem = function(key, val){ //get library item by its ID
+		var item = ''; if(!key) return '';
+		if(!val){ val = key; key = 'id'; }
 		$.each(serverdata.library(),function(i,obj){
-			if(obj.id==id){ item = obj; return false; }
+			if(obj[key] && unwrap(obj[key])==val){ item = obj; return false; }
 		});
 		return item;
-	}
+	};
+	self.getpath = function(id,addself){
+		var arr = addself? [id] : [];
+		while(id){
+			id = unwrap(self.getitem(id).parentid)||'';
+			arr.unshift(id);
+		}
+		if(!arr.length) arr = [''];
+		return arr;
+	};
 	
 	self.dirpath = ko.observableArray(['']) //current library treepath
 	self.cwd = ko.computed(function(){ var arr = self.dirpath(); return arr[arr.length-1]; });
@@ -91,15 +129,7 @@ var koLibrary = function(){
 		read: function(){ return self.openitem().name||''; },
 		write: function(newval){ var itm = self.openitem(); if(itm) itm.name(newval); }
 	});
-	self.openpath = ko.computed(function(){
-		var id = self.openid(), arr = [];
-		while(id){
-			id = unwrap(self.getitem(id).parentid)||'';
-			arr.push(id);
-		}
-		if(!arr.length) arr = [''];
-		return arr;
-	});
+	self.openpath = ko.computed(function(){ return self.getpath(self.openid()); });
 	self.openparent = ko.computed(function(){ return unwrap(self.openitem().parentid)||''; });
 	self.importurl = '';
 	self.addanim = function(div){ $(div).hide().fadeIn(800); };
@@ -121,6 +151,16 @@ var koLibrary = function(){
 		return false; //onclick reponse
 	};
 	
+	self.moveitem = function(id, e, copy, targetid){
+		if(!id) return;
+		var btn = e?e.target:'';
+		if(!targetid) targetid = self.cwd();
+		var parentid = unwrap(self.getitem(id).parentid);
+		communicate('movedir',{id:id, parentid:parentid, target:targetid, copy:copy||''},{btn:btn, restore:true, restorefunc:function(){self.moveitem(id,e,copy)}, after:'closewindow'});
+	};
+	
+	self.copyitem = function(id, e){ self.moveitem(id,e,true); }
+	
 	self.importitem = function(item, event){ //mark job as imported to library
 		if(!item.outfile() || $('#job_'+item.id+' .importtick>input')[0].checked){ communicate('writemeta',{id:item.id,key:'imported'}); }
 		else{ //also import to wasabi browser
@@ -128,11 +168,19 @@ var koLibrary = function(){
 		}
 	}
 	
+	self.newdir = function(itm, e){ //add new folder to current library path
+		var btn = e? e.target:'';
+		communicate('newdir',{parentid:self.cwd()},{restore:true, restorefunc:function(){self.newdir(itm,e)},
+		parse:true, aftersync:true, btn:btn, success:function(data){	
+			if(data.id) self.dirpath(self.getpath(data.id,'addself'));
+		}});
+	};
+	
 	self.toggleitem = function(item, event){ //expand/contract library item div
 		var btn = event.target;
 		var itemdiv = $(btn).closest('div.itemdiv');
 		if(btn.innerHTML == '\u25BC More info'){ //expand itemdiv
-			itemdiv.css('height',itemdiv.children().first().height()+12+'px');
+			itemdiv.css('height',itemdiv.children('div.itemcontent').height()+12+'px');
 			setTimeout(function(){btn.innerHTML = '\u25B2 Less info';},400);
 		}
 		else{ //contract
@@ -143,15 +191,19 @@ var koLibrary = function(){
 	};
 	
 	self.sharelink = function(item,file,url){ //generate sharing url
-		var urlstr = '';
-		if(item && item.id && (file||item.outfile)) urlstr = 'share='+item.id+(file?'&file='+file:'');
-		else urlstr = 'url='+url;
-		return encodeURI('http://'+window.location.host+'?'+urlstr);
+		var urlstr = filestr = '';
+		if(file && typeof(file)=='string') filestr = ~file.indexOf('.')? '&file='+file : '&dir='+file;
+		if(url) urlstr = 'url='+url;
+		else if(item && item.id) urlstr = 'share='+item.id+filestr;
+		if(urlstr) urlstr = '?'+urlstr;
+		return encodeURI('http://'+window.location.host+urlstr);
 	}
 	
 	self.shareicon = function(item,file,title,url){ //generate share link icon
 		if(settingsmodel.sharelinks() && (item||url)){
-			return '<span class="svgicon share" title="'+(title?title:file?'Share this file':'Share the dataset')+'" onclick="dialog(\'share\',{url:\''+self.sharelink(item,file,url)+'\'})">'+svgicon('link')+'</span>';
+			var opt = url?'url:\''+url+'\'': item&&item.id?'id:\''+item.id+'\'' :'';
+			if(file) opt += ',file:\''+file+'\'';
+			return '<span class="svgicon share" title="'+(title?title:file?'Share this file':'Share the dataset')+'" onclick="dialog(\'share\',{'+opt+'})">'+svgicon('link')+'</span>';
 		} else return '';
 	}
 	
@@ -179,7 +231,7 @@ var koLibrary = function(){
 			getfile({id:item.id, file:file, btn:logdiv, skipimport:true});
     	}
     	else{ //show library folder content
-    		communicate('getdir',{dir:item.id},{success: function(data){
+    		communicate('getdir',{id:item.id},{success: function(data){
     			var files = JSON.parse(data);
     			var str = '';
     			var outfile = item.outfile?item.outfile():''; //mark the results file in filelist
@@ -199,6 +251,7 @@ var koLibrary = function(){
     				str += '<a class="button" onclick="dialog(\'export\',{exporturl:\''+settingsmodel.userid+
     				'?type=text&getlibrary='+item.id+'&file='+fname+'\'})" title="View file content">View</a></div>';
     			});
+    			if(!str) str = '<span class="note">No files in this folder</span>';
     			logdiv.html(str);
     		}});
     	}
@@ -470,6 +523,7 @@ var koSettings = function(){
 	self.hidebar = ko.observable(false); //hidden menubar
 	self.minlib = ko.observable(false); //compact library view
 	self.sharelinks = ko.observable(true);
+	self.sharedir = ko.observable(false);
 }
 var settingsmodel = new koSettings();
 
@@ -567,7 +621,10 @@ var koModel = function(){
 	self.runmenu = [{txt:'PRANK align',act:'align',icn:'icon_prank',inf:'Realign current sequence data'}];
 	self.toolsmenu = ko.computed(function(){
 		var menuarr = [], seq = self.seqsource();
-		if(seq && !self.offline()) menuarr.push({txt:'PRANK alignment',act:'align',icn:'prank',inf:'Realign current sequence data'});
+		if(seq && !self.offline()){
+			menuarr.push({txt:'PRANK alignment',act:'align',icn:'prank',inf:'Realign current sequences using Prank'});
+			menuarr.push({txt:'PAGAN alignment',act:'pagan',icn:'pagan',inf:'Realign and add sequences using Pagan'});
+		}
 		if(seq) menuarr.push({txt:'Hide gaps',act:'seqtool',icn:'seq',inf:'Collapse sequence alignment columns'});
 		if(self.treesource()) menuarr.push({txt:'Prune tree',act:'treetool',icn:'prune',inf:'Prune/hide tree leafs'});
 		if(seq) menuarr.push({txt:'Translate',act:'translate',icn:'book_open',inf:'Translate sequence data'});
@@ -914,9 +971,9 @@ function titlemenu(e){
 	var $input = $('#toptitle>input');
 	if($input.hasClass('editable')) return false;
 	var title = '';
-	var menudata = {'Rename':function(){$input.addClass('editable'); $input.focus();}, 
-		'Save':function(){savefile($('#toptitle>span.note'))}, 'Export':function(){dialog('export')}};
-	if(librarymodel.openid()) menudata['View in Library'] = function(){dialog('library')};
+	var menudata = {'Rename':function(){ $input.addClass('editable'); $input.focus(); }, 
+		'Save':function(){ savefile($('#toptitle>span.note')) }, 'Export':function(){ dialog('export') }};
+	if(librarymodel.openid()) menudata['View in Library'] = function(){ dialog('library') };
 	else title = 'Not in Library';
 	tooltip('',title,{target:$('#toptitle'), arrow:'top', shifty:-5, data:menudata, style:'white greytitle', id:'titlemenu'});
 }
@@ -949,6 +1006,18 @@ function topmenu(e,btn,menuid){
 	});
 	if(!Object.keys(menudata).length) title = 'No items';
 	tooltip('',title,{clear:true, target:btn, arrow:'top', data:menudata, style:'white topmenu greytitle', id:menuid});
+}
+
+//library window pop-up menu
+function librarymenu(itm,e){
+	if(e){ e.preventDefault(); e.stopPropagation(); }
+	var btn = $('#library a.back.gear');
+	var menutarget = $('#library span.dirtrail span.leftfade');
+	var libmode = settingsmodel.minlib()? 'Standard' : 'Compact';
+	var menudata = {'Refresh':function(){ communicate('getlibrary','',{restore:true,btn:btn,restorefunc:librarymenu}) }, 
+	'New folder': librarymodel.newdir };
+	menudata[libmode+' view'] = function(){ settingsmodel.toggle(settingsmodel.minlib) };
+	tooltip('','',{target:menutarget, shiftx:'-14', arrow:'top', data:menudata, style:'white', id:'librarymenu'});
 }
 
 //hide/expand toolbar
@@ -993,13 +1062,18 @@ function communicate(action,senddata,options){
 		if(typeof(val)=='object') val = JSON.stringify(val);
 		if(typeof(val)!='undefined') formdata.append(key,val);
 	});
-	if(options.btn && options.btn.jquery) options.btn = options.btn[0];
-	var btntxt = options.btntxt || (options.btn? options.btn.innerHTML : '');
+	if(options.btn){
+		if(options.btn.jquery) options.btn = options.btn[0];
+		if(!options.btntxt) options.btntxt = options.btn.innerHTML;
+		if(!options.btntitle) options.btntitle = options.btn.getAttribute('title');
+	}
+	
 	var retryfunc = function(){ communicate(action,senddata,options) }; //resend request
+	if(typeof(options.restorefunc)=='function') retryfunc = options.restorefunc;
 	var restorefunc = function(){ //restore original button function
 		if(options.btn){
-    		if(!~btntxt.indexOf('spinner')) options.btn.innerHTML = btntxt;
-    		options.btn.title = '';
+    		if(!~options.btntxt.indexOf('spinner')) options.btn.innerHTML = options.btntxt||'Retry';
+    		options.btn.title = options.btntitle||'Click to retry';
     		$(options.btn).off('click').click(retryfunc);
     	}
     }
@@ -1017,10 +1091,11 @@ function communicate(action,senddata,options){
     }
     
     var successfunc = errorfunc = '';
-    if(action=='save'){
-		successfunc = function(data){
-    		resp = parseResp(data,'json');
-    		if(!resp) return;
+    if(action=='save' && senddata.file){
+    	options.aftersync = true;
+    	options.parse = 'json';
+		successfunc = function(resp){
+    		if(!resp.id) return;
     		librarymodel.openid(resp.id);
     		if(options.btn) options.btn.innerHTML = 'Saved';
    		}
@@ -1028,16 +1103,13 @@ function communicate(action,senddata,options){
    	//else if(action=='getimportmeta'){ if(!options.saveto) options.saveto = 'import'; }
    	else if(action=='getlibrary'){ if(!options.saveto) options.saveto = 'library'; }
    	else if(action=='checkserver'){
-   		errorfunc = function(msg){ if(~msg.indexOf('No response')) model.offline(true); };
+   		errorfunc = function(msg){ if(~msg.indexOf('No response')) model.offline(true); else dialog('error','Wasabi server error: '+msg); };
    		successfunc = function(resp){
-   			try{
-   				var data = JSON.parse(resp);
-   				if(data){
-   					model.offline(false);
-   					setTimeout(function(){communicate('getlibrary')},700);
-   				}
-   			}catch(e){ console.log(e); model.offline(true); }};
+   			resp = parseResp(resp,'json');
+   			if(resp){ model.offline(false); setTimeout(function(){communicate('getlibrary')},700); }
+   		}
     }
+    
     if(typeof(options.success)=='function') successfunc = options.success;
     if(typeof(options.error)=='function') errorfunc = options.error;
     else if(options.btn){ errorfunc = function(errmsg){
@@ -1046,59 +1118,70 @@ function communicate(action,senddata,options){
     }}
     
     var afterfunc = ''; //follow-up action
-    var actionnr = ['writemeta','terminate','save','startalign','rmdir','movedir'].indexOf(action);
+    if(typeof(options.after)=='string' && options.btn){ //close window after done
+    	afterfunc = function(){ closewindow(options.btn) };
+    } else if(typeof options.after=='function') afterfunc = options.after;
+    
+    var actionnr = ['writemeta','terminate','save','startalign','newdir','rmdir','movedir'].indexOf(action);
     if(~actionnr){ //action changes library content
-      if(librarymodel.getitem(senddata.id).shared && actionnr<4 && (!senddata.writemode||senddata.writemode!='new')){
+      if(librarymodel.getitem(senddata.id).shared && actionnr<5 && (!senddata.writemode||senddata.writemode!='new')){
       	dialog('error','You cannot modify shared data.<br>(Attempted to '+action+' on '+senddata.id+')');
       	return false;
       }
-      afterfunc = function(){ //followup: refresh library
-      	if (action=='save') model.unsaved(false);
+      afterfunc = function(response){ //followup: refresh library
+      	if(options.aftersync && successfunc){
+      		options.success = successfunc; successfunc = afterfunc = ''; //delay successaction to after datasync
+    		communicate('getlibrary','',{success:function(){options.success(response)},after:options.after,btn:options.btn});
+    	} else communicate('getlibrary','',{after:options.after,btn:options.btn});
+    	
+    	if(action=='save') model.unsaved(false);
       	if(settingsmodel.datalimit && actionnr>1){ //files added/removed. Get new library size.
-      		communicate('checkserver','',{success:function(data){data=JSON.parse(data); settingsmodel.datause(parseInt(data.datause));}});
+      		communicate('checkserver','',{parse:'json', success:function(resp){ settingsmodel.datause(parseInt(resp.datause)); }});
       	}
-    	communicate('getlibrary');
       }
     }
-    if(typeof options.after=='function') afterfunc = options.after;
     
 	return $.ajax({
 		type: "POST",
 		url: 'index.html',
 		beforeSend : function(xhrobj){
 			if(options.btn){
-				options.btn.innerHTML = '<img src="images/spinner.gif" class="icn"/>';
-				if(!~['terminate','rmdir'].indexOf(action)){ //make process abortable with action/closebutton
-					options.btn.title = 'Click to abort';
+				if(!~['terminate','rmdir','newdir'].indexOf(action)){ //make process abortable with action/closebutton
+					options.btn.innerHTML = '<span class="spinner cancel"><img src="images/spinner_thin.gif"/>'+svgicon('x')+'</span>';
+					options.btn.title = 'Waiting for response. Click to abort';
 					$(options.btn).off('click').click(function(){xhrobj.abort()});
 					closewindow(options.btn,function(){xhrobj.abort()}); //add call aborting to closebtn
-				}
+				} else options.btn.innerHTML = '<img src="images/spinner.gif" class="icn"/>';
 			}
 		},
-    	success: function(data){
+    	success: function(rawdata){
+    		parseformat = typeof(options.parse)=='string'? parseformat : 'guess';
+    		response = parseResp(rawdata,parseformat);
+    		restdelay = 500;
     		if(options.saveto){ //save data from server
-    			resp = parseResp(data,'guess');
     			if(typeof(options.saveto)=='string'){ //save to 'serverdata' array
     				if(typeof(serverdata[options.saveto])=='function'){ //map to datamodel
-    					ko.mapping.fromJS(resp, serverdata[options.saveto]);
-    				} else { serverdata[options.saveto] = resp; } //plain copy
+    					ko.mapping.fromJS(response, serverdata[options.saveto]);
+    				} else { serverdata[options.saveto] = response; } //plain copy
     			}
-    			else if(typeof(options.saveto)=='function'){ options.saveto(resp); }//save to an observable
+    			else if(typeof(options.saveto)=='function'){ options.saveto(response); }//save to an observable
     		}
     		else if(options.btn && !successfunc){ //show feedback on button
-    			var resp = parseResp(data,'guess');
-    			if(!resp) return;
-    			if(typeof(resp)=='string') options.btn.innerHTML = resp;
-    			else if(resp.file) options.btn.href = resp.file;
+    			if(!response) return;
+    			if(typeof(response)=='string'){ options.btn.innerHTML = response; restdelay = 3000; }
+    			else if(response.file) options.btn.href = resp.file;
     			if($(options.btn).css('opacity')==0) $(options.btn).css('opacity',1); //show downloadlink_btn
     		}
     		
-    		if(parseResp(data)){ //no errors
-    			if(successfunc) successfunc(data); //custom successfunc (data processing/import)
-    			if(options.restore) setTimeout(restorefunc, 3000); //restore original button state
+    		if(parseResp(rawdata)){ //no errors
+    			if(successfunc) successfunc(options.parse?response:rawdata); //custom successfunc (data processing/import)
+    			if(options.restore) setTimeout(restorefunc, restdelay); //restore original button state
     			if(model.offline()) model.offline(false);
     		}
-    		if(afterfunc) setTimeout(function(){ afterfunc(data||''); }, 500); //follow-up (data sync)
+    		if(afterfunc){
+    			var aftdelay = typeof(options.after)=='string'? 1000 : 500; //close window
+    			setTimeout(function(){ afterfunc(options.parse?response:rawdata); }, aftdelay); //follow-up (data sync)
+    		}
     	},
     	timeout: options.timeout||0,
     	error: function(xhrobj,status,msg){
@@ -1121,7 +1204,6 @@ function communicate(action,senddata,options){
     		    else{ //no response
         			if(options.retry){ //allow 2 retries
         				options.retry = options.retry=='take2'? false : 'take2';
-        				if(btntxt) options.btntxt = btntxt;
         				setTimeout(retryfunc, 2000); return;
         			}
         			msg = 'No response from server. Try again.';
@@ -1134,7 +1216,7 @@ function communicate(action,senddata,options){
         		setTimeout(restorefunc,3000);
         	}
     		
-    		if(afterfunc) setTimeout(function(){ afterfunc(msg||''); }, 500); //follow-up (data resync)
+    		if(afterfunc && typeof(options.after)!='string') setTimeout(function(){ afterfunc(msg||''); }, 500); //follow-up (data resync)
     	},
     	xhr: function(){
  			var xhr = $.ajaxSettings.xhr();
@@ -1695,6 +1777,7 @@ function parseexport(filetype,options){
 		exportmodel.fileurl(options.exporturl);
 		exportmodel.filename(parseurl(options.exporturl).file||'file.txt');
 	}
+	if(options.exporturl || options.snapshot) $('#exportwrap a.backbtn').css('display','none');
 	if(options.makeids) output = {file:output, nameids:nameids};
 	return output;
 }
@@ -2306,11 +2389,9 @@ function tooltip(evt,title,options){
     			}
     		}
     	}
-    	else {
-    		if(isNaN(target.x)) target.x = evt.pageX+5;
-    		if(isNaN(target.y)) target.y = evt.pageY+5;
-    		if(!target.height) target.height = 0;
-    	}
+    	if(!target.x) target.x = evt.pageX+5;
+    	if(!target.y) target.y = evt.pageY+5;
+    	if(!target.height) target.height = 0;
     }
     else{ var target = { x: evt.pageX+5, y: evt.pageY+5 }; } //tooltip next to cursor
     target.x += parseInt(options.shiftx||0); target.y += parseInt(options.shifty||0);
@@ -2798,7 +2879,10 @@ function makewindow(title,content,options,container){ //(string,array(,obj{flips
 	if(!options) options = {};
 	if(!$.isArray(content)) content = [content];
 	var animate = settingsmodel.windowanim();
-	if(options.id && $('#'+options.id).length!=0){ $('#'+options.id).remove(); }//kill clones
+	if(options.id && $('#'+options.id).length!=0){ //kill clones
+		options.position = $('#'+options.id).position();
+		$('#'+options.id).remove();
+	}
 	if(options.flipside){ //we make two-sided window
 		var sideclass = 'side '+options.flipside;
 		if(!animate) sideclass += ' notransition';
@@ -2847,9 +2931,10 @@ function makewindow(title,content,options,container){ //(string,array(,obj{flips
 	if(options.backfade){ //place window to center
     	dragdiv.css({'top':(page.h/2)-(win.h/2)+'px','left':(page.w/2)-(win.w/2)+'px'});
     }
-	if($('#page>div.popupwindow').length){ //place a new window to shifted overlap
+    
+    var pos = options.position || ($('#page>div.popupwindow').length? $('#page>div.popupwindow').last().position() : '');
+    if(pos){ //place a new window to shifted overlap
 		toFront(dragdiv,'first');
-		var pos = $('#page>div.popupwindow').last().position();
 		dragdiv.css({'top':pos.top+20+'px','left':pos.left+20+'px'});
 	}
 	
@@ -2897,7 +2982,8 @@ function expandtitle(options){
 //Content for different types of pop-up windows
 function dialog(type,options){
 	if(typeof(type.act)!='undefined') type = type.act;
-	if($('#'+type).length){ $('#'+type).trigger('mousedown');  return; } //window laready created. bring it to front.
+	//window laready created. bring it to front.
+	if(!~['share','moveitem'].indexOf(type) && $('#'+type).length){ $('#'+type).trigger('mousedown');  return; }
 // file/data import window
 	if(type=='import'){
 		$('div.popupwindow').remove(); //close other windows
@@ -3024,6 +3110,7 @@ function dialog(type,options){
 		};
 		if($("#exportwrap").length){ //use existing window
 			$("#exportwrap").click();
+			$("#exportwrap a.backbtn").css('display','inline-block');
 			flipexport();
 			if(options) parseexport('',options);
 			return;
@@ -3055,7 +3142,7 @@ function dialog(type,options){
 		
 		var backcontent = $('<div class="sectiontitle"><img src="images/file.png"><span data-bind="text:filename()+(~filename().indexOf(\'.\')?\'\':fileext())"></span></div>'+
 		'<div class="insidediv" style="max-width:400px;max-height:150px;overflow:auto"><div class="paper"></div></div>');
-		var backbtn = $('<a class="button" style="padding-left:17px;margin-top:25px"><span style="vertical-align:2px">&#x25C0;</span> Options</a>');
+		var backbtn = $('<a class="button backbtn" style="padding-left:17px;margin-top:25px"><span style="vertical-align:2px">&#x25C0;</span> Options</a>');
 		backbtn.click(function(){ flipexport(); exportmodel.filename(exportmodel.savename().replace(' ','_')); });
 		
 		var downloadbtn = $('<a class="button" style="margin-left:40px;margin-top:25px" data-bind="visible:fileurl,attr:{href:fileurl}">Download</a>');
@@ -3103,6 +3190,54 @@ function dialog(type,options){
 	}
 // start a new alignment job
 	else if(type=='align'){
+		var nameinput = $('<input type="text" class="hidden" value="'+exportmodel.savename()+'" title="Click to edit">');
+		var namespan = $('<span class="note">Descriptive name: </span>').append(nameinput);
+		var infospan = $('<span class="note" style="display:none;margin-left:20px">Hover options for description</span>');
+		var opttitle = expandtitle({title:'Alignment options', desc:'Click to toggle options', onshow:function(){infospan.fadeIn()}, onhide:function(){infospan.fadeOut()}}).append(infospan);
+		var tunetitle = expandtitle({title:'Fine-tuning', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
+		var treecheck = $.isEmptyObject(treesvg)?'checked="" disabled=""':''; //new tree needed
+		var parentoption = librarymodel.openparent()?'<option>sibling</option>':'';
+		var writetarget = librarymodel.openid()?'<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input (currently open) analysis">'+
+		'Save as a</span> <select name="writemode">'+parentoption+'<option '+(librarymodel.openparent()?'':'selected="selected"')+'>child</option>'+
+		'<option>overwrite</option></select> of current analysis in the <a onclick="dialog(\'library\'); return false">library</a>.':'';
+		
+		var optform = $('<form id="alignoptform" onsubmit="return false">'+writetarget+'<br><input name="includehidden" type="checkbox" data-bind="checked:exportmodel.includehidden">'+
+			'<span class="label" title="You can exclude data from analysis by column collapsing">include hidden columns</span><hr>'+
+		'<input type="checkbox" name="newtree" '+treecheck+'><span class="label" title="Create a new NJ tree to guide the sequence alignment process (uncheck to use the current tree)">create a guidetree</span>'+
+		'<br><input type="checkbox" checked="checked" name="anchor"><span class="label" title="Use Exonerate anchoring to speed up alignment">alignment anchoring</span> '+
+		'<br><input type="checkbox" name="iterate" data-bind="checked:iterate"><span class="label" title="Iterating re-alignment cycles can improve tree phylogeny. Uncheck this option to keep the input tree intact">'+
+			'iterate alignment for</span> <select name="rounds"><option>2</option><option>3</option><option>4</option><option selected="selected">5</option></select> cycles'+
+		'<br><div class="sectiontitle small"><span class="grey">or</span></div>'+
+		'<input type="checkbox" name="e"><span class="label" title="Keep current alignment intact and just add sequences for ancestral nodes">keep alignment</span></form>');
+		var tunediv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		  '<input type="checkbox" checked="checked" name="F"><span class="label" title="Force insertions to be always skipped. Enabling this option is generally beneficial but may cause an excess of gaps if the guide tree is incorrect">trust insertions (+F)</span>'+
+		  '<br><input type="checkbox" name="nomissing"><span class="label" title="Do not treat gaps as missing data. Use +F for terminal gaps">no missing data</span>'+
+		  '<div class="sectiontitle small"><span>alignment model parameters</span></div>'+
+		  '<div data-bind="visible:isdna"><input type="checkbox" name="translate">'+
+		    '<span class="label" title="Translate and align cDNA with protein or codon model">align as</span>'+
+		      ' <select name="translateto" data-bind="options:transopt,optionsText:\'t\',optionsValue:\'v\'"></select>'+
+			'<br><span class="label" title="Default values are empirical, based on the input data">DNA base frequencies</span>'+
+			' <input type="text" name="A" placeholder="A"><input type="text" name="C" placeholder="C"><input type="text" name="G" placeholder="G"><input type="text" name="T" placeholder="T">'+
+			'<br><span class="label" title="Transition/transversion rate ratio in substitution model">K</span> <input type="text" name="kappa" class="num" placeholder="2">'+
+			' <span class="label" title="Purine/pyrimidine rate ratio in substitution model">P</span> <input type="text" name="rho" class="num" placeholder="1"></div>'+
+		  '<span class="label" title="Gap opening rate">gap opening</span> <input type="text" name="gaprate" style="width:45px" data-bind="attr:{placeholder:gaprate}">'+
+			' <span class="label" title="Gap extension probability">gap extension</span> <input type="text" name="gapext" data-bind="attr:{placeholder:gapext}" style="width:40px">'+
+		  '<div data-bind="visible:iterate" class="sectiontitle small"><span class="label" title="The optimization score is used to assess an alignment iteration result">optimization scoring</span></div>'+
+		  '<div data-bind="visible:iterate"><span class="label" title="Indel penalties for alginment scoring (with substitution penalty as 1)">indels with length</span> 1:'+
+		    '<input type="text" name="ind1" placeholder="6" class="num"> 2:<input type="text" name="ind2" placeholder="8" class="num"> 3:<input type="text" name="ind3" placeholder="9" class="num"> 4+:<input type="text" name="ind4" placeholder="10" class="num"></div>'+
+		  '<hr><span class="label" title="Specifing a seed number allows reproducing alignment results">random number seed</span> <input type="text" name="seed">'+
+		  '<br><input type="checkbox" name="uselogs"><span class="label" title="Slow, but may be needed for very large number of sequences">use log space</span></div>');
+		optform.append(tunetitle,tunediv);
+		var optdiv = $('<div class="insidediv" style="display:none">').append(optform);
+		
+		var alignbtn = $('<a class="button orange">Start alignment</a>');
+		alignbtn.click(function(){ sendjob({form:$('form',optdiv)[0],btn:alignbtn,name:nameinput.val()}); });
+		
+		var dialogwindow = makewindow("Make alignment",['Current sequence data will be aligned with <a href="http://prank-msa.googlecode.com" target="_blank">Prank</a> aligner.<br><hr>',namespan,opttitle,optdiv,'<br>'],{id:type, btn:alignbtn, icn:'icon_prank', nowrap:true});
+		ko.applyBindings(model,dialogwindow[0]);
+	}
+// start a new PAGAN alignment job
+	else if(type=='pagan'){
 		var nameinput = $('<input type="text" class="hidden" value="'+exportmodel.savename()+'" title="Click to edit">');
 		var namespan = $('<span class="note">Descriptive name: </span>').append(nameinput);
 		var infospan = $('<span class="note" style="display:none;margin-left:20px">Hover options for description</span>');
@@ -3216,7 +3351,7 @@ function dialog(type,options){
 		  '<a class="button itembtn" data-bind="text:[\'Kill\',\'Delete\',\'Import\'][st()], css:{red:st()!=2},'+
 		    'attr:{title:[\'Cancel job\',\'Delete data\',\'Import to library\'][st()]},'+
 		    'click:st()==2?$parent.importitem:$parent.removeitem"></a><br>'+
-		  '<span class="note">Created:</span> <span data-bind="text:msectodate(starttime())"></span> '+
+		  '<span class="note">Created:</span> <span data-bind="text:msectodate(unwrap(starttime))"></span> '+
 		  '<span class="importtick" title="Moves files to analysis library without loading it to the browser" data-bind="visible:st()==2">'+
 		    '<input type="checkbox"><span class="label">Just move data</span></span>'+
 		  '<a class="button itembtn" style="top:65%" data-bind="visible:st()==1&&~log().indexOf(\'done\'),click:$parent.importitem" '+
@@ -3234,34 +3369,55 @@ function dialog(type,options){
     else if(type=='library'){
     	communicate('getlibrary'); //refresh data
     	
-    	var header = $('<a class="button square back" title="View parent analysis" data-bind="fadevisible:cwd,click:updir">&#x25C0;</a>'+
-    	'<span class="dirtrail"><span class="text"><span class="svgicon">'+svgicon('home')+'</span><span data-bind="html:dirpath().join(\' &#x25B8; \')"></span></span><span class="leftfade"></span></span>'+
-    	' <span style="position:absolute;top:6px;right:15px;">Sort by: <select data-bind="options:sortopt,optionsText:\'t\',optionsValue:\'v\',value:sortkey"></select> '+
+    	var header = $('<a class="button round back" title="View parent folder" data-bind="fadevisible:cwd,click:updir"><span class="svgicon">'+svgicon('left')+'</span></a>'+
+    	'<a class="button round back gear" title="Click for options" data-bind="fadevisible:!cwd(),click:librarymenu"><span class="svgicon">'+svgicon('gear')+'</span></a>'+
+    	'<span class="dirtrail"><span class="text"><span class="svgicon">'+svgicon('home')+'</span><span data-bind="html:dirpath().join(\'&#x25B8; \')"></span></span><span class="leftfade"></span></span>'+
+    	' <span style="position:absolute;top:6px;right:15px;">Sort: <select data-bind="options:sortopt,optionsText:\'t\',optionsValue:\'v\',value:sortkey"></select> '+
     	'<span class="icon action" style="font:20px/16px sans-serif;vertical-align:-2px" data-bind="html:sortasc()?\'\u21A7\':\'\u21A5\',click:function(){sortasc(!sortasc())},'+
     	'attr:{title:sortasc()?\'ascending\':\'descending\'}"></span></span>');
 		
     	var content = $('<div class="insidediv" data-bind="foreach:{data:libraryview,afterAdd:addanim}">'+
-    	'<div class="itemdiv" style="height:" data-bind="css:{activeitem:id==$parent.openid(),compact:settingsmodel.minlib,shared:$data.shared}"><div>'+
+    	'<div class="itemdiv" style="height:" data-bind="dragdrop:$data.id,css:{activeitem:id==$parent.openid(),compact:settingsmodel.minlib,shared:$data.shared},attr:{itemid:$data.id}">'+
+    	'<div class="draghandle" title="Drag & drop to move library items around"><span>&#x22EE;</span></div><div class="itemcontent">'+
     	  '<span class="note">Name:</span> <input type="text" class="hidden" data-bind="value:name" title="Click to edit name"><br>'+
 		  '<span class="note">Last opened:</span> <span data-bind="text:msectodate($data.imported)"></span><br>'+
 		  '<span class="note">Analysis ID:</span> <span class="rotateable">&#x25BA;</span><span class="action" title="Browse data files" data-bind="click:$parent.showfile, text:id"></span><br>'+
-		  '<span data-bind="visible:$data.outfile,html:$parent.shareicon($data,false,\'Share this analysis\')"></span>'+
+		  '<span data-bind="visible:$data.outfile()||$data.children(),html:$parent.shareicon($data,false,\'Share this analysis\')"></span>'+
 		  '<a class="button itembtn" data-bind="visible:$data.outfile,click:function(item,e){getfile({id:item.id,file:item.outfile(),btn:e.target})}, text:id==$parent.openid()?\'Restore\':\'Open\', '+
 		    'attr:{title:id==$parent.openid()?\'Revert back to saved state\':\'Load data\'}"></a>'+
 		  '<span class="note">Created:</span> <span data-bind="text:msectodate($data.starttime)"></span><br>'+
 		  '<span class="note">Last saved:</span> <span data-bind="text:msectodate($data.savetime)"></span><br>'+
 		  '<span class="note">Data source:</span> <span data-bind="text:$data.aligner?aligner+\' alignment\':'+
-		    '\'Imported from \'+($data.source||\'files\'), css:{label:$data.parameters}, attr:{title:$data.parameters?\'Started with: \'+$data.parameters:\'\'}"></span>'+
+		    '$data.source?\'Imported from \'+$data.source:\'Unknown\', css:{label:$data.parameters}, attr:{title:$data.parameters?\'Started with: \'+$data.parameters:\'\'}"></span>'+
 		    '<span data-bind="visible:$data.shared" class="label" style="color:#6D98B6;margin-left:5px" title="You can read or (re)move this dataset in your library but only the owner can modify its content">(shared)</span>'+
 		  '<a class="button itembtn childbtn" data-bind="visible:children, click:function(data){$parent.dirpath.push(data.id)},'+
 		    'css:{activeitem:~$parent.openpath().indexOf(id)}" title="View subanalyses"><span class="svg">'+svgicon('children')+
 		    '</span> <span data-bind="text:children"></span></a>'+
-		    '<a class="button itembtn movebtn" data-bind="visible:!$data.shared, click:dialog(\'moveitem\'), attr:{title:\'Move or copy this dataset (and its children)\'}">Move</a>'+
-		  '<a class="button itembtn removebtn" data-bind="click:$parent.removeitem, attr:{title:\'Remove this sataset (and its children) from your library\'}">Delete</a>'+
+		  '<a class="button itembtn movebtn" data-bind="visible:!$parent.getitem($data.parentid()).shared, '+
+		    'click:function(){dialog(\'moveitem\',{id:$data.id})}, attr:{title:\'Move or copy this dataset (and its children)\'}">Move</a>'+
+		  '<a class="button itembtn removebtn" data-bind="visible:!$parent.getitem($data.parentid()).shared, click:$parent.removeitem, attr:{title:\'Remove this dataset (and its children) from your library\'}">Delete</a>'+
 		  '<span class="action itemexpand" data-bind="click:$parent.toggleitem" title="Toggle additional info">&#x25BC; More info</span></div></div><hr></div>');
 		  
 		var librarywindow = makewindow("Library of analyses",content,{id:type,header:header,icn:'library.png'});
 		ko.applyBindings(librarymodel,librarywindow[0]);
+    }
+// move item in library
+    else if(type=='moveitem'){
+    	itempath = librarymodel.getpath(options.id,'addself');
+    	itemdir = itempath[itempath.length-2];
+		shared = librarymodel.getitem(options.id).shared||'';
+		
+    	var content = 'Selected library item: <span class="dirtrail"><span class="text"><span class="svgicon" style="padding:0">'+
+    	svgicon('home')+'</span><span>'+itempath.join('&#x25B8; ')+'</span></span></span><br><br>'+
+    	'Browse to the destination folder in <a onclick="dialog(\'library\');return false;">analysis library</a>:'+
+    	'<div class="insidediv"><span class="dirtrail"><span class="text"><span class="svgicon" style="padding:0">'+svgicon('home')+
+    	'</span><span data-bind="html:dirpath().join(\'&#x25B8; \')"></span></span></span></div><br>'+
+    	'<a class="button square" title="Create new folder in to the folder indicated above" data-bind="click:newdir">New folder</a> '+
+    	(shared?'':'<a class="button square" title="Duplicate item '+options.id+' to the indicated folder" data-bind="click:function(i,e){copyitem(\''+options.id+'\',e)}">Copy here</a> ')+
+    	'<a class="button square" title="Move item '+options.id+' to the indicated folder" data-bind="click:function(i,e){moveitem(\''+options.id+'\',e)},css:{disabled:cwd()==\''+itemdir+'\'}">Move here</a>';
+    	
+		var movewindow = makewindow("Move library item",content,{id:type, icn:'library.png'})[0];
+		ko.applyBindings(librarymodel,movewindow);
     }
 // shortcut for error dialogs
 	else if(type=='error'||type=='warning'||type=='notice'){
@@ -3385,7 +3541,7 @@ function dialog(type,options){
 			'<span class="bar" data-bind="style:{width:dataperc}"></span><span class="title" data-bind="html:\'Library size: \'+numbertosize(datause(),\'byte\')"></span></span>'+
 			'<a class="button toggle" style="margin-top:-2px;padding-bottom:2px" onclick="dialog(\'account\')">Reset</a><br><br>'+
 			'<span class="label" title="This web browser remembers and opens your account URL when you go to Wasabi web page. Disable on public computers">Remember me on this computer</span> '+
-			'<span class="svgicon share" style="margin-left:35px" title="View/share your account URL" onclick="dialog(\'share\',{url:\''+window.location+'\',nofile:true})">'+svgicon('link')+'</span>'+
+			'<span class="svgicon share" style="margin-left:35px" title="View/share your account URL" onclick="dialog(\'share\',{library:true})">'+svgicon('link')+'</span>'+
 			'<a class="button toggle" data-bind="css:{on:keepuser},click:toggle.bind($data,keepuser)"><span class="light"></span><span class="text" data-bind="text:btntxt(keepuser)"></span></a></div>');
 				
 		var dialogwindow = makewindow('Settings',content,{id:type, icn:type, btn:'OK', closefunc:settingsmodel.saveprefs});
@@ -3449,7 +3605,7 @@ function dialog(type,options){
 		'<a href="http://wasabi.biocenter.helsinki.fi" target="_blank">Learn more &gt;&gt;</a><br><br>';
 		if(options.oldid) str += svgicon('info',{span:true})+'There was no account with ID <b>'+options.oldid+'</b>.<br>';
 		str += 'Wasabi created you a new account where to keep your future analyses.<br>'+
-		'<a title="'+window.location+'" onclick="dialog(\'share\',{url:\''+window.location+'\',nofile:true})">Current web page address</a> is the key to access your data in the future,<br>so please write it down';
+		'<a title="'+window.location+'" onclick="dialog(\'share\',{url:\''+window.location+'\',library:true})">Current web page address</a> is the key to access your data in the future,<br>so please write it down';
 		if(settingsmodel.email) str += ' or <span class="label" title="The e-mail address will only be used for sending the URL">have it sent to</span> <input style="width:180px" type="email" id="usermail" placeholder="your e-mail address">';
 		else str += '.';
 		if(settingsmodel.userexpire) str+= '<br><span style="color:#888">Note: neglected user accounts will be deleted after '+settingsmodel.userexpire+' days of last visit.</span>'
@@ -3486,20 +3642,44 @@ function dialog(type,options){
 		makewindow('Error log',['Wasabi server errors:',errorlog],{id:type, icn:'info', btn:'OK'});
 	}
 	else if(type=='share'){
-		if(!options) options = {url : librarymodel.sharelink(librarymodel.openitem())};
+		var opt = options || {};
+		if(!opt.id) opt.id = librarymodel.openid();
+		if(!opt.item) opt.item = librarymodel.getitem(opt.id);
+		var url = librarymodel.sharelink(opt.item, opt.file||'', opt.url||'');
 		var ckey = navigator.userAgent.match(/Mac/i)? '&#x2318;' : 'crtl';
-		var desc = options.nofile? 'to launch Wasabi with your analysis library' : 'or into Wasabi import dialog to display the shared data';
-		var content = ['<div>Paste this URL to a web browser address bar<br>'+desc+'.</div><br>'];
-		var input = $('<input class="transparent" style="width:350px;padding:0" value="'+options.url+'"></input>');
-		setTimeout(function(){input[0].select()},400);
+		var dirtoggle = dirurl = '';
+		settingsmodel.sharedir(false);
+		if(opt.library){
+			var desc = '<br>to launch Wasabi with your analysis library';
+			url = librarymodel.sharelink()+'/'+settingsmodel.userid;
+		} else {
+			var desc = '<br><span data-bind="visible:sharedir">to have the shared item included to the library</span>'+
+			'<span data-bind="visible:!sharedir()">or into Wasabi import dialog to display the shared data</span>';
+			if(opt.item && !opt.url){
+				if(!opt.file && !unwrap(opt.item.outfile)){
+					desc += '<span data-bind="visible:!sharedir()" class="note">.<br>Note: This library item has no data file to open</span>';
+					if(unwrap(opt.item.children)) settingsmodel.sharedir(true);
+				}
+				if(unwrap(opt.item.children)){
+					dirurl = librarymodel.sharelink(opt.item,librarymodel.getitem('parentid',opt.id).id);
+					var dirtoggle = '<div class="insidediv"><span class="label" title="The folder share link will add dynamic '+
+					'read-only reference of this library folder (and all sub-folders) to the recipient\'s library">Share the whole library folder</span> '+
+		'<a class="button toggle" data-bind="css:{on:sharedir},click:toggle.bind($data,sharedir)"><span class="light"></span><span class="text" data-bind="text:btntxt(sharedir)"></span></a></div><br>';
+				}
+			} else if(opt.url){ url = opt.url; } else { desc = '.<br>Note: No library items specified for sharing'; }
+		}
+		var content = ['<div>Paste this URL to a web browser address bar'+desc+'.</div><br>'];
+		var input = $('<input class="transparent" style="width:350px;padding:0" onclick="this.select()" data-bind="value:sharedir()?\''+dirurl+'\':\''+url+'\'"></input>');
+		setTimeout(function(){input[0].select()},500);
 		var email = $('<input style="width:183px" type="email" placeholder="e-mail address">');
 		var emailbtn = $('<a class="button square" style="margin-left:3px">Send</a>');
 		var sendmail = function(){ if(~email.val().indexOf('@')) communicate('sendmail',{email:email.val(),url:options.url},{btn:emailbtn,restore:true}); }
 		emailbtn.click(sendmail);
-		content.push(input, '<div class="inputdesc">Press '+ckey+'+C to copy the link to clipboard</div>');
+		content.push(input, '<div class="inputdesc">Press '+ckey+'+C to copy the link to clipboard</div>', dirtoggle);
 		if(settingsmodel.email) content.push('Share the link: ', email, emailbtn);
 		var openbtn = $('<a class="button blue" href="'+options.url+'" target="_blank">Open link</a>');
-		makewindow('Share data',content,{icn:'info',btn:['OK',openbtn]});
+		var windowdiv = makewindow('Share data',content,{id:type, icn:'info', btn:['OK',openbtn]})[0];
+		ko.applyBindings(settingsmodel,windowdiv);
 	}
 	
 	return false;
@@ -3607,7 +3787,7 @@ function ensemblimport(){
 			seq_region: marr[1], seq_region_start: start, seq_region_end: end, output_file: ensemblmodel.outname+'.xml',
 			db: 'mysql://anonymous@ensembldb.ensembl.org/'+ensemblmodel.dbver, masked_seq: ensemblmodel.maskopt.indexOf(mask)};
 		
-		ensbtn.innerHTML = '<img src="images/spinner.gif" class="icn"/>';
+		//ensbtn.innerHTML = '<img src="images/spinner.gif" class="icn"/>';
 		
 		communicate('startepo',params,{error:function(){ showerror('Wasabi server error. Try again.'); }, success:function(response){
 			response = JSON.parse(response);
@@ -3814,8 +3994,8 @@ function getfile(opt){
     var download = function(fileopt){
       if(!fileopt) fileopt = {};
       var filename = fileopt.file || opt.file || "";
-      if(!opt.id && !filename){ constole.log('download error: id or filename missing.'); return; }
-      var urlparams = (opt.id?"&getlibrary="+opt.id:"")+(filename?"&file="+filename:"")+(fileopt.child?"&child="+fileopt.child:"");
+      if(!opt.id && !filename){ console.log('download error: id or filename missing.'); return; }
+      var urlparams = (opt.id?"&getlibrary="+opt.id:"")+(filename?"&file="+filename:"")+(fileopt.dir?"&dir="+fileopt.dir:"");
 	  $.ajax({
 		type: "GET",
 		url: settingsmodel.userid+"?type=text"+urlparams,
@@ -3860,8 +4040,8 @@ function getfile(opt){
 	};
 	
 	if(!opt.skipimport && opt.id){ //library import. get (meta)>importmeta>main_file
+		var libitem = librarymodel.getitem(opt.id);
 		var importpipeline  = function(){
-			var libitem = librarymodel.getitem(opt.id);
 			if(!libitem){ //id not in library (shared id); get meta
 				var metaerror = function(e){ 
 					console.log('metadata error: '+e); 
@@ -3884,17 +4064,22 @@ function getfile(opt){
 			}
 		};
 		
-		download({file:"importmeta.txt", child:opt.child||'', success:function(filedata){
-			try{ serverdata.import = JSON.parse(filedata); }
-			catch(e){ console.log('importmeta parse error: '+e); }
-			importpipeline();
+		var showdir = function(){ dialog('library'); librarymodel.dirpath(librarymodel.getpath(opt.id)); };
+		
+		if(opt.dir && libitem) showdir(); //shared folder aleady in library
+		else{
+			download({file:"importmeta.txt", dir:opt.dir||'', success:function(filedata){
+				try{ serverdata.import = JSON.parse(filedata); }
+				catch(e){ console.log('importmeta parse error: '+e); }
+				if(opt.dir) showdir();
+				else importpipeline();
 			},
 			error:function(e){
 				if(e.indexOf('Invalid library ID')) dialog('error','Analysis ID <b>'+opt.id+'</b> was not found in library.<br>'+
 					'The data may have been deleted'+(opt.share?' or your sharing URL may be faulty':'')+'.');
-				else if(opt.child) dialog('library');
-				else importpipeline(); 
-		}});
+				else if(opt.dir) showdir();
+				else importpipeline();
+		}})}
 	}
 	else{ download(); } //import/display the requested file
 }
@@ -4145,7 +4330,7 @@ function startup(response){
 	
 	communicate('getlibrary','',{success: function(){
 		if(urlvars.share){ //import from library
-			getfile({id:urlvars.share, file:urlvars.file||'', child:urlvars.child||'', share:true});
+			getfile({id:urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', share:true});
 			//dialog('export',{exporturl:settingsmodel.userid+'?type=text&getlibrary='+urlvars.share+'&file='+urlvars.file+'&share=true'});
 		}
 		else if(urlvars.file){ getfile({file:urlvars.file}); } //import local file

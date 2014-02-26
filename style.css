@@ -150,7 +150,7 @@ svg.icon path{
 span.svgicon{
 	display: inline-block;
     padding-right: 5px;
-    vertical-align: -4px;
+    vertical-align: text-bottom;
     width: 18px;
     height: 18px;
 }
@@ -218,6 +218,11 @@ a.button.square{
 }
 #top a.button.square{
 	padding: 5px 9px;
+}
+
+a.button.round{
+	padding: 3px;
+    border-radius: 100%;
 }
 
 a.button.small{
@@ -897,6 +902,41 @@ img#rightshadow{
  	display: block;
  	opacity: 1;
  }
+ 
+span.spinner{
+	display: block;
+	position: relative;
+	height: 18px;
+	width: 18px;
+	margin: 1px;
+	border-radius: 100%;
+	vertical-align: text-bottom;
+}
+span.spinner>img{
+	display: block;
+	position: absolute;
+	width: 28px;
+	height: 28px;
+	top: -5px;
+	left: -5px;
+}
+span.spinner.cancel{
+	cursor: pointer;
+}
+span.spinner.cancel svg.icon>path{
+	fill: #888;
+	stroke: none;
+}
+span.spinner.cancel:hover, a.button:hover span.spinner.cancel{
+	background-color: #888;	
+}
+span.spinner.cancel:hover>img, a.button:hover span.spinner.cancel>img{
+	display: none;
+}
+span.spinner.cancel:hover svg.icon>path, a.button:hover span.spinner.cancel svg.icon>path{
+	fill: white;
+	stroke: none;
+}
  
  #wrap {
  	position: absolute;
@@ -1812,7 +1852,7 @@ span.icon{
 
 
 img.icn{ height: 20px; vertical-align: bottom; }
-a.button img.icn{ vertical-align: -4px; }
+a.button img.icn{ vertical-align: text-bottom; }
 img.small{ height: 16px; }
 img.icn.action{ cursor: pointer; }
 img.icn.action:hover{ box-shadow: 0 1px 2px #999 inset; }
@@ -1852,6 +1892,7 @@ div.insidediv{
 	border-radius: 3px;
 	box-shadow: 0 2px 3px -1px rgba(0, 0, 0, 0.4) inset, 0 -4px 3px -4px rgba(0, 0, 0, 0.4) inset;
 }
+#library div.insidediv{ padding: 5px; }
 /* settings list */
 div.insidediv div.row{
 	position: relative;
@@ -1868,10 +1909,10 @@ div.insidediv a.button.toggle{
 	margin-top: -5px;
     padding: 2px 6px 1px 6px;
     border-radius: 3px;
+    top: auto;
 }
 div.insidediv div.row.bottombtn a.button.toggle{ margin-top: -4px;}
 div.insidediv div.row>span.buttongroup{ margin: -10px 0 0 5px; }
-div.insidediv div.row a.button:active{ top: auto; }
 div.rowwrap{
 	position: relative;
 	height: 34px;
@@ -1899,6 +1940,7 @@ div.logdiv div.row a.button{
 	padding: 1px 6px;
 	border-radius: 3px;
 	margin: -3px 0 0 0;
+	z-index: 5;
 }
 div.logdiv div.row span.note{
 	padding-left: 10px;
@@ -1932,12 +1974,12 @@ div.itemdiv{
 	min-width: 330px;
 	min-height: 40px;
 	overflow: hidden;
-	-webkit-transition: height 0.4s;
-	transition: height 0.4s;
+	-webkit-transition: height 0.4s, border-color 0.3s, background-color 0.3s;
+	transition: height 0.4s, border-color 0.3s, background-color 0.3s;
 }
 #library div.itemdiv{
 	height: 55px;
-	padding: 5px 0 0 5px;
+	padding: 5px 0 0 12px;
 	min-width: 370px;
 	border: 2px solid transparent;
 	border-radius: 3px;
@@ -1954,6 +1996,47 @@ div.itemdiv{
 #library div.itemdiv.compact{
 	min-height: 24px;
 	height: 24px;
+}
+#library div.itemdiv.draghover{
+	border-color: orange;
+	background-color: rgba(255,165,0,0.4);
+}
+#library div.itemdiv.ui-draggable-dragging{
+	box-shadow: 0 3px 5px #666;
+	background-color: #fff;
+}
+#library div.itemdiv.ui-draggable-dragging div.draghandle{ border-color: transparent; }
+
+div.itemdiv div.draghandle{
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 30px;
+	border-radius: 3px 0 0 3px;
+	background: transparent;
+	cursor: pointer;
+	border: 1px solid transparent;
+	border-right: none;
+    transition: border-color 0.2s linear;
+    -webkit-transition: border-color 0.2s linear;
+}
+div.itemdiv div.draghandle:hover{
+	background: -webkit-linear-gradient(left, rgb(255,255,255), rgba(255,255,255,0));
+	background: linear-gradient(to right, rgb(255,255,255), rgba(255,255,255,0));
+	border-color: #ccc;
+}
+div.itemdiv div.draghandle>span{
+	display: block;
+	position: absolute;
+	top: 50%;
+	height: 18px;
+	width: 18px;
+	text-align: left;
+	padding-left: 2px;
+	font-size: 18px;
+	margin-top: -12px;
+	color: #888;
 }
 
 div.itemdiv a.button.itembtn{
@@ -1977,18 +2060,18 @@ div.itemdiv a.button.itembtn{
     color: red;
     padding: 3px 8px;
     right: 5px;
-    top: 60px;
+    top: 65px;
 }
 #library div.itemdiv a.button.itembtn.movebtn{
 	border-radius: 3px;
     padding: 3px 8px;
-    right: 80px;
-    top: 60px;
+    right: 85px;
+    top: 65px;
 }
 #library div.itemdiv a.button.itembtn.childbtn{
 	border-radius: 3px;
     padding: 3px 5px 3px 3px;
-    left: 205px;
+    left: 215px;
     right: auto;
     top: 28px;
 }
@@ -2001,7 +2084,7 @@ div.itemdiv a.button span.svg{
 	display: inline-block;
 	width: 20px;
 	height: 20px;
-	vertical-align: -4px;
+	vertical-align: text-bottom;
 }
 div.itemdiv a.button svg path{
 	fill: white;
@@ -2037,15 +2120,9 @@ span.itemexpand{
 /* library path header */
 #library a.back{
 	position: absolute;
-	left: 4px;
-    top: 0;
-    width: 20px;
+	left: 5px;
+    top: 1px;
     margin: 0;
-    padding: 5px 0 3px;
-	font-size: 18px;
-	line-height: 16px;
-	text-align: center;
-    font-weight: bold;
     z-index: 1;
 }
 #library span.svgicon{
@@ -2063,19 +2140,23 @@ span.itemexpand{
 #library div.itemdiv.compact span.svgicon.share{ top: 6px; }
 
 span.svgicon.share path{ fill: #369; }
-span.svgicon.share:hover path{ fill: orange; }
+a.button span.svgicon path{ fill: #333; }
+span.svgicon.share:hover path, a.button:hover span.svgicon path{ fill: orange; }
 
 #library span.dirtrail{
 	display: inline-block;
 	position: relative;
-	max-width: 235px;
+	margin-left: 15px;
+	margin-right: 145px;
+	max-width: 245px;
 	overflow: hidden;
 	font-weight: bold;
 	color: #666;
+	white-space: nowrap;
 }
 #library span.dirtrail>span.text{
 	float: right;
-	margin-left: 18px;
+	margin-left: 10px;
 }
 
 /* fading-end textline */
@@ -2104,7 +2185,7 @@ span>span.leftfade{
 	position: absolute;
   	top: 0;
   	left: 0;
-  	width: 20px;
+  	width: 15px;
   	height: 100%;
 	background: -webkit-linear-gradient(left, rgb(240,240,240), rgba(240,240,240,0));
 	background: linear-gradient(to right, rgb(240,240,240), rgba(240,240,240,0));

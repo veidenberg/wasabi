@@ -196,17 +196,13 @@ def getmeta(dirpath, rootlevel, shareroot=None): #get processed metadata
         logging.error('Metadata parsing error: %s' % why)
     return md
 
-def create_job_dir(d = datadir, uid = '', newlibrary = False, newfolder = False):
-    if(d is not datadir): d = apath(d,d=datadir,uid=uid)
-    else:
-        if(uid): d = joinp(d,uid,uid=uid)
-        elif(useraccounts): newlibrary = True
+def create_job_dir(d='', uid='', newlibrary=False, newfolder=False):
+    if(not d):
+        d = datadir
+        if(useraccounts):
+            if(not uid or uid not in libdirs): newlibrary = True
+            else: d = librarypath(uid)   
             
-    if(not os.path.isdir(d)):
-        try : os.makedirs(d,0775)
-        except OSError as e:
-            raise OSError(501,'Could not create a job folder to %s : %s' % (userpath(d), e.strerror))
-                
     newdir = tempfile.mkdtemp(prefix='', dir=d)
     while(os.path.basename(newdir) in libdirs): #check for uniqueness
         os.rmdir(newdir)
@@ -234,6 +230,26 @@ def create_job_dir(d = datadir, uid = '', newlibrary = False, newfolder = False)
             Metadata.create(newdir, filename="importmeta.txt")
         maplibrary(uid)
     return newdir
+
+def change_ids(d='', uid=''): #replace IDs of library item(s)
+    if(not d or d==datadir): raise OSError(501,"No path given for ID change")
+    names = tempfile._RandomNameSequence()  #random ID generator
+    newids = []
+    for (dirpath,dirs,files) in os.walk(d,followlinks=False):
+        newid = names.next()
+        while(newid in libdirs): newid = names.next()
+        try:
+            newpath = os.path.join(os.path.dirname(dirpath),newid)
+            os.rename(dirpath, newpath)
+            md = Metadata(newpath)
+            md.update({"id":newid})
+            if('importmeta.txt' in files):
+                md = Metadata(newpath, filename='importmeta.txt')
+                md.update({"id":newid})
+        except (OSError, MetadataError, IOError) as why: raise OSError(501,"ID renaming failed for %s (%s)" % dirpath,why)
+        newids.append(newid)
+    return newids
+            
 
 def info(msg):
     if(logfile): logging.info(msg)
@@ -314,15 +330,15 @@ class WasabiServer(BaseHTTPRequestHandler):
         else: #send as binary
             ctype = 'image' if url.endswith(".jpg")|url.endswith(".png")|url.endswith(".gif") else 'application/octet-stream'
            
-        if 'getlibrary' in params and params['getlibrary']: #access datafiles from external directories
+        if 'getlibrary' in params and params['getlibrary']: #access datafiles from library directory
             filename = params['file'] if 'file' in params else 'meta.txt'
-            if 'child' in params: #check requested ID
-                url = os.path.join(getlibrary(uid=userid,jobid=params['child']), filename)
-                if userid: #add shared ID to library
+            if 'dir' in params and params['dir']: #check requested ID
+                childpath = librarypath(params['dir'])
+                if userid: #add shared ID to user library
                     md = Metadata(librarypath(userid))
                     idlist = md['shared'] or [] 
                     if params['getlibrary'] not in idlist: md.update({'shared':idlist+[params['getlibrary']]})
-            url = os.path.join(getlibrary(uid=userid,jobid=params['getlibrary']), filename)
+            url = os.path.join(librarypath(params['getlibrary']), filename)
             root = datadir
         elif 'file' in params and local: #local wasabi installation permits unrestricted file reading
             url = params['file']
@@ -335,7 +351,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         else: root = wasabidir
             
         try:    
-            f = open(apath(url,root)) if 'text' in ctype else open(apath(url,root),'rb')
+            f = open(apath(url,root)) if 'text' in ctype else open(apath(url,root),'rb') #symlink check
             filecontent = f.read()
             f.close()
             self.send_response(200)
@@ -352,7 +368,7 @@ class WasabiServer(BaseHTTPRequestHandler):
     def post_checkserver(self, form, userid):
         status = {"status":"OK"}
         if(useraccounts):
-            if(not userid or not os.path.isdir(joinp(datadir, userid, uid='skip'))): #create new user folder
+            if(not userid or userid not in libdirs): #create new user folder
                 userid = os.path.basename(create_job_dir(newlibrary=True))
                 status["newuser"] = "yes"
             os.utime(joinp(datadir, userid, uid='skip'),None) #timestamp last login
@@ -381,11 +397,11 @@ class WasabiServer(BaseHTTPRequestHandler):
         metadata = []
         for path in librarypaths(rootlevel,inclroot=True):
             md = getmeta(path,rootlevel)
-            if(md['id'] == rootlevel): md['parentid'] = ''
+            if(md['id'] == rootlevel): md['id'] = ''
             if md['shared']: #add shared analyses/folders
-                metadata += [str(getmeta(spath,libdirs[sid]['parent'],md['parentid'])) for sid in md['shared'] for spath in librarypaths(sid,True)]
+                metadata += [str(getmeta(spath,libdirs[sid]['parent'],md['id'])) for sid in md['shared'] for spath in librarypaths(sid,True)]
                 del md['shared']
-            if(md['id'] != rootlevel): metadata.append(str(md))
+            if(md['id']): metadata.append(str(md))
         rootmd = Metadata(getlibrary(jobid=rootlevel))
         self.sendOK()
         self.wfile.write('['+','.join(metadata)+']')
@@ -414,6 +430,10 @@ class WasabiServer(BaseHTTPRequestHandler):
     #save files to libary
     def post_save(self, form, userid):
         self.post_startalign_save(form, 'save', userid)
+        
+    #make new folder to libary
+    def post_newdir(self, form, userid):
+        self.post_startalign_save(form, 'save', userid)
             
     #start new alignment job
     def post_startalign(self, form, userid):
@@ -427,19 +447,27 @@ class WasabiServer(BaseHTTPRequestHandler):
         writemode = form.getvalue('writemode','') #infer target path in library
         name = form.getvalue('name','')
         odir = datadir
+        response = {}
         emptyfolder = True if action=='save' and 'file' not in form else False
+        
+        if(not userid):
+        	if(currentid in libdirs): userid = getlibrarypath(currentid, getroot=True)
+        	else: userid = os.path.basename(create_job_dir(newlibrary=True))
+        	response["userid"] = userid
+        	
+        parentdir = getlibrary(jobid=parentid, uid=userid, checkowner=True) if parentid else ''
         
         logging.debug("%s: userid=%s parentid=%s currentid=%s writemode=%s" % (action, userid, parentid, currentid, writemode))
         
         if(writemode=='child' or writemode=='sibling'):  #create a child job
             if writemode=='child': parentid = currentid
-            odir = create_job_dir(d=getlibrary(jobid=parentid, uid=userid, checkowner=True), uid=userid, newfolder=emptyfolder)
+            odir = create_job_dir(d=parentdir, uid=userid, newfolder=emptyfolder)
         elif(writemode=='overwrite' and currentid):  #rerun of job, use same directory
             odir = getlibrary(jobid=currentid, uid=userid, checkowner=True)
-        else: odir = create_job_dir(uid=userid, newfolder=emptyfolder)  #create new top-level job directory
+        else: odir = create_job_dir(d=parentdir, uid=userid, newfolder=emptyfolder)  #create new job directory
         
         jobid = os.path.basename(odir)
-        response = {"id":jobid}
+        response["id"] = jobid
 
         #store form info to metadata file
         importdata = {}
@@ -524,14 +552,11 @@ class WasabiServer(BaseHTTPRequestHandler):
     
     #send a library directory filelist
     def post_getdir(self, form, userid):
-        jobdir = form.getvalue('dir', '')
-        if not jobdir:
+        dirid = form.getvalue('id', '')
+        if(not dirid or dirid not in libdirs):
             self.sendOK()
             return
-        dirpath = getlibrary(jobid=jobdir,uid=userid)
-        if not os.path.isdir(dirpath):
-            self.sendOK()
-            return
+        dirpath = librarypath(dirid)
         files = {}
         for item in os.listdir(dirpath):
             if item.startswith("."): continue
@@ -561,26 +586,38 @@ class WasabiServer(BaseHTTPRequestHandler):
     def post_movedir(self, form, userid):
         jobid = form.getvalue('id','')
         parentid = form.getvalue('parentid','')
-        targetid = form.getvalue('target','')
+        targetid = form.getvalue('target','') or userid or os.path.basename(datadir)
         duplicate = form.getvalue('copy','')
-        if(not jobid or not targetid): raise IOError(404,'Source or target ID not given')
-        if(userid and userid!=librarypath(targetid,True)): raise IOError(404,'Permission denied')
+        if(not jobid): raise IOError(404,'Item ID not given')
+        if(userid and userid!=librarypath(targetid,getroot=True)): raise IOError(404,'Permission denied')
         sourcepath = librarypath(jobid)
         targetpath = librarypath(targetid)
-        if(userid and userid!=librarypath(jobid,True)): #move shared dir
-            if parentid and not duplicate:
+        if(not duplicate and os.path.dirname(sourcepath)==targetpath):
+            self.sendOK('{"id":"'+jobid+'"}')
+            return
+        if(userid and userid!=librarypath(jobid,getroot=True)): #move reference to shared dir
+            if parentid:
                 md = Metadata(parentid)
-                if md['shared']: md['shared'].remove(parentid)
+                if md['shared']: 
+                    try: md['shared'].remove(jobid)
+                    except KeyError: pass
                 md.flush()
             md2 = Metadata(targetid)
             idlist = md2['shared'] or []
             idlist.append(jobid)
             md2.update({'shared':idlist})
-        else: #move real dir
-            if duplicate: shutil.copytree(sourcepath, os.path.join(targetpath,jobid))
+        else: #move/copy real dir
+            if duplicate:
+                jobid = tempfile._RandomNameSequence().next() #tmp copyfolder
+                shutil.copytree(sourcepath, os.path.join(targetpath,jobid))
+                try:
+                    jobid = change_ids(os.path.join(targetpath,jobid))[0]
+                except OSError as why: #cannot change IDs of copied data. delete copy
+                    shutil.rmtree(apath(os.path.join(targetpath,jobid),d=datadir))
+                    raise OSError(501, 'Failed to finish data copying: %s' % why)
             else: shutil.move(sourcepath, targetpath)
             maplibrary(userid)
-        self.sendOK('Done')
+        self.sendOK('{"id":"'+jobid+'"}')
              
          
 
@@ -744,8 +781,8 @@ class WasabiServer(BaseHTTPRequestHandler):
             userid = form.getvalue('userid','') if useraccounts else ''
             
             if(action!='getlibrary'): logging.debug("Post: %s, userid=%s" % (action, userid))
-            if(useraccounts and action not in ['checkserver','errorlog','terminate']): #userid check
-                if(not userid or userid not in libdirs) :
+            if(useraccounts): #userid check
+                if(((not userid or userid not in libdirs) and action not in ['checkserver','errorlog','terminate','save']) or libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'):
                     raise IOError(404,'Post '+action+' => Invalid user ID "'+userid)
                     
             getattr(self, "post_%s" % action)(form, userid)

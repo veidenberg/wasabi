@@ -948,7 +948,7 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data){
 			var circle = svg.draw(new Smits.PhyloCanvas.Render.Circle((x2 || positionX), y, 5, { attr: circleattr }));
 			node.edgeCircleHighlight = node.svgEl = circle;
 			circle.node.setAttribute("nodeid",node.id);
-			tipnote = $('#right').hasClass('dragmode')? '' : (node.name.length>5?'<br>':' ')+'<span class="note">'+(tipnote||'Click for options')+'</span>';
+			tipnote = $('#right').hasClass('dragmode')? '' : (node.name.length>5?'<br>':' ')+'<span class="note">'+(tipnote||'Click or drag')+'</span>';
 			var name = node.displayname || node.name || 'no name';
 			
 			circle.mouseover(function(e){
