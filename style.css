@@ -1686,6 +1686,7 @@ div.windowcontent div.btndiv a.button{
 	font-weight: normal;
 	letter-spacing: 0.5px;
 }
+div.windowcontent div.btndiv a.button:active{ top: 0 }
 
 div.windowcontent span.cell{
 	display: inline-block;
@@ -2141,7 +2142,8 @@ span.itemexpand{
 
 span.svgicon.share path{ fill: #369; }
 a.button span.svgicon path{ fill: #333; }
-span.svgicon.share:hover path, a.button:hover span.svgicon path{ fill: orange; }
+span.svgicon.action{ cursor: pointer; }
+span.svgicon.share:hover path, span.svgicon.action:hover path, a.button:hover span.svgicon path{ fill: orange; }
 
 #library span.dirtrail{
 	display: inline-block;

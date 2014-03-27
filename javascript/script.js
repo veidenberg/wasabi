@@ -38,7 +38,7 @@ var libraryopt = {
 	}}
 };
 
-var serverdata = {import: {}, library: ko.mapping.fromJS([],libraryopt)};
+var serverdata = {import: {}, library: ko.mapping.fromJS([],libraryopt), params: ko.mapping.fromJS({},{copy:['params']})};
 
 //extenders to KO viewmodel items
 ko.extenders.format = function(obsitem, formattype){ //format an observable value in-place
@@ -79,7 +79,7 @@ ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
     		zIndex: 50
     	});
     	$div.droppable({
-      		accept: function(el){ return thisid&&!unwrap(librarymodel.getitem(thisid).shared); },
+      		accept: function(el){ return el.attr('itemid')&&thisid&&!unwrap(librarymodel.getitem(thisid).shared); },
       		activeClass: '',
       		addClasses: false,
       		hoverClass: 'draghover',
@@ -228,7 +228,7 @@ var koLibrary = function(){
 		}
 
 		if(file){ //show logfile content
-			getfile({id:item.id, file:file, btn:logdiv, skipimport:true});
+			getfile({id:item.id, file:file, btn:logdiv, noimport:true});
     	}
     	else{ //show library folder content
     		communicate('getdir',{id:item.id},{success: function(data){
@@ -288,7 +288,7 @@ var koLibrary = function(){
 	self.autoimport = '';
 	self.parselog = function(item){
 		var logline = item.log(), status = item.status(), params = item.parameters;
-		var progr = logline.match(/#\((\d+)\/(\d+)\)/), html = logline;
+		var progr = logline.match(/# ?\((\d+)\/(\d+)\)/), html = logline;
 		if(!progr && ~logline.indexOf('Nothing yet')){ html = 'Waiting for feedback...'; }
 		else if(~logline.indexOf('Cputime limit')){
 			var timelimit = settingsmodel.jobtimelimit? settingsmodel.jobtimelimit+'-hour':'time';
@@ -398,8 +398,8 @@ var ensemblmodel = new koEnsembl();
 //datamodel for Wasabi settings
 var koSettings = function(){
 	var self = this;
-	self.toggle = function(obsvalue){ obsvalue(!obsvalue()); }
-	self.btntxt = function(obsvalue){ return obsvalue()?'ON':'OFF'; }
+	self.toggle = function(obs){ if(typeof(obs)=='function') obs(!obs()); }
+	self.btntxt = function(obs){ return obs()?'ON':'OFF'; }
 	self.preflist = {tooltipclass:'', undolength:'', autosaveint:'autosave', onlaunch:'', zoomlevel:'keepzoom', userid:'keepuser', colorscheme:'', boxborder:'', font:'', windowanim:'', allanim:'', hidebar:'', minlib:'', skipversion:'', checkupdates:'local', bundlestart:'local'};
 	self.saveprefs = function(){ //store preferences to harddisk
 		$.each(self.preflist,function(pref,checkpref){
@@ -449,7 +449,7 @@ var koSettings = function(){
 	self.email = false; //whether server can send emails
 	self.datause = ko.observable(0); //current library size
 	self.dataperc = ko.computed(function(){ return parseInt(self.datause()/(self.datalimit/100))+'%'; });
-	self.joblimit = 10; //max. nr. of running jobs
+	self.joblimit = 0; //max. nr. of running jobs
 	self.checkupdates = ko.observable(true);
 	self.skipversion = ko.observable(0); //skip a version update
 	//autosave settings
@@ -526,6 +526,7 @@ var koSettings = function(){
 	self.sharedir = ko.observable(false);
 }
 var settingsmodel = new koSettings();
+var toggle = settingsmodel.toggle;
 
 //main datamodel
 var koModel = function(){
@@ -535,7 +536,8 @@ var koModel = function(){
 	self.offline.subscribe(function(v){
 		if(v && librarymodel.jobtimer){ clearInterval(librarymodel.jobtimer); librarymodel.jobtimer = ''; }
 	});
-	self.helsinki = Boolean(~window.location.hostname.indexOf('helsinki.fi'));
+	self.helsinki = Boolean(~window.location.hostname.indexOf('helsinki.fi')||~window.location.hostname.indexOf('wasabiapp.org'));
+	if(self.helsinki) settingsmodel.joblimit = 5;
 	self.version = {local:currentversion, remote:ko.observable(0), lastchange:''};
 	//rendering parameters
 	self.zlevels = [1,3,5,8,11,15,20]; //zoom level = box width (px)
@@ -579,9 +581,9 @@ var koModel = function(){
 	self.gaprate = ko.computed(function(){ return self.isdna()? 0.025 : 0.005; });
 	self.gapext = ko.computed(function(){ return self.isdna()? 0.75 : 0.5; });
 	self.transopt = ko.computed(function(){
-		var opts = [{t:'codons',v:'codon'}];
-		if(self.seqtype()=='rna') opts.push({t:'mt protein',v:'mttranslate'});
-		else opts.push({t:'protein',v:'translate'});
+		var opts = [{t:'codons',v:'codon',p:'codons'}];
+		if(self.seqtype()=='rna') opts.push({t:'mt protein',v:'mttranslate',p:'mt-translate'});
+		else opts.push({t:'protein',v:'translate',p:'translate'});
 		return opts;
 	});
 	self.iterate = ko.observable(false);
@@ -670,10 +672,15 @@ var koModel = function(){
 		if(!msgarr.length && $("#jobstatus").length) setTimeout(function(){closewindow('jobstatus')}, 1000); //close empty status window
 		return str;
 	}).extend({throttle: 200});
+	//imported data
+	self.dnasource = ko.observable(''); //cDNA data
+	self.filestype = ko.observable(''); //type of imported files in filescontent{}
+	self.filesname = ko.computed(function(){ //name of an imported file
+		return self.filestype()? Object.keys(filescontent)[0] : '';
+	});
 	//undo stack
-	self.undostack = ko.observableArray();
 	self.treebackup = '';
-	self.dnasource = ko.observable('');
+	self.undostack = ko.observableArray();
 	self.activeundo = {name:ko.observableArray(), undone:ko.observable(''), data:ko.observable('')};
 	self.refreshundo = function(data,redo){
 		if(!self.undostack().length){
@@ -756,7 +763,7 @@ var koExport = function(){
 	var self = this;
 	self.categories = ko.computed(function(){
 		var catarr = [];
-		if(model.seqsource()) catarr.push({name:'Sequence', formats:[{name:'fasta', variants:[{name:'fasta', ext:['.fa']} ]} ]}); 
+		if(model.seqsource()) catarr.push({name:'Sequence', formats:[{name:'fasta', variants:[{name:'fasta', ext:['.fa']} ]}, {name:'Phylip', variants:[{name:'phylip', ext:['.phy'], interlace:true}]} ]}); 
 		if(model.treesource()) catarr.push({name:'Tree', formats:[ 
 			{name:'newick', variants:[
 				{name:'newick', ext:['.nwk','.tre','.tree']},
@@ -794,10 +801,10 @@ var koExport = function(){
 	self.savetargets = ko.computed(function(){
 		var openitem = librarymodel.openitem();
 		if(openitem && !openitem.shared){
-			var targets = [{name:'overwrite of current',type:'overwrite'},{name:'child of current',type:'child'},{name:'new',type:'new'}];
+			var targets = [{name:'overwrite of current',type:'overwrite'},{name:'new',type:'new'},{name:'child of current',type:'child'}];
 			if(unwrap(openitem.parentid)) targets.push({name:'sibling of current',type:'sibling'});
 		} else { var targets = [{name:'new',type:'new'}]; }
-		self.savetarget(targets[0]);
+		self.savetarget(targets[targets.length-1]);
 		return targets;
 	});
 	self.savename = ko.observable('Untitled analysis');
@@ -895,25 +902,91 @@ var koTools = function(){
 };
 var toolsmodel = new koTools();
 
+ko.mapping.fromJS({pagan:[{name:'placement',params:{testparam:'1'}},{name:'pileup',params:{testparam:'2'}}]},serverdata.params);
+//datamodel for a new alignment input form
+var koPagan = function(){
+	var self = this;
+	self.selected = ko.observable(); //selected from serverdata.config.pagan
+	self.error = ko.observable();
+	self.note = ko.computed(function(){
+		var set = self.selected();
+		if(set){
+			if(!set.name()) return 'Preset needs to be named!';
+			else return 'Selected preset will be updated';
+		} else return 'Hover option labels for description';
+	});
+	self.edit = ko.observable(false);
+	self.index = function(needle, prop){
+		var found = -1, val;
+		$.each(serverdata.params.pagan(),function(i,set){
+			val = prop? set.name[prop] : unwrap(set.name);
+			if(val==needle){ found = i; return false; }
+		});
+		return found;
+	}
+	self.name = ko.computed({
+		read: function(){ var set = self.selected(); return set?unwrap(set.name):''; },
+		write: function(newname){
+			if(!newname) self.error('Please enter a descriptive name for the preset.');
+			else if(~self.index(unwrap(newname))) self.error('Preset name needs to be unique.');
+			else{ wrap(self.selected().name, newname, false); self.edit(false); }
+		}
+	});
+	self.add = function(){
+		var hasnew = self.index(true,'created');
+		if(~hasnew) self.remove(hasnew);
+		var newset = {name:ko.observable(''),params:{}};
+		newset.name.created = true;
+		serverdata.params.pagan.push(newset);
+		self.selected(newset);
+		self.edit(true);
+	};
+	self.remove = function(i){
+		var set = typeof(i)=='number'? serverdata.params.pagan()[i] : self.selected();
+		if(set){
+			serverdata.params.pagan.remove(set); 
+			self.selected(undefined);
+			self.edit(false);
+		}
+	};
+	self.saveparams = function(){ console.log(ko.mapping.toJS(serverdata.params)); }; //communicate('saveparams',ko.mapping.toJS(self.params())); };
+	self.on = { //watch for some checkboxes
+		newtree:ko.observable(), realb:ko.observable(), useprefix:ko.observable(), 
+		pruneext:ko.observable(), trimext:ko.observable(), refoverlap:ko.observable(),
+		nofastq:ko.observable(), useexonloc:ko.observable(), useexongap:ko.observable(),
+		findorf:ko.observable(), keepedges:ko.observable(), translate:ko.observable()
+	};
+}
+var paganmodel = new koPagan();
+
+
 //HTML element transitions for KO viewmodel items
 ko.bindingHandlers.fadevisible = {
 	init: function(element){ $(element).css('display','none') },
-    update: function(element, value){
-    	var value = unwrap(value);
+    update: function(element, accessor){
+    	var value = unwrap(accessor);
         if(value) $(element).fadeIn(); else $(element).hide();
+    }
+};
+ko.bindingHandlers.tempfade = {
+	init: ko.bindingHandlers.fadevisible.init,
+	update: function(element, accessor){
+    	var value = unwrap(accessor);
+        if(value) $(element).fadeIn(); else $(element).hide();
+        setTimeout(function(){ wrap(accessor(),''); },3000); //clear value => rehide
     }
 };
 ko.bindingHandlers.slidevisible = {
 	init: function(element){ $(element).css('display','none') },
-    update: function(element, value){
-        var value = unwrap(value);
+    update: function(element, accessor){
+        var value = unwrap(accessor);
         if(value) $(element).slideDown(); else $(element).slideUp();
     }
 };
 ko.bindingHandlers.fadeText = {
-    update: function(element, valueAccessor){
+    update: function(element, accessor){
   		$(element).hide();
-        ko.bindingHandlers.text.update(element, valueAccessor);
+        ko.bindingHandlers.text.update(element, accessor);
         $(element).fadeIn(200);
     }        
 };
@@ -923,7 +996,11 @@ var marginadd = function(elarr){ setTimeout(function(){ elarr[0].style.marginTop
 var waitremove = function(el){ setTimeout(function(){ $(el).remove() },500) };
 
 /* Utility functions */
-function unwrap(v){ if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; } //unwrap an observable
+function unwrap(v){ if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; } //read from (non)observable
+function wrap(v,newv,create){ //update/create (non)observable
+	if(typeof(v)=='function') v(newv); else if(create) v = ko.observable(newv); 
+	else if(create===false) return false; else v = newv; return true;
+}
 
 function numbertosize(number,type,min){ //prettyformat a number
 	if(isNaN(number)) return number;
@@ -1016,7 +1093,7 @@ function librarymenu(itm,e){
 	var libmode = settingsmodel.minlib()? 'Standard' : 'Compact';
 	var menudata = {'Refresh':function(){ communicate('getlibrary','',{restore:true,btn:btn,restorefunc:librarymenu}) }, 
 	'New folder': librarymodel.newdir };
-	menudata[libmode+' view'] = function(){ settingsmodel.toggle(settingsmodel.minlib) };
+	menudata[libmode+' view'] = function(){ toggle(settingsmodel.minlib) };
 	tooltip('','',{target:menutarget, shiftx:'-14', arrow:'top', data:menudata, style:'white', id:'librarymenu'});
 }
 
@@ -1100,7 +1177,6 @@ function communicate(action,senddata,options){
     		if(options.btn) options.btn.innerHTML = 'Saved';
    		}
    	}
-   	//else if(action=='getimportmeta'){ if(!options.saveto) options.saveto = 'import'; }
    	else if(action=='getlibrary'){ if(!options.saveto) options.saveto = 'library'; }
    	else if(action=='checkserver'){
    		errorfunc = function(msg){ if(~msg.indexOf('No response')) model.offline(true); else dialog('error','Wasabi server error: '+msg); };
@@ -1252,9 +1328,9 @@ function communicate(action,senddata,options){
 /* Input file parsing */
 function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	if(!options) options = {};
-	if(!options.mode) options.mode = '';
+	if(!options.mode) options.mode = 'import';
 	var errors = [], notes = [], treeoverwrite = false, seqoverwrite = false;
-	var Tidnames = {}, Tsequences = '', Ttreedata = '', Ttreesource = '', Tseqsource = '', Tseqformat = '';
+	var Tidnames = {}, Tsequences = Ttreedata = Ttreesource = Tseqsource = '';
 	var metaidnames = {}, nodeinfo = {}, visiblecols = [];
 	var ensinfo = options.ensinfo || {};
 	if(options.id){ //item imported from library. Get metadata.
@@ -1356,9 +1432,6 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		Ttreesource = filename;
 		if(!format) format = 'newick';
 		if(format=='newick'){ //remove whitespace
-			if(Tseqformat=='fasta'){ //match fasta name truncating
-				//treetxt = treetxt.replace(/(['"]\w+)[^'"]+(['"])/g,"$1$2");
-			}
 			treetxt = treetxt.replace(/\n+/g,'');
 		}
 		Ttreedata[format] = treetxt;
@@ -1370,6 +1443,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	};
 	
 	var filenames = options.filenames || Object.keys(filescontent);
+	if(!$.isArray(filenames)) filenames = [filenames];
 	filenames.sort(function(a,b){ //sort filelist: [nexus,xml,phylip,...,tre]
 		if(/\.tre/.test(a)) return 1; else if(/\.tre/.test(b)) return -1;
 		return /\.ne?x/.test(a)? -1: /\.xml/.test(a)? /\.ne?x/.test(b)? 1:-1 : /\.ph/.test(a)? /\.ne?x|\.xml/.test(b)? 1:-1 : /\.ne?x|\.xml|\.ph/.test(b)? 1: 0;
@@ -1398,18 +1472,18 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		else if(typeof(file)!='string'){ errors.push("Unrecognized data format in "+filename); return true; }
 		else if(/^<.+>$/m.test(file)){ //xml
 			if(~file.indexOf("<phyloxml")){ //phyloxml tree
-				if(options.mode=='check'){ datatype += 'tree '; return true; }
+				if(options.mode=='check'){ datatype += 'tree:phyloxml '; return true; }
 				parsetree(file,filename,'phyloxml');
 			}
 			else{  //HSAML
 			  var newickdata = $(file).find("newick");
 			  if(newickdata.length != 0){
-			  	if(options.mode=='check') datatype += 'tree ';
+			  	if(options.mode=='check') datatype += 'tree:HSAML ';
 			  	else parsetree(newickdata.text(),filename);
 			  }
 			  var leafdata = $(file).find("leaf");
 			  if(leafdata.length != 0){
-			  	if(options.mode=='check') datatype += 'seq ';
+			  	if(options.mode=='check') datatype += 'seq:HSAML ';
 			  	else { if(Tsequences) seqoverwrite = true; Tsequences = {}; Tseqsource = filename; }
 			  }
 			  if(options.mode=='check') return true;
@@ -1419,16 +1493,17 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
    			}
    			//if(newickdata.length!=0 && leafdata.length!=0){ return false }//got data, no more files needed
    		}
-   		else if(/^>.+$/m.test(file)){ //fasta
-   			if(options.mode=='check'){ datatype += 'seq '; return true; }
+   		else if(/^[>@].+$/m.test(file)){ //fasta/fastq
+   			datatype = /^@.+$/m.test(file)? 'fastq' : 'fasta';
+   			if(options.mode=='check'){ datatype+='seq:'+datatype; return true; }
    			if(Tsequences) seqoverwrite = true;
    			else Tsequences = {};
-   			Tseqsource += ' '+filename; Tseqformat = 'fasta';
-   			var nameexp = /^>(.+)$/mg;
+   			Tseqsource += ' '+filename;
+   			var nameexp = /^[>@](.+)$/mg;
    			while(result = nameexp.exec(file)){ //find nametags from fasta
-   				var to = file.indexOf(">",nameexp.lastIndex);
+   				var to = file.indexOf((datatype=='fasta'?">":"+"),nameexp.lastIndex);
    				if(to==-1){ to = file.length; }
-   				var tmpseq = file.substring(nameexp.lastIndex,to); //get text between fasta tags
+   				var tmpseq = file.substring(nameexp.lastIndex,to); //get text between namelines
    				tmpseq = tmpseq.replace(/\s+/g,''); //remove whitespace
    				var name = result[1];
    				name = name.trim(name);
@@ -1483,7 +1558,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
    		}
 	});//for each file
 	if(options.mode=='check') return datatype;
-	filescontent = {};
+	filescontent = {}; model.filestype('');
 	
 	if(options.mode=='importcdna'){
 		if(!Tseqsource) errors.push('No sequence data found');
@@ -1505,9 +1580,9 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		var feedback = function(){
    	  		if(options.dialog){ //import/translate window
 				$('.errors',options.dialog).text('Import complete.');
-				if(options.mode == 'importcdna'){ //flip window back
-					$("#importcdna").removeClass('finished flipped');
-					setTimeout(function(){ $("#importcdna").addClass('finished') },900);
+				if(options.mode == 'importcdna'){ //flip cdna window back
+					$("#translate").removeClass('finished flipped');
+					setTimeout(function(){ $("#translate").addClass('finished') },900);
 				}
 				else setTimeout(function(){ closewindow(options.dialog) }, 3000); //close window
 			}
@@ -1529,6 +1604,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				delete Tsequences[name]; 
 			}});
 			if(options.mode=='importcdna'){ model.dnasource(Tsequences); feedback(); return true; }
+			else if(options.mode=='noimport'){ feedback(); return Tsequences; }
 			sequences = Tsequences; Tsequences = '';
 			namearr = Object.keys(sequences);
 		}
@@ -1761,23 +1837,24 @@ function parseexport(filetype,options){
 	}
 	else if(filetype=='newick'){ output = treefile; }
 	
+	if(options.filename&&!options.exportdata) options.exportdata = filescontent[options.filename]||'';
 	if(usemodel||options.exportdata){ //export data to exportwindow & make download url
 		if(options.exportdata){
 			output = options.exportdata;
-			filename = 'exported_subtree.nwk';
+			filename = options.filename||'exported_subtree.nwk';
 			exportmodel.filename(filename);
 		} else filename = exportmodel.filename()+exportmodel.fileext();
-		$('#exportedwindow .paper').text(output);
-		$('#exportwrap').addClass('flipped');
-		communicate('makefile',{filename:filename,filedata:output},{saveto:exportmodel.fileurl});
+		$('#exportpaper').text(output);
+		$('#export').addClass('flipped');
+		if(usemodel) communicate('makefile',{filename:filename,filedata:output},{saveto:exportmodel.fileurl});
 	}
 	else if(options.exporturl){ //export server file to exportwindow
-		$.get(options.exporturl,function(txt){$('#exportedwindow .paper').text(txt)},'text');
-		$('#exportwrap').addClass('flipped');
+		$.get(options.exporturl,function(txt){$('#exportpaper').text(txt)},'text');
+		$('#export').addClass('flipped');
 		exportmodel.fileurl(options.exporturl);
 		exportmodel.filename(parseurl(options.exporturl).file||'file.txt');
 	}
-	if(options.exporturl || options.snapshot) $('#exportwrap a.backbtn').css('display','none');
+	if(options.exporturl || options.snapshot || options.exportdata) $('#export a.backbtn').css('display','none');
 	if(options.makeids) output = {file:output, nameids:nameids};
 	return output;
 }
@@ -1785,6 +1862,7 @@ function parseexport(filetype,options){
 //Save current MSA data to server (library)
 function savefile(btn){
 	if(!$.isEmptyObject(sequences) || !$.isEmptyObject(treesvg)){
+		var savetarget = btn? exportmodel.savetarget().type : exportmodel.savetargets()[0].type; //manual or autosave
 		var filedata = parseexport('HSAML',{includetree:true,includeanc:true,tags:true});
 		var nodeinfo = {};
 		$.each(leafnodes,function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
@@ -1792,10 +1870,9 @@ function savefile(btn){
 		var visiblecols = model.hiddenlen()? model.visiblecols() : '';
 		var ensinfo = $.isEmptyObject(model.ensinfo())? '' : model.ensinfo();
 		var savename = $('#savename').val() || exportmodel.savename();
-		communicate('save', {writemode:exportmodel.savetarget().type, file:filedata, name:savename, source:model.sourcetype(), parameters:librarymodel.importurl,
-			parentid:librarymodel.openparent(), id:librarymodel.openid(), ensinfo:ensinfo, nodeinfo:nodeinfo, visiblecols:visiblecols}, {btn:btn});
+		communicate('save', {writemode:savetarget, file:filedata, name:savename, source:model.sourcetype(), parameters:librarymodel.importurl,
+			parentid:librarymodel.openparent(), id:librarymodel.openid(), ensinfo:ensinfo, nodeinfo:nodeinfo, visiblecols:visiblecols}, {btn:btn,after:'closewindow'});
 	}
-	if($("#save").length) setTimeout(function(){ closewindow('save'); }, 2000);
 	return false;
 }
 
@@ -2105,7 +2182,7 @@ function makeCanvases(){ //make canvases for sequence letters
 
 // render sequence tiles
 function makeImage(target,cleanup,slowfade){
-	//var d = new Date(), starttime = d.getTime();
+	var d = new Date(), starttime = d.getTime();
 	var targetx, targety, boxw = model.boxw(), boxh = model.boxh(), tilesize = {w:4000,h:2000};
 	var colstep = parseInt(tilesize.w/boxw), rowstep = parseInt(tilesize.h/boxh); //tile size limits
 	var visiblecols = model.visiblecols(), visiblerows = model.visiblerows();
@@ -2166,7 +2243,7 @@ function makeImage(target,cleanup,slowfade){
 				tilediv.css({'left': c*boxw+'px', 'top': r*boxh+'px'});
 				tilediv.append(canvas);
 				dom.seq.append(tilediv);
-				//d = new Date(); console.log((r-endrow)*(c-endcol)+'bp drawn on 'cstep*boxw+'*'+rstep*boxh+'px canvas: '+(d.getTime()-starttime)+'ms');
+				d = new Date(); console.log((r-endrow)*(c-endcol)+'bp drawn on '+(cstep*boxw)+'*'+(rstep*boxh)+'px canvas: '+(d.getTime()-starttime)+'ms');
 				tilediv.fadeIn(fadespeed);
 				curcanvas++;
 				if(curcanvas==lastcanvas){ //last tile made => cleanup
@@ -2875,24 +2952,32 @@ function closewindow(elem,addfunc){
 }
 
 /* Generate pop-up windows */
-function makewindow(title,content,options,container){ //(string,array(,obj{flipside:'front'|'back',backfade,btn:string|jQObj|array,id:string},jQObj))
+function makewindow(title,content,options){ //(string,array(,obj{flipside:'front'|'back',backfade,btn:string|jQObj|array,id:string},jQObj))
 	if(!options) options = {};
 	if(!$.isArray(content)) content = [content];
 	var animate = settingsmodel.windowanim();
-	if(options.id && $('#'+options.id).length!=0){ //kill clones
+	if(options.id && $('#'+options.id).length){ //kill clones
 		options.position = $('#'+options.id).position();
-		$('#'+options.id).remove();
+		if(!options.flipside||options.flipside=='front') $('#'+options.id).remove();
 	}
+	var container = false;
 	if(options.flipside){ //we make two-sided window
+		if(options.id && $('#'+options.id).length){
+			container = $('#'+options.id);
+		} else {
+			var animclass = settingsmodel.windowanim()? 'zoomin' : '';
+			container = $('<div class="popupwrap '+animclass+'">');
+			$("#page").append(container);
+		}
 		var sideclass = 'side '+options.flipside;
 		if(!animate) sideclass += ' notransition';
 	} else if(animate){ var sideclass = 'zoomin'; } else { var sideclass = ''; }
 	var windowdiv = $('<div class="popupwindow '+sideclass+'"></div>');
-	if(options.id) windowdiv.attr('id',options.id);
+	if(options.id) (container||windowdiv).attr('id',options.id);
 	var shade = $("#backfade");
 	var closebtn = $('<span class="closebtn" title="Close window">'+svgicon('x')+'</span>');
 	var closefunc = function(){ //close window
-		var wrapdiv = container ? container : windowdiv; 
+		var wrapdiv = container || windowdiv; 
 		wrapdiv.removeClass('zoomed');
 		if(animate) setTimeout(function(){ wrapdiv.remove() },600); else wrapdiv.remove();
 		if(shade.css('display')!='none'){ shade.fadeOut(); }
@@ -2919,8 +3004,8 @@ function makewindow(title,content,options,container){ //(string,array(,obj{flips
 	titlediv.html(title);
 	$.each(content,function(i,item){ contentdiv.append(item); });
 	windowdiv.append(headerdiv,contentdiv,titlediv,closebtn);
-	if(container) container.append(windowdiv); //add window to webpage
-	else $("#page").append(windowdiv);
+	if(options.hidden) windowdiv.css('display','none');
+	$(container||"#page").append(windowdiv); //add window to webpage
 	
 	var dragdiv = container||windowdiv, page = {w:$('#page').width(), h:$('#page').height()}, win = {w:windowdiv.width(), h: windowdiv.height()};
 	var toFront = function(windiv,first){ //bring window on top
@@ -2933,7 +3018,7 @@ function makewindow(title,content,options,container){ //(string,array(,obj{flips
     }
     
     var pos = options.position || ($('#page>div.popupwindow').length? $('#page>div.popupwindow').last().position() : '');
-    if(pos){ //place a new window to shifted overlap
+    if(pos && (!options.flipside||options.flipside=='front')){ //place a new window to shifted overlap
 		toFront(dragdiv,'first');
 		dragdiv.css({'top':pos.top+20+'px','left':pos.left+20+'px'});
 	}
@@ -2976,7 +3061,9 @@ function expandtitle(options){
 			if(typeof(options.onshow)=='function') options.onshow();
 		}
 	});
-	return $('<div>').append(arrow,titlespan);
+	var titlediv = $('<div>').append(arrow,titlespan);
+	if(options.inline) titlediv.css({'display':'inline-block','margin-left':'5px'});
+	return titlediv;
 }
 
 //Content for different types of pop-up windows
@@ -2986,10 +3073,12 @@ function dialog(type,options){
 	if(!~['share','moveitem'].indexOf(type) && $('#'+type).length){ $('#'+type).trigger('mousedown');  return; }
 // file/data import window
 	if(type=='import'){
-		$('div.popupwindow').remove(); //close other windows
-		var fileroute = window.File && window.FileReader && window.FileList ? 'localread' : 'upload';
+		if(!options) options = {};
+		if(!options.mode) $('div.popupwindow').remove(); //close other windows
+		var winid = 'import', fade = true;
+		if(options.mode){ winid = 'import_'+options.mode; fade = false; }
 		
-		var localhelp = 'Select file(s) that contain aligned or unaligned sequence (and tree) data. Supported filetypes: fasta, newick (.tree), HSAML (.xml), NEXUS, phylip, ClustalW (.aln), phyloXML';
+		var localhelp = 'Select file(s) that contain aligned or unaligned sequence (and tree) data. Supported filetypes: fasta(q), (extended)newick, HSAML, NEXUS, phylip, ClustalW, phyloXML etc.';
 		var localheader = '<div class="sectiontitle"><img src="images/hdd.png"><span>Import local files</span><span class="svg" title="'+localhelp+'">'+svgicon('info')+'</span></div><br>';
 		
 		var filedrag = $('<div class="filedrag">Drag files here</div>');
@@ -3006,14 +3095,14 @@ function dialog(type,options){
     		evt.stopPropagation();
     		evt.preventDefault();
     		filedrag.removeClass('dragover');
-    		checkfiles(evt.originalEvent.dataTransfer.files,fileroute);
+    		checkfiles(evt.originalEvent.dataTransfer.files,options);
     	});
     	
 		var fileinput = $('<input type="file" multiple style="opacity:0" name="upfile">');
 		var form = $('<form enctype="multipart/form-data" style="position:absolute">');
 		form.append(fileinput);
 		filedrag.append(form);
-		fileinput.change(function(){ checkfiles(this.files,fileroute) });
+		fileinput.change(function(){ checkfiles(this.files,options) });
 		
 		var selectbtn = $('<a class="button" style="vertical-align:0">Select files</a>');
 		selectbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
@@ -3036,30 +3125,31 @@ function dialog(type,options){
 				var rmvarr = [curbtn.prev("br"),curbtn,curinput,curinput.next("span.icon")];
 				$.each(rmvarr,function(i,el){ el.remove() });
 			});
-			var lastel =  $("#import span.action.icon").last();
+			var lastel =  $('#'+winid+' span.action.icon').last();
 			lastel.after("<br>",rmvbtn,urlinput.clone().css('height','').val(''),expbtn.clone(true).html('\u25BC'));
 		});
 		
 		var dwnlbtn = $('<a class="button">Import</a>');
 		dwnlbtn.click(function(){
 			var urlarr = [];
-			$("#import .front .windowcontent textarea.url").each(function(i,input){
+			$('#'+winid+' .front .windowcontent textarea.url').each(function(i,input){
 				var val = $(input).val();
 				if(!val) return true;
-				if(~val.indexOf('share=') && ~val.indexOf('file=')){
+				if(~val.indexOf('share=')){
 					var urlind = val.lastIndexOf('?');
 					var urlvars = parseurl(val.substring(urlind+1));
 					urlvars.host = val.substring(0,urlind);
-					urlarr.push({name:urlvars.name||'shared data',share:urlvars,url:val});
+					urlarr.push({share:urlvars,url:val});
 				}
 				else if(val.substr(0,7)=='http://'){
 					var filename = val.substring(val.lastIndexOf('/')+1);
-					urlarr.push({name:filename, url:val});
+					urlarr.push({url:val});
 				}
 				else{ urlarr.push({name:'text input '+(i+1), text:val}); }
 				
 			});
-			checkfiles(urlarr,'download'); 
+			options.source = 'download';
+			checkfiles(urlarr,options); 
 		});
 		
 		var ensheader = '<br><br><div class="sectiontitle"><img src="images/ensembl.png"><span>Import from <a href="http://www.ensembl.org" target="_blank">Ensembl</a></span>'+
@@ -3091,36 +3181,29 @@ function dialog(type,options){
 		'<a id="ensbtn" class="button" onclick="ensemblimport()">Import</a> <span id="enserror" class="note" style="color:red"></span>'+
 		'<span data-bind="fadevisible:epojob">Fetching: <span class="progressline" style="width:200px"><span class="bar" data-bind="style:{width:epojobperc}"></span></span></span>';
 		
-		var animclass = settingsmodel.windowanim()? 'zoomin' : '';
-		var dialogwrap = $('<div id="import" class="popupwrap '+animclass+'"></div>');
-		$("#page").append(dialogwrap);
-		var dialogwindow = makewindow("Import data",[localheader,filedrag,or,selectbtn,ensheader,enscontent,remoteheader,urladd,urlinput,expbtn,'<br>',dwnlbtn],{backfade:true,flipside:'front',icn:'import.png',nowrap:true},dialogwrap);
+		var dialogwindow = makewindow("Import data",[localheader,filedrag,or,selectbtn,ensheader,enscontent,remoteheader,urladd,urlinput,expbtn,'<br>',dwnlbtn],{backfade:fade,flipside:'front',icn:'import.png',nowrap:true,id:winid});
 		ko.applyBindings(ensemblmodel,dialogwindow[0]);
 		
 		setTimeout(function(){
-			makewindow("Import data",[],{backfade:false,flipside:'back',icn:'import.png'},dialogwrap);
+			makewindow("Import data",[],{backfade:false,flipside:'back',icn:'import.png',id:winid});
 		},1000);
 	}
 // file export window	
 	else if(type=='export'){
 		exportmodel.filename(exportmodel.savename().replace(' ','_'));
 		var flipexport = function(){
-			$("#exportwrap").removeClass('finished flipped');
-			setTimeout(function(){ $("#exportwrap").addClass('finished') },900); //avoid firefox transition bugs
+			$('#'+type).removeClass('finished flipped');
+			setTimeout(function(){ $('#'+type).addClass('finished') },900); //avoid firefox transition bugs
 		};
-		if($("#exportwrap").length){ //use existing window
-			$("#exportwrap").click();
-			$("#exportwrap a.backbtn").css('display','inline-block');
+		if($('#'+type).length){ //use existing window
+			$('#'+type).click();
+			$('#'+type+' a.backbtn').css('display','inline-block');
 			flipexport();
 			if(options) parseexport('',options);
 			return;
 		}
 		
-		var animclass = settingsmodel.windowanim()? 'zoomin' : '';
-		var exportwrap = $('<div id="exportwrap" class="popupwrap '+animclass+'">');
-		$("#page").append(exportwrap);
 		var hasancestral = treesvg.data && treesvg.data.root.children.length==3?true:false;
-		
 		var frontcontent = $('<div class="sectiontitle" style="min-width:320px"><img src="images/file.png"><span>File</span></div>'+
 		'<span class="cell">Data<hr><select data-bind="options:categories, optionsText:\'name\', value:category"></select></span>'+
 		'<span class="cell" data-bind="fadevisible:category().formats.length,with:category">Format<hr><span data-bind="visible:formats.length==1,text:formats[0].name"></span><select data-bind="visible:formats.length>1, options:formats, optionsText:\'name\', value:$parent.format"></select></span>'+
@@ -3138,17 +3221,17 @@ function dialog(type,options){
 		
 		var makebtn = $('<a class="button orange" data-bind="visibility:format">Make file</a>');
 		makebtn.click(function(){ parseexport(); });
-		var frontwindow = makewindow("Export data",frontcontent,{icn:'export.png',id:'exportwindow',flipside:'front',btn:makebtn,nowrap:true},exportwrap);
+		var frontwindow = makewindow("Export data",frontcontent,{icn:'export.png',id:type,flipside:'front',btn:makebtn,nowrap:true});
 		
 		var backcontent = $('<div class="sectiontitle"><img src="images/file.png"><span data-bind="text:filename()+(~filename().indexOf(\'.\')?\'\':fileext())"></span></div>'+
-		'<div class="insidediv" style="max-width:400px;max-height:150px;overflow:auto"><div class="paper"></div></div>');
+		'<div class="insidediv" style="max-width:400px;max-height:150px;overflow:auto"><div id="exportpaper" class="paper"></div></div>');
 		var backbtn = $('<a class="button backbtn" style="padding-left:17px;margin-top:25px"><span style="vertical-align:2px">&#x25C0;</span> Options</a>');
 		backbtn.click(function(){ flipexport(); exportmodel.filename(exportmodel.savename().replace(' ','_')); });
 		
 		var downloadbtn = $('<a class="button" style="margin-left:40px;margin-top:25px" data-bind="visible:fileurl,attr:{href:fileurl}">Download</a>');
-		var backwindow = makewindow("Export data",[backcontent,backbtn,downloadbtn],{icn:'export.png', id:'exportedwindow', flipside:'back'},exportwrap);
+		var backwindow = makewindow("Export data",[backcontent,backbtn,downloadbtn],{icn:'export.png', flipside:'back', id:type});
 		
-		ko.applyBindings(exportmodel,exportwrap[0]);
+		ko.applyBindings(exportmodel,$('#'+type)[0]);
 		if(options) parseexport('',options);
 	}
 // save data to library	
@@ -3196,10 +3279,10 @@ function dialog(type,options){
 		var opttitle = expandtitle({title:'Alignment options', desc:'Click to toggle options', onshow:function(){infospan.fadeIn()}, onhide:function(){infospan.fadeOut()}}).append(infospan);
 		var tunetitle = expandtitle({title:'Fine-tuning', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
 		var treecheck = $.isEmptyObject(treesvg)?'checked="" disabled=""':''; //new tree needed
-		var parentoption = librarymodel.openparent()?'<option>sibling</option>':'';
-		var writetarget = librarymodel.openid()?'<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input (currently open) analysis">'+
-		'Save as a</span> <select name="writemode">'+parentoption+'<option '+(librarymodel.openparent()?'':'selected="selected"')+'>child</option>'+
-		'<option>overwrite</option></select> of current analysis in the <a onclick="dialog(\'library\'); return false">library</a>.':'';
+		var writetarget = (exportmodel.savetargets().length?'<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input (currently open) analysis">Save as</span> <select data-bind="visible:exportmodel.savetargets().length>1, options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':'Will be saved as new')+
+		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
+		exportmodel.savetarget(exportmodel.savetargets()[exportmodel.savetargets().length-1]); //default: sibling||child||new
+		
 		
 		var optform = $('<form id="alignoptform" onsubmit="return false">'+writetarget+'<br><input name="includehidden" type="checkbox" data-bind="checked:exportmodel.includehidden">'+
 			'<span class="label" title="You can exclude data from analysis by column collapsing">include hidden columns</span><hr>'+
@@ -3234,55 +3317,184 @@ function dialog(type,options){
 		alignbtn.click(function(){ sendjob({form:$('form',optdiv)[0],btn:alignbtn,name:nameinput.val()}); });
 		
 		var dialogwindow = makewindow("Make alignment",['Current sequence data will be aligned with <a href="http://prank-msa.googlecode.com" target="_blank">Prank</a> aligner.<br><hr>',namespan,opttitle,optdiv,'<br>'],{id:type, btn:alignbtn, icn:'icon_prank', nowrap:true});
+		
 		ko.applyBindings(model,dialogwindow[0]);
 	}
 // start a new PAGAN alignment job
 	else if(type=='pagan'){
-		var nameinput = $('<input type="text" class="hidden" value="'+exportmodel.savename()+'" title="Click to edit">');
-		var namespan = $('<span class="note">Descriptive name: </span>').append(nameinput);
-		var infospan = $('<span class="note" style="display:none;margin-left:20px">Hover options for description</span>');
-		var opttitle = expandtitle({title:'Alignment options', desc:'Click to toggle options', onshow:function(){infospan.fadeIn()}, onhide:function(){infospan.fadeOut()}}).append(infospan);
-		var tunetitle = expandtitle({title:'Fine-tuning', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
-		var treecheck = $.isEmptyObject(treesvg)?'checked="" disabled=""':''; //new tree needed
-		var parentoption = librarymodel.openparent()?'<option>sibling</option>':'';
-		var writetarget = librarymodel.openid()?'<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input (currently open) analysis">'+
-		'Save as a</span> <select name="writemode">'+parentoption+'<option '+(librarymodel.openparent()?'':'selected="selected"')+'>child</option>'+
-		'<option>overwrite</option></select> of current analysis in the <a onclick="dialog(\'library\'); return false">library</a>.':'';
+		var windowid = type;
+		var header = 'Currently open sequence data will be aligned with <a href="http://pagan-msa.googlecode.com" target="_blank">Pagan</a> aligner.<br>';
+		var nameinput = $('<input type="text" class="hidden" value="Pagan realignment" title="Click to edit">');
+		var namespan = $('<span class="note">Name the results: </span>').append(nameinput);
+		var presets = '<hr><span>Saved options:</span> <select style="margin-bottom:5px" data-bind="fadevisible:!edit(), options:serverdata.params.pagan, '+
+		'value:selected, optionsText:\'name\', optionsCaption:\'Choose a preset\'"></select> '+
+		'<input data-bind="fadevisible:edit,value:name" style="width:180px" placeholder="Type new preset name" title="Edit preset name"></input> '+
+		'<a class="button small square" data-bind="visible:selected()&&!edit(),click:function(){edit(true)},text:\'Edit\'" title="Edit this preset"></a>'+
+		'<a class="button small square red" data-bind="visible:edit,click:remove"  title="Remove this preset">Delete</a> '+
+		'<a class="button small square" data-bind="visible:!selected(),click:add" title="Add new preset">Create</a>'+
+		'<div style="color:red" data-bind="tempfade:error,text:error"></div>';
 		
-		var optform = $('<form id="alignoptform" onsubmit="return false">'+writetarget+'<br><input name="includehidden" type="checkbox" data-bind="checked:exportmodel.includehidden">'+
-			'<span class="label" title="You can exclude data from analysis by column collapsing">include hidden columns</span><hr>'+
-		'<input type="checkbox" name="newtree" '+treecheck+'><span class="label" title="Create a new NJ tree to guide the sequence alignment process (uncheck to use the current tree)">create a guidetree</span>'+
-		'<br><input type="checkbox" checked="checked" name="anchor"><span class="label" title="Use Exonerate anchoring to speed up alignment">alignment anchoring</span> '+
-		'<br><input type="checkbox" name="iterate" data-bind="checked:iterate"><span class="label" title="Iterating re-alignment cycles can improve tree phylogeny. Uncheck this option to keep the input tree intact">'+
-			'iterate alignment for</span> <select name="rounds"><option>2</option><option>3</option><option>4</option><option selected="selected">5</option></select> cycles'+
-		'<br><div class="sectiontitle small"><span class="grey">or</span></div>'+
-		'<input type="checkbox" name="e"><span class="label" title="Keep current alignment intact and just add sequences for ancestral nodes">keep alignment</span></form>');
-		var tunediv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
-		  '<input type="checkbox" checked="checked" name="F"><span class="label" title="Force insertions to be always skipped. Enabling this option is generally beneficial but may cause an excess of gaps if the guide tree is incorrect">trust insertions (+F)</span>'+
-		  '<br><input type="checkbox" name="nomissing"><span class="label" title="Do not treat gaps as missing data. Use +F for terminal gaps">no missing data</span>'+
-		  '<div class="sectiontitle small"><span>alignment model parameters</span></div>'+
-		  '<div data-bind="visible:isdna"><input type="checkbox" name="translate">'+
-		    '<span class="label" title="Translate and align cDNA with protein or codon model">align as</span>'+
-		      ' <select name="translateto" data-bind="options:transopt,optionsText:\'t\',optionsValue:\'v\'"></select>'+
-			'<br><span class="label" title="Default values are empirical, based on the input data">DNA base frequencies</span>'+
-			' <input type="text" name="A" placeholder="A"><input type="text" name="C" placeholder="C"><input type="text" name="G" placeholder="G"><input type="text" name="T" placeholder="T">'+
-			'<br><span class="label" title="Transition/transversion rate ratio in substitution model">K</span> <input type="text" name="kappa" class="num" placeholder="2">'+
-			' <span class="label" title="Purine/pyrimidine rate ratio in substitution model">P</span> <input type="text" name="rho" class="num" placeholder="1"></div>'+
-		  '<span class="label" title="Gap opening rate">gap opening</span> <input type="text" name="gaprate" style="width:45px" data-bind="attr:{placeholder:gaprate}">'+
-			' <span class="label" title="Gap extension probability">gap extension</span> <input type="text" name="gapext" data-bind="attr:{placeholder:gapext}" style="width:40px">'+
-		  '<div data-bind="visible:iterate" class="sectiontitle small"><span class="label" title="The optimization score is used to assess an alignment iteration result">optimization scoring</span></div>'+
-		  '<div data-bind="visible:iterate"><span class="label" title="Indel penalties for alginment scoring (with substitution penalty as 1)">indels with length</span> 1:'+
-		    '<input type="text" name="ind1" placeholder="6" class="num"> 2:<input type="text" name="ind2" placeholder="8" class="num"> 3:<input type="text" name="ind3" placeholder="9" class="num"> 4+:<input type="text" name="ind4" placeholder="10" class="num"></div>'+
-		  '<hr><span class="label" title="Specifing a seed number allows reproducing alignment results">random number seed</span> <input type="text" name="seed">'+
-		  '<br><input type="checkbox" name="uselogs"><span class="label" title="Slow, but may be needed for very large number of sequences">use log space</span></div>');
-		optform.append(tunetitle,tunediv);
-		var optdiv = $('<div class="insidediv" style="display:none">').append(optform);
+		var infospan = $('<span class="note" style="display:none;margin-left:20px" data-bind="text:note"></span>');
+		var opttitle = expandtitle({title:'Edit options', desc:'Click to toggle options', onshow:function(){infospan.fadeIn()}, onhide:function(){infospan.fadeOut()}}).append(infospan);
 		
+		var writetarget = (exportmodel.savetargets().length>1?'<span class="label" title="Specify the saving place '+
+		'for the new analysis in the library, relative the to the input (currently open) analysis">Save as</span> '+
+		'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':
+		'Will be saved as new')+' analysis in the <a onclick="dialog(\'library\')">library</a>.';
+		exportmodel.savetarget(exportmodel.savetargets()[exportmodel.savetargets().length-1]);
+		
+		var inclhidden = '<br><input name="includehidden" type="checkbox" data-bind="checked:exportmodel.includehidden">'+
+		'<span class="label" title="You can exclude data from analysis by column collapsing">include hidden columns</span><hr>';
+				
+		var optform = $('<form id="alignoptform" onsubmit="return false"></form>');
+		
+		if($.isEmptyObject(treesvg)){ paganmodel.on.newtree(true); var treedis = 'disabled=""'; } //new tree needed
+		else treedis = '';
+		optform.append('<input type="checkbox" name="newtree" data-bind="checked:on.newtree" '+treedis+'><span class="label" title="Create a new phylogenetic tree to guide the sequence alignment process (uncheck to use the current tree)">create a guidetree</span>');
+		var treetitle = expandtitle({title:'More options', desc:'Tree manipulation options', inline:true});
+		var treediv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		'<span data-bind="visible:on.newtree"><input type="checkbox" name="raxml-tree" data-bind="enable:on.newtree">'+
+		'<span class="label" title="use RAxML for guide tree computation (default: BppDist)">create RAxML tree</span><br></span>'+
+		'<span class="label" title="scale tree branches">scale</span> <input type="text" name="scale-branches"> '+
+		'<span class="label" title="truncate tree branches">truncate</span> <input type="text" name="truncate-branches" placeholder="0.2"> tree branches<br>'+
+		'Use <input type="checkbox" name="real-branches" data-bind="checked:on.realb"><span class="label" title="use real tree branch lengths">real</span> '+
+		'<span data-bind="visible:!on.realb()">or <span class="label" title="fixed length for tree branches">fixed</span> <input type="text" name="fixed-branches" data-bind="disable:on.realb"></span> branch lengths<br>'+
+		'<span class="label" title="minimum length for tree branches">min. branch length</span> <input type="text" name="min-branch-length">');
+		optform.append(treetitle,treediv);
+		
+		optform.append('<br><input type="checkbox" checked="checked" name="anchor"><span class="label" title="Use Exonerate anchoring to speed up alignment">alignment anchoring</span>');
+		var anchortitle = expandtitle({title:'More options', desc:'Exonerate anchoring options', inline:true});
+		var anchordiv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		'<span class="label" title="Exonerate hit length for anchor">exonerate hit length</span> <input type="text" name="exonerate-hit-length" placeholder="30"> '+
+		'<span class="label" title="Exonerate hit score for anchor">exonerate hit score</span> <input type="text" name="exonerate-hit-score"><br>'+
+		'<span class="label" title="anchors offset for alignment">anchors offset</span> <input type="text" name="anchors-offset" placeholder="15"> '+
+		'<span class="label" title="anchoring coverage threshold for skipping">anchoring threshold</span> <input type="text" name="anchoring-threshold" placeholder="0.50"><br>'+
+		'<input type="checkbox" name="use-prefix-anchors" data-bind="checked:on.useprefix"><span class="label" title="use prefix approach to anchor alignment">use prefix anchors</span> '+
+		'<span data-bind="visible:on.useprefix">with <span class="label" title="prefix hit length for anchor">prefix hit length</span> <input type="text" name="prefix-hit-length" placeholder="30" data-bind="enable:on.useprefix">');
+		optform.append(anchortitle,anchordiv);
+		
+		filescontent = {}; model.filestype('');
+		var filediv = $('<div><div class="sectiontitle small"><span>Alignment extension</span></div></div>');
+		var filedrag = $('<div class="filedrag">Drag query file here</div>');
+		filedrag.bind('dragover',function(evt){ //file drag area
+			filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+    		evt.originalEvent.dataTransfer.dropEffect = 'copy';
+    	}).bind('dragleave',function(evt){
+			filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+    	}).bind('drop',function(evt){
+    		filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+    		checkfiles(evt.originalEvent.dataTransfer.files,{mode:'noimport',onefile:true,silent:true});
+    	});
+    	var or = $('<span style="display:inline-block;font-size:18px;"> or </span>');
+		var importbtn = $('<a class="button" style="vertical-align:0">Import</a>');
+		importbtn.click(function(e){ return dialog('import',{mode:'noimport',onefile:true}); });
+		var importdiv = $('<div data-bind="visible:!model.filestype()">').append(filedrag, or, importbtn);
+		
+		var filelist = $('<div data-bind="visible:model.filestype">Extend with <img class="icn" src="images/file.png"> <span data-bind="text:model.filesname"></span></div>');
+		var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;">'+svgicon('close')+'</span>');
+		filedel.click(function(e){ filescontent={}; model.filestype(''); return false; });
+		var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{filename:model.filesname})}">View</a>');
+		filelist.append(filedel, fileview); filediv.append(importdiv, filelist);
+
+		var extentitle = expandtitle({title:'Alignment extension options', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
+		var extendiv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		'Correct for <input type="checkbox" name="454"><span class="label" title="correct homopolymer error (DNA)">454</span> '+
+		'<input type="checkbox" name="homopolymer"><span class="label" title="correct homopolymer error (more agressively)">homopolymer</span> errors.<br>'+
+		'<input type="checkbox" name="use-consensus"><span class="label" title="use consensus for query ancestors">use consensus</span> '+
+		'<input type="checkbox" name="build-contigs"><span class="label" title="build contigs of query clusters">build contigs</span><br>'+
+		'<input type="checkbox" name="test-every-node"><span class="label" title="test every node for each query">test every node</span> '+
+		'<input type="checkbox" name="upwards-search"><span class="label" title="stepwise search from root">upwards search</span><br>'+
+		'Use <input type="checkbox" name="fast-placement"><span class="label" title="use Exonerate to quickly assign queries to nodes">fast placement</span> '+
+		'<input type="checkbox" name="very-fast-placement"><span class="label" title="shorthand for fast heuristic settings">very fast placement</span><br>'+
+		'<input type="checkbox" name="score-only-ungapped"><span class="label" title="score query placement only on ungapped sites">score only ungapped sites</span> '+
+		'with <span class="label" title="max. ungapped proportion">max. proportion</span> <input type="text" name="score-ungapped-limit" placeholder="0.1"><br>'+
+		'<input type="checkbox" name="prune-extended-alignment" data-bind="checked:on.pruneext"><span class="label" title="remove closely related sequences">prune extended alignment</span> '+
+		'<span data-bind="visible:on.pruneext"><br>and keep <input type="text" name="prune-keep-number" placeholder="15" data-bind="enable:on.pruneext"> '+
+		'<span class="label" title="keep N most distantly related sequences">sequences</span> or '+
+		'<span class="label" title="remove sequences with distance below threshold">with distance over</span> <input type="text" name="prune-keep-threshold" data-bind="enable:on.pruneext"><br></span>'+
+		'or <input type="checkbox" name="prune-all"><span class="label" title="remove all reference sequences">prune all reference</span><br>'+
+		'<input type="checkbox" name="trim-extended-alignment" data-bind="checked:on.trimext"><span class="label" title="remove terminal reference sequences">trim extended alignment</span> '+
+		'<span data-bind="visible:on.trimext"><span class="label" title="trim distance around queries">and keep</span> '+
+		'<input type="text" name="trim-keep-sites" placeholder="15" data-bind="enable:on.trimext"> sites</span>');
+		
+		var extentitle2 = expandtitle({title:'Additional options', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
+		var extendiv2 = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		'<input type="checkbox" name="pair-end"><span class="label" title="connect paired reads (FASTQ)">pair end reads</span> '+
+		'<input type="checkbox" name="pacbio"><span class="label" title="correct for missing data in PacBio reads (DNA)">pacbio</span> '+
+		'<input type="checkbox" name="show-contig-ancestor"><span class="label" title="fill contig gaps with ancestral sequence">add ancestral seq. to contig</span><br>'+
+		'Include in contig <span class="label" title="threshold for inclusion in contig">minimum</span> <input type="text" name="consensus-minimum" placeholder="5"> '+
+'<span class="label" title="threshold for inclusion in contig">with proportion</span> <input type="text" name="consensus-minimum-proportion" placeholder="0.5"><br>'+
+		'Test every <input type="checkbox" name="test-every-internal-node"><span class="label" title="test every internal node for each query">internal node</span> '+
+		'<input type="checkbox" name="test-every-terminal-node"><span class="label" title="test every terminal node for each query">terminal node</span><br>'+
+		'<span class="label" title="evolutionary distance from pseudo-root">query root distance</span> <input type="text" name="query-distance" placeholder="0.1"> '+
+		'<input type="checkbox" name="one-placement-only"><span class="label" title="place only once despite equally good hits">only one placement</span><br>'+
+		'<input type="checkbox" name="overlap-with-reference" data-bind="checked:on.refoverlap"><span class="label" title="require overlap with reference">Require query overlap with reference</span> '+
+		'<span data-bind="visible:on.refoverlap">for at least <span class="label" title="overlap threshold for query and reference">overlap</span> <input type="text" name="min-query-overlap" placeholder="0.5" data-bind="enable:on.refoverlap"> and with '+
+		'<input type="text" name="min-query-identity" placeholder="0.5" data-bind="enable:on.refoverlap"> <span class="label" title="identity threshold for aligned sites">identity</span></span><br>'+
+		'<span class="label" title="paired read spacer extension probability (DNA)">paired-read gap extension</span> <input type="text" name="pair-read-gap-extension"><br>'+
+		'<input type="checkbox" name="no-fastq" data-bind="checked:on.nofastq"><span class="label" title="do not use Q-scores">Do not use</span> '+
+		'<span data-bind="visible:!on.nofastq()">or <span class="label" title="threshold to mask low Q-score sites">require min.</span> <input type="text" name="qscore-minimum" placeholder="10" data-bind="disable:on.nofastq"> </span>fastq quality score<br>'+
+		'<input type="checkbox" name="perfect-reference"><span class="label" title="assume perfect reference alignment">perfect reference</span></div>');
+		extendiv.append(extentitle2,extendiv2);
+		optform.append(filediv,extentitle,extendiv);
+
+		var exontitle = expandtitle({title:'Exonerate options', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
+		var exondiv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		'<input type="checkbox" name="exhaustive-placement"><span class="label" title="if Exonrate fails, use PAGAN to place the query">exhaustive placement</span><br>'+
+		'<input type="checkbox" name="use-exonerate-local" data-bind="checked:on.useexonloc"><span class="label" title="use Exonerate local to map queries to nodes">use Exonerate local</span> '+
+		'<span data-bind="visible:on.useexonloc"><span class="label" title="keep best number of local matches">and keep</span> '+
+		'<input type="text" name="exonerate-local-keep-best" placeholder="5" data-bind="enable:on.useexonloc"> '+
+		'<span class="label" title="keep local matches above a specific % of the best score">or above</span> '+
+		'<input type="text" name="exonerate-local-keep-above" data-bind="enable:on.useexonloc">% of best matches</span><br>'+
+		'<input type="checkbox" name="use-exonerate-gapped" data-bind="checked:on.useexongap"><span class="label" title="use Exonerate gapped to map queries to nodes">use Exonerate gapped</span> '+
+		'<span data-bind="visible:on.useexongap"><span class="label" title="keep best number of gapped matches">and keep</span> '+
+		'<input type="text" name="exonerate-gapped-keep-best" placeholder="1" data-bind="enable:on.useexongap"> '+
+		'<span class="label" title="keep gapped matches above specific % of the best score">or above</span> '+
+		'<input type="text" name="exonerate-gapped-keep-above" data-bind="enable:on.useexongap">% of best matches</span><br>'+
+		'<input type="checkbox" name="keep-despite-exonerate-fails"><span class="label" title="keep queries that Exonerate fails to align">keep Exonerate failed queries</span></div>');
+		optform.append(exontitle,exondiv);
+
+		var piletitle = expandtitle({title:'Pileup options', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
+		var pilediv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		'<input type="checkbox" name="pileup-alignment"><span class="label" title="make pileup alignment">pileup alignment</span> '+
+		'<input type="checkbox" name="compare-reverse"><span class="label" title="test also reverse-complement and keep better (DNA)">compare with reverse-complement</span><br>'+
+		'<input type="checkbox" name="find-best-orf" data-bind="checked:on.findorf"><span class="label" title="translate and use best ORF (DNA)">find best ORF</span> '+
+		'<span data-bind="visible:on.findorf"> with <span class="label" title="minimum ORF length to be considered (DNA)">min. length</span> <input type="text" name="min-orf-length" placeholder="100" style="width:33px" data-bind="enable:on.findorf"> '+
+		'and <span class="label" title="minimum ORF coverage to be considered (DNA)">min. coverage</span> <input type="text" name="min-orf-coverage" data-bind="enable:on.findorf"></span><br>'+
+		'<span class="label" title="attempts to find overlap">query cluster attempts</span> <input type="text" name="query-cluster-attempts" placeholder="1"> '+
+		'<input type="checkbox" name="inlude-parent-in-contig"><span class="label" title="include also ancestral parent in contigs">inlude parent in contig</span><br>'+
+		'<input type="checkbox" name="use-duplicate-weights"><span class="label" title="use specific number of duplicates to weight consensus counts">use duplicate weights</span> '+
+		'<input type="checkbox" name="no-read-ordering"><span class="label" title="do not order reads by duplicate number">no read ordering</span> '+
+		'<input type="checkbox" name="output-consensus"><span class="label" title="output contig consensus alone">output consensus</span></div>');
+		optform.append(piletitle,pilediv);
+
+		var aligntitle = expandtitle({title:'Alignment model parameters', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
+		var aligndiv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
+		'<span class="label" title="Number of skips to confirm as insertion">Number of skips</span> <input type="text" name="any-skips-confirm-insertion">, '+
+		'<span class="label" title="Number of skips from match sites to confirm as insertion">from match sites</span> <input type="text" name="match-skips-confirm-insertion">,<br>'+
+		'<span class="label" title="total branch length skipped to confirm as insertion">with total branch length</span> <input type="text" name="branch-length-confirm-insertion"> to confirm as insertion.<br>'+
+		'<span data-bind="visible:!on.keepedges()"><span class="label" title="weighted (by branch length unit) probability for site(s) being skipped over and later matched (default)">distance-weighted</span> <input type="text" name="branch-skip-weight-per-distance" data-bind="disable:on.keepedges"> '+
+		'or <span class="label" title="fixed probability for site(s) being skipped over and later matched">fixed</span> <input type="text" name="branch-skip-penalty-per-branch" data-bind="disable:on.keepedges"> '+
+		'site skip, or</span> <input type="checkbox" name="keep-all-edges" data-bind="checked:on.keepedges"><span class="label" title="nothing of those above - keep everything forever">keep all edges</span>'+
+		'<div class="sectiontitle small"><span>DNA/protein options</span></div>'+
+		'<span class="label" title="insertion-deletion rate">indel rate</span> <input type="text" name="indel-rate"> '+
+		'<input type="checkbox" name="no-terminal-edges"><span class="label" title="assume terminal gaps as missing data">terminal gaps are missing data</span><br>'+
+		'extension probability of <span class="label" title="gap extension probability">gaps</span> <input type="text" name="gap-extension"> '+
+		'and <span class="label" title="terminal gap extension probability">terminal gaps</span> <input type="text" name="end-gap-extension"><br>'+
+		'<span data-bind="visible:true"><input type="checkbox" name="translate" data-bind="checked:on.translate">'+
+			'<span class="label" title="Translate and align cDNA with protein or codon model">align as</span>'+
+			' <select name="translateto" data-bind="options:model.transopt,optionsText:\'t\',optionsValue:\'p\',enable:on.translate" style="margin-right:20px"></select> '+
+		'<span class="label" title="Transition/transversion rate ratio in substitution model (kappa)">K</span> <input type="text" name="dna-kappa"> '+
+		'<span class="label" title="Purine/pyrimidine rate ratio in substitution model (rho)">P</span> <input type="text" name="dna-rho"><br></span>'+
+		'<input type="checkbox" name="use-aa-groups"><span class="label" title="reconstruct amino-acid parsimony with 51 groups">use amino-acid groups</span></div>');
+		optform.append(aligntitle,aligndiv);
+		
+		var optdiv = $('<div class="insidediv" style="display:none">').append(writetarget, inclhidden, optform);
 		var alignbtn = $('<a class="button orange">Start alignment</a>');
-		alignbtn.click(function(){ sendjob({form:$('form',optdiv)[0],btn:alignbtn,name:nameinput.val()}); });
+		alignbtn.click(function(){ sendjob({form:$('form',optdiv)[0],btn:alignbtn,name:nameinput.val(),pagan:true}); });
 		
-		var dialogwindow = makewindow("Make alignment",['Current sequence data will be aligned with <a href="http://prank-msa.googlecode.com" target="_blank">Prank</a> aligner.<br><hr>',namespan,opttitle,optdiv,'<br>'],{id:type, btn:alignbtn, icn:'icon_prank', nowrap:true});
-		ko.applyBindings(model,dialogwindow[0]);
+		var dialogwindow = makewindow("Pagan alignment",[header,namespan,presets,opttitle,optdiv,'<br>'],{id:type, btn:alignbtn, icn:'icon_prank', nowrap:true});
+		ko.applyBindings(paganmodel,dialogwindow[0]);
 	}
 // notifications & submitted job status window
 	else if(type=='jobstatus'){
@@ -3295,12 +3507,11 @@ function dialog(type,options){
 		'The tree phylogeny has been changed and the sequence alignment needs to be updated to reflect the new tree.<br>'+
 		'<a class="button square red" data-bind="visible:treebackup" onclick="model.selectundo(\'firsttree\'); model.undo(); return false;" title="Undo tree modifications">Revert changes</a></div>');
 		var realignbtn = $('<a class="button square orange" title="Realign current dataset with PRANK">Realign</a>');
-		var optform = librarymodel.openid()? $('<form id="realignoptform" onsubmit="return false">The realignment will <select name="writemode">'+
-		(librarymodel.openparent()?'<option value="sibling" checked="checked">branch parent</option>':'')+
-		'<option value="child" '+(librarymodel.openparent()?'':'checked="checked"')+'>branch current</option>'+
-		'<option value="overwrite">overwrite current</option></select> analysis files in the <a onclick="dialog(\'library\'); return false;">library</a>.</form>') : [''];
-		realignbtn.click(function(){ sendjob({form:optform[0],btn:realignbtn,realign:true}) });
-		treenotif.append(realignbtn,optform,'<hr>');
+		var writetarget = 'Realigned data will be saved as '+(exportmodel.savetargets().length?'<select data-bind="visible:exportmodel.savetargets().length>1, options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':'new')+
+		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
+		exportmodel.savetarget(exportmodel.savetargets()[0]);
+		realignbtn.click(function(){ sendjob({btn:realignbtn,realign:true}) });
+		treenotif.append(realignbtn,writetarget,'<hr>');
 		
 		var ancnotif = $('<div data-bind="visible:noanc" class="sectiontext">'+
 		'Current phylogenetic tree is missing sequences for ancestral nodes. Wasabi can use the PRANK aligner to infer the ancestral sequences and add it to the dataset.<br>'+
@@ -3347,7 +3558,7 @@ function dialog(type,options){
 		  '<span class="note">Name:</span> <span class="logline" data-bind="text:name"></span><br>'+
 		  '<span class="note">Status:</span> <span data-bind="text:[status(),\'Failed\',\'Finished\'][st()], css:{red:st()==1,label:true},'+
 		  'attr:{title:st()==1?(outfile()?\'Job cancelled. Exit code \'+status():\'No output file\'):\'No errors\'}"></span><br>'+
-		  '<span class="note">Job type:</span> <span data-bind="text:$data.type?type():\'Prank alignment\'"></span>'+
+		  '<span class="note">Job type:</span> <span data-bind="text:$data.type?type():\'Realignment\'"></span>'+
 		  '<a class="button itembtn" data-bind="text:[\'Kill\',\'Delete\',\'Import\'][st()], css:{red:st()!=2},'+
 		    'attr:{title:[\'Cancel job\',\'Delete data\',\'Import to library\'][st()]},'+
 		    'click:st()==2?$parent.importitem:$parent.removeitem"></a><br>'+
@@ -3377,8 +3588,8 @@ function dialog(type,options){
     	'attr:{title:sortasc()?\'ascending\':\'descending\'}"></span></span>');
 		
     	var content = $('<div class="insidediv" data-bind="foreach:{data:libraryview,afterAdd:addanim}">'+
-    	'<div class="itemdiv" style="height:" data-bind="dragdrop:$data.id,css:{activeitem:id==$parent.openid(),compact:settingsmodel.minlib,shared:$data.shared},attr:{itemid:$data.id}">'+
-    	'<div class="draghandle" title="Drag & drop to move library items around"><span>&#x22EE;</span></div><div class="itemcontent">'+
+    	'<div class="itemdiv" data-bind="dragdrop:$data.id,css:{activeitem:id==$parent.openid(),compact:settingsmodel.minlib,shared:$data.shared},attr:{itemid:$data.id}">'+
+    	'<div class="draghandle" data-bind="visible:!$parent.getitem($data.parentid()).shared" title="Drag & drop to move library items around"><span>&#x22EE;</span></div><div class="itemcontent">'+
     	  '<span class="note">Name:</span> <input type="text" class="hidden" data-bind="value:name" title="Click to edit name"><br>'+
 		  '<span class="note">Last opened:</span> <span data-bind="text:msectodate($data.imported)"></span><br>'+
 		  '<span class="note">Analysis ID:</span> <span class="rotateable">&#x25BA;</span><span class="action" title="Browse data files" data-bind="click:$parent.showfile, text:id"></span><br>'+
@@ -3549,7 +3760,6 @@ function dialog(type,options){
 	}
 //translate sequnces
 	else if(type=='translate'){
-		var windowid = 'importcdna';
 		var header = '<div style="width:420px;margin-bottom:20px">Display the sequences as <span class="buttongroup">'+
 		'<a class="button left disabled" onclick="translateseq(\'dna\')" data-bind="css:{pressed:seqtype()==\'dna\'||seqtype()==\'rna\',disabled:!dnasource()}">nucleotides</a>'+
 		'<a class="button middle" onclick="translateseq(\'codons\')" data-bind="css:{pressed:seqtype()==\'codons\',disabled:!dnasource()}">codons</a>'+
@@ -3558,7 +3768,6 @@ function dialog(type,options){
 		var dnaimport = $('<div data-bind="visible:!dnasource()">To backtranslate a protein sequence, Wasabi needs the cDNA sequences used for the protein alignment.<br>'+
 		'Drag or select data file(s) with the source cDNA.<br></div>');
 		var filedrag = $('<div class="filedrag">Drag cDNA file here</div>');
-		var fileroute = window.File && window.FileReader && window.FileList ? 'localread' : 'upload';
 		filedrag.bind('dragover',function(evt){ //file drag area
 			filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
     		evt.originalEvent.dataTransfer.dropEffect = 'copy';
@@ -3566,19 +3775,17 @@ function dialog(type,options){
 			filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
     	}).bind('drop',function(evt){
     		filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-    		checkfiles(evt.originalEvent.dataTransfer.files,fileroute,windowid);
+    		checkfiles(evt.originalEvent.dataTransfer.files,{windowid:type,mode:'importcdna'});
     	});
 		var fileinput = $('<input type="file" multiple style="opacity:0" name="file">');
 		var form = $('<form enctype="multipart/form-data" style="position:absolute">');
-		fileinput.change(function(){ checkfiles(this.files,fileroute,windowid) });
+		fileinput.change(function(){ checkfiles(this.files,{windowid:type,mode:'importcdna'}) });
 		var selectbtn = $('<a class="button" style="vertical-align:0">Select files</a>');
 		selectbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
 		var or = $('<span style="display:inline-block;font-size:18px;"> or </span>');
 		form.append(fileinput); filedrag.append(form); dnaimport.append([filedrag,or,selectbtn]);
-		var dialogwrap = $('<div id="'+windowid+'" class="popupwrap '+(settingsmodel.windowanim()?'zoomin':'')+'"></div>');
-		$("#page").append(dialogwrap);
-		var windowdiv = makewindow("Translate sequences",[header,dnaimport],{backfade:false,flipside:'front',icn:'translate.png',btn:'OK'},dialogwrap)[0];
-		makewindow("Importing cDNA",[],{backfade:false,flipside:'back',icn:'import.png'},dialogwrap);
+		var windowdiv = makewindow("Translate sequences",[header,dnaimport],{backfade:false,flipside:'front',icn:'translate.png',btn:'OK',id:type})[0];
+		makewindow("Importing cDNA",[],{backfade:false,flipside:'back',icn:'import.png',id:type});
 		ko.applyBindings(model,windowdiv);
 	}
 //about/help/contact window
@@ -3715,17 +3922,23 @@ function sendjob(options){
 	var optdata = {btn:alignbtn[0]};
 	if(options.form) optdata.form = options.form;
 	var senddata = {};
-	senddata.dots = true;
-	senddata.name = options.name||exportmodel.savename()||'PRANK realignment';
+	senddata.name = options.name||exportmodel.savename()||'Realignment';
+	senddata.writemode = exportmodel.savetarget().type;
 	var exportdata = parseexport('fasta',{makeids:true,includehidden:exportmodel.includehidden()}); //{file:fastafile,nameids:{name:id}}
 	senddata.fasta = exportdata.file;
 	var idnames = {};
 	$.each(exportdata.nameids, function(name,id){ idnames[id] = name; });
 	senddata.idnames = idnames;
 	if(!$.isEmptyObject(treesvg) && (options.realign || options.ancestral || !options.form['newtree']['checked'])) senddata.newick = parseexport('newick',{tags:true,nameids:exportdata.nameids});
-	if(options.realign) senddata.update = true;
+	if(options.pagan){
+		senddata.pagan = true;
+		if(model.filesname) senddata.queryfile = filescontent[model.filesname];
+	} else {
+		senddata.dots = true;
+		if(options.realign) senddata.update = true;
+		if(options.ancestral){ senddata.e = true; if(senddata.id) senddata.writemode = 'overwrite'; }
+	}
 	if(librarymodel.openid()) senddata.id = librarymodel.openid();
-	if(options.ancestral){ senddata.e = true; if(senddata.id) senddata.writemode = 'overwrite'; }
 	if(librarymodel.openparent()) senddata.parentid = librarymodel.openparent();
 	var nodeinfo = {};
 	$.each(leafnodes,function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
@@ -3766,7 +3979,7 @@ function sendjob(options){
 
 //import ensembl data
 function ensemblimport(){
-	filescontent = {};
+	filescontent = {}; model.filestype('');
 	var idformat = ensemblmodel.idformat().url;
 	var ensid = ensemblmodel.ensid() || ensemblmodel.idformat().example;
 	var ensbtn = document.getElementById('ensbtn');
@@ -3814,11 +4027,13 @@ function ensemblimport(){
 			if(typeof(ensdata)=='object'){ //JSON => gene homology data
 				if(!ensdata.data) return showerror('Data is in unexpected format. Try other options.');
 				filescontent[ensid+'.json'] = ensdata;
+				model.filestype('seq:json');
 			} else { //XHTML => genetree data
 				if(ensdata.indexOf('phyloxml')==-1) return showerror('Data is in unexpected format. Try other options.');
 				var xmlstr = ensdata.substring(ensdata.indexOf('<pre>'),ensdata.indexOf('</pre>')+6);
 				xmlstr = $(xmlstr).text().replace(/\s*\n\s*/g,'');
 				filescontent[ensid+'.xml'] = xmlstr;
+				model.filestype('seq:phyloxml tree:phyloxml');
 			}
 			setTimeout(function(){ parseimport({source:'Ensembl',importbtn:$(ensbtn),importurl:urlstring,ensinfo:{type:idformat,id:ensid}}) },600);
 		}
@@ -3858,9 +4073,16 @@ function ensemblid(ensdata){
 }
 
 /* Validation of files in import dialog */
-function checkfiles(filearr,fileroute,windowid,importurl){
-	if(!windowid) windowid = 'import';
-	var infowindow = $('#'+windowid).length? $('#'+windowid) : makewindow("Importing data",[],{id:windowid,icn:'import.png',btn:false});
+function checkfiles(filearr,options){
+	if(!filearr) filearr = [];
+	else if(!filearr[0]) filearr = [filearr];
+	if(!options) options = {};
+	if(options.onefile && filearr.length>1) filearr = [filearr[0]];
+	var noimport = options.noimport||(options.mode&&options.mode=='noimport');
+	var windowid = options.windowid||'import';
+	var importurl = options.url||false;
+	var fileroute = options.fileroute || (window.File && window.FileReader && window.FileList ? 'localread' : 'upload');
+	var infowindow = $('#'+windowid).length? $('#'+windowid) : makewindow("Importing data",[],{id:windowid,icn:'import.png',btn:false,hidden:options.silent});
 	var backside = $('.back',infowindow).length;
 	var infodiv = backside? $('.back .windowcontent', infowindow) : $('.windowcontent', infowindow);
 	if(!infodiv.length) return;
@@ -3868,14 +4090,14 @@ function checkfiles(filearr,fileroute,windowid,importurl){
 	var spinimg = $('<img class="icn small" src="images/spinner.gif">');
 	var warnimg = $('<img class="icn small" src="images/warning.png">');
 	
-	// list files //
+	//phase 1: display list of files //
 	var ajaxcalls=[];
 	if(!$('ul',infodiv).length){
 		var btn = $('<a class="button" style="padding-left:15px">&#x25C0; Back</a>');
 		btn.click(function(){
 			$.each(ajaxcalls,function(c,call){ if(call.readyState!=4){call.abort()}});
 			ajaxcalls = []; //cancel hanging filetransfers
-			filescontent = {};
+			filescontent = {}; model.filestype('');
 			infowindow.removeClass('finished flipped');
 			setTimeout(function(){ infowindow.addClass('finished') },900);
 		});
@@ -3887,99 +4109,113 @@ function checkfiles(filearr,fileroute,windowid,importurl){
 		});
 		var filestitle = filearr.length? '<b>Files to import:</b><br>' : '';
 		infodiv.empty().append(filestitle,list,'<br><span class="errors note"></span><br>',btn);
-		if(backside) infowindow.addClass('flipped');
+		if(backside && !options.silent) infowindow.addClass('flipped');
 	}
 	var errorspan = $('span.errors',infodiv);
 	
 	var namelist = [];
 	var checkprogress = function(){ //check if all files are in filescontent{}
 		if(Object.keys(filescontent).length==filearr.length){
-        	ajaxcalls = []; checkfiles(namelist,fileroute,windowid,importurl);
+        	ajaxcalls = []; checkfiles(namelist,options); //go to phase2
         }
 	};
-	var showerror = function(msg){ errorspan.html('<span class="red">'+msg+'</span>'); };
+	var showerror = function(msg){
+		errorspan.html('<span class="red">'+msg+'</span>');
+		if(options.silent){
+			infowindow.css('display','block');
+			if(backside) infowindow.addClass('flipped');
+		}
+		return false;
+	};
 	
-  	// read files in //
-  	if(!filearr.length){ showerror('There is nothing to import'); return; }
+  	//phase 1: load filedata to global filescontent{} //
+  	if(!filearr.length) return showerror('There is nothing to import');
+  	else if(typeof(filearr[0])=='object'){ filescontent = {}; model.filestype(''); }//first round
+  	
 	if($.isEmptyObject(filescontent)){
 		errorspan.text('Loading files...');
-		if(fileroute=='upload'||fileroute=='download'){ //via backend server
-			if(model.offline()){
-  				showerror('This file operation needs a backend server which is currently offline'); return;
+		$.each(filearr,function(i,file){
+			namelist.push(file.name||'unnamed'+i);
+  			$('li.file span.icon:eq('+i+')',infodiv).empty().append(spinimg);
+  			var senddata = '';
+  			if(file.share){
+  				var vars = file.share;
+  				if(vars.host=='http://'+window.location.host){
+  					setTimeout(function(){getfile({id:vars.share,file:vars.file,btn:errorspan,noimport:noimport})},500);
+  					return false;
+  				} else if(vars.file){
+  					senddata = {fileurl:vars.host+"?type=text&share=true&getlibrary="+vars.share+"&file="+vars.file}
+  					importurl = senddata.fileurl;
+  					if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = vars.file;
+  				} else return showerror('URLs from extenal Wasabi servers need \'file=\' parameter'); 
   			}
-  			$.each(filearr,function(i,file){
-  				namelist.push(file.name);
-  				var senddata = {};
-  				if(fileroute=='upload'){ senddata = {upfile:file} }
-  				else if(file.share){
-  					var vars = file.share;
-  					importurl = file.url;
-  					if(~vars.file.indexOf('.xml') && vars.host=='http://'+window.location.host){
-  						setTimeout(function(){getfile({id:vars.share,share:file.name,file:vars.file,btn:errorspan})},500);
-  						return false;
-  					}else{
-  						senddata = {fileurl: vars.host+"?type=text&share=true&getlibrary="+vars.share+"&file="+vars.file}
-  					}
-  				}
-  				else if(file.url){
-  					senddata = {fileurl:file.url}
-  					importurl = file.url;
-  				}
-  				else{
-  					if(file.text) filescontent[file.name] = file.text;
-  					checkprogress();
-  					return true;
-  				}
-  				$('li.file span.icon:eq('+i+')',infodiv).empty().append(spinimg);
-  				var successfunc = function(data){
-        			$('li.file span.icon:eq('+i+')',infodiv).empty();
-        			filescontent[file.name] = (data);
-        			checkprogress();
-        		};
-        		var ajaxcall = communicate(fileroute=='upload'?'echofile':'geturl',senddata,{retry:true,error:showerror,success:successfunc});
-    			ajaxcalls.push(ajaxcall);
-    		});
-    	} else if(fileroute=='localread'){ //direct read
-    		$.each(filearr,function(i,file){
-    			namelist.push(file.name);
-    			var reader = new FileReader();  
+  			else if(file.url){
+  				senddata = {fileurl:file.url}
+  				importurl = file.url;
+  				if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = file.url.substring(file.url.lastIndexOf('/')+1);
+  			}
+  			else if(file.text){
+  				filescontent[file.name] = file.text;
+  				importurl = '';
+  				checkprogress();
+  			}
+  			else if(fileroute=='upload'){ senddata = {upfile:file} }
+  			else if(fileroute=='localread'){
+  				var reader = new FileReader(); 
     			reader.onload = function(evt){
     				filescontent[file.name] = evt.target.result;
     				checkprogress();
     		 	}
     		 	reader.readAsText(file);
-    		});
-  		}
+  			}
+  				
+  			var successfunc = function(data){
+        		$('li.file span.icon:eq('+i+')',infodiv).empty();
+       			filescontent[file.name] = data;
+       			checkprogress();
+       		};
+        		
+       		if(senddata){
+        		if(model.offline()){
+  					return showerror('Import of this file needs Wasabi server, which is currently offline');
+  				} else {
+       				ajaxcalls.push(communicate(fileroute=='upload'?'echofile':'geturl',senddata,{retry:true, error:showerror, success:successfunc}));
+        		}
+        	}
+    	});
   		return;
   	}
   
-	// check files //
+	//phase2: check files in filescontent{}//
 	var iconimg = '', accepted, rejected = [];
 	$.each(filescontent,function(name){
 		accepted = parseimport({filenames:[name],mode:'check'});
-		if(accepted){ iconimg = tickimg.clone(); }
+		if(accepted){ iconimg = tickimg.clone(); model.filestype(model.filestype()+' '+accepted); }
 		else{ rejected.push(name); iconimg = warnimg.clone(); }
 		$('li.file span.icon:eq('+filearr.indexOf(name)+')',infodiv).empty().append(iconimg);
 	});
 	
-	// import //
+	//phase2: import //
 	var importfunc = function(){
 		errorspan.text('Importing data...');
-		setTimeout(function(){ parseimport({source:fileroute,mode:windowid,importurl:importurl,dialog:infowindow}) }, 800);
+		var source = options.source||(importurl===false?fileroute:'download');
+		setTimeout(function(){ parseimport({source:source,mode:options.mode||windowid,importurl:importurl,dialog:infowindow}) }, 800);
 	};
+	
 	if(rejected.length){
 		var s = rejected.length>1? 's' : '';
-		var msg = '<span class="red">Cannot recognize the "!"-marked file'+s+'.</span><br>Please choose a different file';
+		var msg = 'Cannot recognize the "!"-marked file'+s+'.<br><span style="color:#666">Please choose a different file';
 		var acceptlen = Object.keys(filescontent).length-rejected.length;
-		if(acceptlen>0){
+		if(acceptlen>0 && !noimport){
 			$.each(rejected,function(r,name){ delete(filescontent[name]); });
 			var importbtn = $('<a class="button" style="padding-left:15px">Import</a>');
 			importbtn.click(function(){ importbtn.css('color','#999'); importfunc(); });
 			infodiv.append(importbtn);
 			msg += ',<br> or proceed to import the recognized file'+(acceptlen>1?'s':'');
 		}
-		errorspan.html(msg+'.');
+		return showerror(msg+'</span>.');
 	}
+	else if(noimport) closewindow(infowindow);
 	else importfunc();
 }
 
@@ -3990,6 +4226,7 @@ function getfile(opt){
 		opt.btn.html('<img class="icn" src="images/spinner.gif">');
 	}
     filescontent = {};
+    model.filestype('');
     var trycount = 0;
     var download = function(fileopt){
       if(!fileopt) fileopt = {};
@@ -4002,7 +4239,7 @@ function getfile(opt){
     	dataType: "text",
     	success: function(data){
     		if(typeof(fileopt.success)=='function'){ fileopt.success(data); }
-    		else if(!opt.skipimport){ //load and parse filedata for import
+    		else if(!opt.noimport){ //load and parse filedata for import
     			filescontent[filename.replace(/^.*[\\\/]/,'')] = data;
         		setTimeout(function(){ parseimport({source:'import', id:opt.id, importbtn:opt.btn, share:opt.share, name:opt.name}) }, 300);
         		if(settingsmodel.keepid()){
@@ -4010,7 +4247,7 @@ function getfile(opt){
         			localStorage.openfile = filename;
         		}
         	}
-        	else if(opt.btn) opt.btn.html('<pre>'+data+'</pre>'); //display filecontents inside a div
+        	else if(opt.btn && opt.btn.prop('tagName')=='DIV') opt.btn.html('<pre>'+data+'</pre>'); //display filecontents inside a div
     	},
     	error: function(xhrobj,status,msg){ 
         	if(!msg && status!="abort"){ //no response. try again
@@ -4023,7 +4260,7 @@ function getfile(opt){
         },
         xhr: function(){
  			var xhr = $.ajaxSettings.xhr();
- 			if(!opt.skipimport && opt.btn){
+ 			if(!opt.noimport && opt.btn){
  				xhr.tick = 1;
  				xhr.addEventListener('progress',function(d){ //listen for file download progress
         			if(d.total && !(xhr.tick%2)){
@@ -4039,7 +4276,7 @@ function getfile(opt){
 	  });
 	};
 	
-	if(!opt.skipimport && opt.id){ //library import. get (meta)>importmeta>main_file
+	if(!opt.noimport && opt.id){ //library import. get (meta)>importmeta>main_file
 		var libitem = librarymodel.getitem(opt.id);
 		var importpipeline  = function(){
 			if(!libitem){ //id not in library (shared id); get meta
@@ -4329,13 +4566,13 @@ function startup(response){
 	if(typeof(localStorage.collapse)!='undefined') toggletop(localStorage.collapse);
 	
 	communicate('getlibrary','',{success: function(){
-		if(urlvars.share){ //import from library
-			getfile({id:urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', share:true});
+		if(urlvars.id||urlvars.share){ //import from library
+			getfile({id:urlvars.id||urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', share:true});
 			//dialog('export',{exporturl:settingsmodel.userid+'?type=text&getlibrary='+urlvars.share+'&file='+urlvars.file+'&share=true'});
 		}
 		else if(urlvars.file){ getfile({file:urlvars.file}); } //import local file
 		else if(urlvars.url){ //import remote file
-			checkfiles([{name:urlvars.url.substr(urlvars.url.lastIndexOf('/')+1), url:urlstr.substr(urlstr.indexOf('url=')+4)}],'download','importurl');
+			checkfiles({url:urlstr.substr(urlstr.indexOf('url=')+4)});
 		}
 		else if(launchact=='import dialog'){ dialog('import'); } //launch import dialog
 		else if(launchact=='demo data'){ getfile({id:'example', file:'out.xml', share:true}); } //or load demo data (default)

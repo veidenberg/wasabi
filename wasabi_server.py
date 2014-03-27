@@ -38,7 +38,6 @@ if(os.path.isfile(os.path.join(appdir,'AppSettings.plist'))):
     wasabidir = os.path.realpath(os.path.join(wasabidir,'..','..')) #OSX bundle path
     osxbundle = True
 os.chdir(wasabidir)
-prankbin = os.path.join(appdir,'binaries','prank','prank')
 #for tracking library content
 job_queue = None
 libdirs = {}
@@ -98,7 +97,7 @@ logging.basicConfig(level=loglevel, filename=logfile, format='%(asctime)s - %(me
 #create linux shortcut
 if(sys.platform.startswith('linux') and linuxdesktop):
     try:
-    	deskfile = os.path.join(appdir,'wasabi.desktop')
+        deskfile = os.path.join(appdir,'wasabi.desktop')
         deskconf = ConfigParser.ConfigParser()
         deskconf.optionxform = str
         deskconf.read(deskfile)
@@ -221,7 +220,7 @@ def create_job_dir(d='', uid='', newlibrary=False, newfolder=False):
                     if(not os.path.isdir(dpath)): continue
                     lasttime = os.path.getmtime(dpath) #faulty in Windows?
                     dirage = (time.time()-lasttime)/86400
-                    if(dirage > userexpire): os.rmtree(apath(dpath,datadir,uid='skip'))
+                    if(dirage > userexpire): shutil.rmtree(apath(dpath,datadir,uid='skip'))
             except (OSError, IOError) as why: logging.error('Library cleanup failed: '+str(why))
     else: #create files for keeping metadata
         if newfolder: Metadata.create(newdir, name="new folder", imported=True)
@@ -451,10 +450,10 @@ class WasabiServer(BaseHTTPRequestHandler):
         emptyfolder = True if action=='save' and 'file' not in form else False
         
         if(not userid):
-        	if(currentid in libdirs): userid = getlibrarypath(currentid, getroot=True)
-        	else: userid = os.path.basename(create_job_dir(newlibrary=True))
-        	response["userid"] = userid
-        	
+            if(currentid in libdirs): userid = getlibrarypath(currentid, getroot=True)
+            else: userid = os.path.basename(create_job_dir(newlibrary=True))
+            response["userid"] = userid
+            
         parentdir = getlibrary(jobid=parentid, uid=userid, checkowner=True) if parentid else ''
         
         logging.debug("%s: userid=%s parentid=%s currentid=%s writemode=%s" % (action, userid, parentid, currentid, writemode))
@@ -480,13 +479,19 @@ class WasabiServer(BaseHTTPRequestHandler):
         if action == 'startalign': #start new alignment job
             infile = write_file(os.path.join(odir, 'input.fas'), form.getvalue('fasta',''))
             outfile = os.path.join(odir, 'out')
-            treefile = None
+            treefile = ''
+            queryfile = ''
+            pagan = form.getvalue('pagan','')
             logfile = os.path.join(odir, 'output.log')
             
-            if 'newick' in form :
-                treefile = write_file(os.path.join(odir, 'input.tree'), form.getvalue('newick',''))
+            if 'newick' in form: treefile = write_file(os.path.join(odir, 'input.tree'), form.getvalue('newick',''))
+            if 'queryfile' in form: queryfile = write_file(os.path.join(odir, 'query.fas'), form.getvalue('queryfile',''))
+            
+            for p in ['action','userid','id','parentid','name','writemode','idnames','ensinfo','nodeinfo','visiblecols', 'out','fasta','newick','newtree','queryfile','pagan']: #leave only aligner parameteres
+                if p in form: form[p].value = '' 
 
-            job = PrankJob(jobid, name, infile, outfile, treefile, logfile, form)
+            if pagan: job = PaganJob(jobid, name, infile, outfile, treefile, queryfile, logfile, form)
+            else: job = PrankJob(jobid, name, infile, outfile, treefile, logfile, form)
             
             metadata.update(job.json())
             job_queue.enqueue(jobid, job)
@@ -641,7 +646,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         filename = form.getvalue('filename','exported_data.txt')
         filepath = joinp(exportdir, filename, d=exportdir, uid=userid)
         if(os.path.isfile(filepath)):
-            filepath += '_'+len(os.listdir(exportdir))
+            filepath += '_'+str(len(os.listdir(exportdir)))
         filedata = form.getvalue('filedata','')
         exportfile = open(filepath,'wb')
         exportfile.write(filedata)
@@ -781,9 +786,9 @@ class WasabiServer(BaseHTTPRequestHandler):
             userid = form.getvalue('userid','') if useraccounts else ''
             
             if(action!='getlibrary'): logging.debug("Post: %s, userid=%s" % (action, userid))
-            if(useraccounts): #userid check
-                if(((not userid or userid not in libdirs) and action not in ['checkserver','errorlog','terminate','save']) or libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'):
-                    raise IOError(404,'Post '+action+' => Invalid user ID "'+userid)
+            if(useraccounts and action not in ['checkserver','errorlog','terminate','save']): #userid check
+                if(not userid or userid not in libdirs or libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'):
+                    raise IOError(404,'Post '+action+' => Invalid user ID:'+userid)
                     
             getattr(self, "post_%s" % action)(form, userid)
             
@@ -1113,9 +1118,9 @@ class Job(object):
 #Job class extension for prank alignment jobs
 class PrankJob(Job):
     def __init__(self, key, name, infile, outfile, treefile, logfile, prank_options):
-        global prankbin
         
         super(PrankJob, self).__init__(key, name)
+        prankbin = os.path.join(appdir,'binaries','prank','prank')
         
         self.files = {
             'infile'   : infile,
@@ -1199,6 +1204,81 @@ class PrankJob(Job):
         self.end(ret)
         logfile.close()
         self.unlock_status()
+        
+
+#Job class extension for Pagan alignment jobs
+class PaganJob(Job):
+    def __init__(self, key, name, infile, outfile, treefile, queryfile, logfile, pagan_options):
+        
+        super(PaganJob, self).__init__(key, name)
+        paganbin = os.path.join(appdir,'binaries','pagan','pagan')
+        
+        self.files = {
+            'infile'   : infile,
+            'outfile'  : outfile+'.xml',
+            'treefile' : treefile,
+            'queryfile' : queryfile,
+            'logfile'  : logfile
+        }
+        
+        self.params = [paganbin, '--outfile='+outfile, '--xml-nhx', '--events', '--output-ancestors']
+        
+        if queryfile:
+            self.params.append('--ref-seqfile='+infile)
+            self.params.append('--queryfile='+queryfile)
+            if treefile: self.params.append('--ref-treefile='+treefile)
+        else:
+            self.params.append('--seqfile='+infile)
+            if treefile: self.params.append('--treefile='+treefile)
+        
+        if not pagan_options.getvalue('anchor',''): self.params.append('--no-anchors')
+        else: pagan_options['anchor'].value = ''
+        
+        if pagan_options.getvalue('translate',''):
+            self.params.append('--'+pagan_options.getvalue('translateto','translate'))
+            pagan_options['translate'].value = ''
+            pagan_options['translateto'].value = ''
+            
+        for opt in pagan_options:
+            val = pagan_options[opt].value
+            if not val: continue
+            if(val=='on' or val=='true'): self.params.append('--'+opt)
+            else: self.params.append('--'+opt+'='+val)
+    
+    def program(self): return "PAGAN"
+        
+    def parameters(self): return ','.join(os.path.basename(p) for p in self.params[1:])
+
+    def infile(self): return self.files['infile']
+    
+    def outfile(self): return self.files['outfile']
+
+    def logfile(self): return self.files['logfile']
+    
+    def process(self):
+        self.lock_status()
+
+        if self.job_status == Job.TERMINATED:
+            self.unlock_status()
+            return
+
+        self.begin()
+
+        logfile = open(self.files['logfile'], 'wb')
+        #limit cpu load
+        cputime = ['ulimit','-t',str(cpulimit*3600)+';'] if(cpulimit) else []
+        self.popen = subprocess.Popen(cputime+['nice','-n','20']+self.params, stdout=logfile, stderr=logfile, close_fds=True)
+        
+        self.unlock_status()
+        ret = self.popen.wait()
+
+        self.lock_status()
+        self.end(ret)
+        logfile.close()
+        self.unlock_status()
+        
+        
+        
 
 def main():
     global job_queue
