@@ -9,7 +9,8 @@ var treesvg = {}; //phylogenetic nodetree
 var leafnodes = {}; //all leafnodes+visible ancestral leafnodes
 var letters = '-_.:?!*=AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz'.split('');
 var alphabet = {protein:['A','R','N','D','C','Q','E','G','H','I','L','K','M','F','P','S','T','W','Y','V','B','Z','X'],
-dna:['A','T','G','C','N','X'], rna:['A','G','C','U','N','X'], gaps: ['-','_','.',':','?','!','*','='], codons:{TTT:'F', TTC:'F', TTA:'L', TTG:'L', CTT:'L', CTC:'L', CTA:'L', CTG:'L', ATT:'I', ATC:'I', ATA:'I', ATG:'M', GTT:'V', GTC:'V', GTA:'V', GTG:'V', TCT:'S', TCC:'S', TCA:'S', TCG:'S', CCT:'P',CCC:'P',CCA:'P',CCG:'P', ACT:'T',ACC:'T',ACA:'T',ACG:'T', GCT:'A', GCC:'A',GCA:'A', GCG:'A', TAT:'Y', TAC:'Y', TAA:'*',TAG:'*', CAT:'H',CAC:'H', CAA:'Q',CAG:'Q', AAT:'N',AAC:'N', AAA:'K',AAG:'K', GAT:'D', GAC:'D', GAA:'E',GAG:'E', TGT:'C',TGC:'C', TGA:'*', TGG:'W', CGT:'R',CGC:'R',CGA:'R',CGG:'R', AGT:'S',AGC:'S', AGA:'R', AGG:'R', GGT:'G', GGC:'G', GGA:'G', GGG:'G'}};
+dna:['A','T','G','C','N','X'], rna:['A','G','C','U','N','X'], gaps: ['-','_','.',':','?','!','*','='], codons:{TTT:'F', TTC:'F', TTA:'L', TTG:'L', CTT:'L', CTC:'L', CTA:'L', CTG:'L', ATT:'I', ATC:'I', ATA:'I', ATG:'M', GTT:'V', GTC:'V', GTA:'V', GTG:'V', TCT:'S', TCC:'S', TCA:'S', TCG:'S', CCT:'P',CCC:'P',CCA:'P',CCG:'P', ACT:'T',ACC:'T',ACA:'T',ACG:'T', GCT:'A', GCC:'A',GCA:'A', GCG:'A', TAT:'Y', TAC:'Y', TAA:'*',TAG:'*', CAT:'H',CAC:'H', CAA:'Q',CAG:'Q', AAT:'N',AAC:'N', AAA:'K',AAG:'K', GAT:'D', GAC:'D', GAA:'E',GAG:'E', TGT:'C',TGC:'C', TGA:'*', TGG:'W', CGT:'R',CGC:'R',CGA:'R',CGG:'R', AGT:'S',AGC:'S', AGA:'R', AGG:'R', GGT:'G', GGC:'G', GGA:'G', GGG:'G', NNN:'?', ANN:'?', TNN:'?', GNN:'?',
+CNN:'?', AAN:'?', ATN:'?', AGN:'?', ACN:'?', TAN:'?', TTN:'?', TGN:'?', TCN:'?', GAN:'?', GTN:'?', GGN:'?', GCN:'?', CAN:'?', CTN:'?', CGN:'?', CCN:'?'}};
 var colors = {};
 var symbols = {};
 var canvassymbols = {'_':'-','.':'+',':':'+','!':'?','=':'*'}; //canvas masks
@@ -19,16 +20,16 @@ var colflags = []; //(selection-)flagged columns
 var rowflags = [];
 var selections = [];
 var maskedcols = []; //array of columns masked via sequence menu
-var filescontent = {}; //temporary file data for import/export
-var filetypes = {};
-var exportedseq = '';
-var exportedtree = '';
+var imported = ko.observableArray([]); //temporary container for imported data
+imported.get = function(name){ return ko.utils.arrayFirst(imported(), function(item){ return item.name==name; }); };
 var dom = {}; //global references to DOM elemets
+var _paq = _paq || []; //list of tracked events
 
+/* System state data. Mapping with KnockOut library */
 //custom settings to map data from server to local datamodel
 var libraryopt = {
 	key: function(item){ return item.id; },
-	copy: ['id','parameters','aligner','infile','logfile','source','starttime','shared'],
+	copy: ['id','parameters','aligner','infile','logfile','source','starttime','shared','importurl'],
 	name: { create: function(opt){ //requires modified ko.mapping to work on our nested data
 		var mapped = ko.observable(opt.data);
 		mapped.subscribe(function(newname){ //auto-sync on name edit
@@ -37,23 +38,32 @@ var libraryopt = {
 		return mapped;
 	}}
 };
-
+//keep state of server data
 var serverdata = {import: {}, library: ko.mapping.fromJS([],libraryopt), params: ko.mapping.fromJS({},{copy:['params']})};
 
+//KO library helper functions
+function unwrap(v){ if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; } //read from (non)observable
+//update/create (non)observable
+function wrap(v,newv,create){
+	if(typeof(v)=='function') v(newv); else if(create) v = ko.observable(newv); 
+	else if(create===false) return false; else v = newv; return true;
+}
+
 //extenders to KO viewmodel items
-ko.extenders.format = function(obsitem, formattype){ //format an observable value in-place
+ko.extenders.format = function(obsitem, format){ //format an observable value in-place
     var formatted = ko.computed({
         read: obsitem,
-        write: function(incoming){
-        	var current = obsitem(), newval = incoming;
-            if(formattype=='trim' && typeof(newval)=='string'){ newval = newval.trim(); }
+        write: function(newval){
+        	var current = obsitem();
+            if(format=='trim' && typeof(newval)=='string') newval = newval.trim();
+            else if(format=='nospace') newval = newval.replace(' ','_');
+            else if(~['number', 'float', 'init'].indexOf(format)) newval = !isNaN(newval)? 0 : format=='init'? parseInt(newval) : parseFloat(newval);
  			if(current!=newval) obsitem(newval);
         }
     });
  	formatted(obsitem());
  	return formatted;
 };
-
 ko.extenders.enable = function(obsitem, bool){ //add filter to enable/disable an observable
     var filtered = ko.computed({
         read: obsitem,
@@ -65,6 +75,36 @@ ko.extenders.enable = function(obsitem, bool){ //add filter to enable/disable an
  	return filtered;
 };
 
+//HTML element transitions for KO viewmodel items
+ko.bindingHandlers.fadevisible = {
+	init: function(element){ $(element).css('display','none') },
+    update: function(element, accessor){
+    	var value = unwrap(accessor);
+        if(value) $(element).fadeIn(); else $(element).hide();
+    }
+};
+ko.bindingHandlers.tempfade = {
+	init: ko.bindingHandlers.fadevisible.init,
+	update: function(element, accessor){
+    	var value = unwrap(accessor);
+        if(value) $(element).fadeIn(); else $(element).hide();
+        setTimeout(function(){ wrap(accessor(),''); },3000); //clear value => rehide
+    }
+};
+ko.bindingHandlers.slidevisible = {
+	init: function(element){ $(element).css('display','none') },
+    update: function(element, accessor){
+        var value = unwrap(accessor);
+        if(value) $(element).slideDown(); else $(element).slideUp();
+    }
+};
+ko.bindingHandlers.fadeText = {
+    update: function(element, accessor){
+  		$(element).hide();
+        ko.bindingHandlers.text.update(element, accessor);
+        $(element).fadeIn(200);
+    }        
+};
 ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
 	init: function(element, itemid){
 		$div = $(element);
@@ -92,6 +132,22 @@ ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
     	});
     }
 };
+ko.bindingHandlers.default = {
+	update: function(element, accessor){
+		var value = ko.utils.unwrapObservable(accessor());
+		var name = allBindings.get('name'); console.log(allBindings.get('value'));
+		if(element.type=='text'){
+			if(allBindings.get('disabled') && name) bindingContext.$data[name](value);
+			element.setAttribute('default', value);
+		}
+		else if(name && element.type=='checkbox' && value!='') bindingContext.$data[name](value);
+	}
+};
+
+var slideadd = function(el){ $(el).css('display','none'); $(el).slideDown() };
+var slideremove = function(el){ $(el).slideUp(400,function(){ $(this).remove() }) };
+var marginadd = function(elarr){ setTimeout(function(){ elarr[0].style.marginTop = 0; },50); };
+var waitremove = function(el){ setTimeout(function(){ $(el).remove() },500) };
 
 /* KnockOut data models to keep the state of the system */
 //datamodel to represent analyses library (including running jobs)
@@ -135,12 +191,12 @@ var koLibrary = function(){
 	self.addanim = function(div){ $(div).hide().fadeIn(800); };
 	
 	self.removetimer = 0;
-	self.removeitem = function(item, event){ //delete item/kill job
-		var btn = event.target;
+	self.removeitem = function(item, event, btn){ //delete item/kill job
+		if(!btn && event) btn = event.currentTarget;
 		var running = item.status && isNaN(item.status()) ? true : false;
 		var action = running? 'terminate' : 'rmdir';
-		var startlabel = running? 'Kill' : 'Delete';
-		if(btn.innerHTML == startlabel){
+		if(btn.innerHTML != 'Confirm'){
+			var startlabel = btn.innerHTML;
 			btn.innerHTML = 'Confirm';
 			self.removetimer = setTimeout(function(){ btn.innerHTML = startlabel; },4000);
 		}else{
@@ -161,12 +217,21 @@ var koLibrary = function(){
 	
 	self.copyitem = function(id, e){ self.moveitem(id,e,true); }
 	
-	self.importitem = function(item, event){ //mark job as imported to library
-		if(!item.outfile() || $('#job_'+item.id+' .importtick>input')[0].checked){ communicate('writemeta',{id:item.id,key:'imported'}); }
-		else{ //also import to wasabi browser
+	self.importitem = function(item, event, move){ //mark job as imported to library
+		if(!item.outfile() || move){ communicate('writemeta',{id:item.id,key:'imported'}); }
+		else{ //also load to wasabi browser
 			getfile({id:item.id, file:item.outfile(), btn:event.target||false});
 		}
 	}
+	
+	self.jobmenu = function(item, event){
+		if(!event) return;
+		event.stopPropagation();
+		var btn = event.currentTarget;
+		var menudata = {'Move to library':function(){ self.importitem(item, false, 'move') }}; 
+		if(item.st()==2) menudata['Delete'] = function(){ self.removeitem(item, false, btn.previousSibling) };
+		tooltip('','',{target:btn, arrow:'top', data:menudata, style:'white', id:'jobmenu'});
+	};
 	
 	self.newdir = function(itm, e){ //add new folder to current library path
 		var btn = e? e.target:'';
@@ -249,7 +314,7 @@ var koLibrary = function(){
     				  	fname+'\'});getfile({id:\''+item.id+'\',file:\''+fname+'\',btn:this})">Open</a>';
     				}
     				str += '<a class="button" onclick="dialog(\'export\',{exporturl:\''+settingsmodel.userid+
-    				'?type=text&getlibrary='+item.id+'&file='+fname+'\'})" title="View file content">View</a></div>';
+    				'?type=text&getanalysis='+item.id+'&file='+fname+'\'})" title="View file content">View</a></div>';
     			});
     			if(!str) str = '<span class="note">No files in this folder</span>';
     			logdiv.html(str);
@@ -385,7 +450,7 @@ var koEnsembl = function(){
 			if(ensbtn.length){
 				ensbtn.text('Error');
 				enserror.html('Process failed: <a class="button square" onclick="dialog(\'export\',{exporturl:\''+settingsmodel.userid+
-    				'?type=text&getlibrary='+item.id+'&file='+item.logfile+'\'})">View errors</a>');
+    				'?type=text&getanalysis='+item.id+'&file='+item.logfile+'\'})">View errors</a>');
     			enserror.fadeIn();
 				setTimeout(function(){ ensbtn.click(ensemblimport); ensbtn.text('Import'); enserror.fadeOut(); },5000);
 			}
@@ -672,14 +737,9 @@ var koModel = function(){
 		if(!msgarr.length && $("#jobstatus").length) setTimeout(function(){closewindow('jobstatus')}, 1000); //close empty status window
 		return str;
 	}).extend({throttle: 200});
-	//imported data
-	self.dnasource = ko.observable(''); //cDNA data
-	self.filestype = ko.observable(''); //type of imported files in filescontent{}
-	self.filesname = ko.computed(function(){ //name of an imported file
-		return self.filestype()? Object.keys(filescontent)[0] : '';
-	});
 	//undo stack
-	self.treebackup = '';
+	self.dnasource = ko.observable(''); //container for source cDNA
+	self.treebackup = ''; //container for source tree
 	self.undostack = ko.observableArray();
 	self.activeundo = {name:ko.observableArray(), undone:ko.observable(''), data:ko.observable('')};
 	self.refreshundo = function(data,redo){
@@ -754,16 +814,15 @@ var koModel = function(){
 		}
 		return found;
 	};
-};//koModel
+}; //koModel
 var model = new koModel();
-
 
 //file export settings (export window)
 var koExport = function(){
 	var self = this;
 	self.categories = ko.computed(function(){
 		var catarr = [];
-		if(model.seqsource()) catarr.push({name:'Sequence', formats:[{name:'fasta', variants:[{name:'fasta', ext:['.fa']} ]}, {name:'Phylip', variants:[{name:'phylip', ext:['.phy'], interlace:true}]} ]}); 
+		if(model.seqsource()) catarr.push({name:'Sequence', formats:[{name:'fasta', variants:[{name:'fasta', ext:['.fa']} ]}, {name:'phylip', variants:[{name:'phylip', ext:['.phy'], interlace:true}]} ]}); 
 		if(model.treesource()) catarr.push({name:'Tree', formats:[ 
 			{name:'newick', variants:[
 				{name:'newick', ext:['.nwk','.tre','.tree']},
@@ -784,7 +843,7 @@ var koExport = function(){
 	self.format.subscribe(function(f){ if(f.name=='HSAML') self.includetree(true); });
 	self.variant = ko.observable({});
 	self.infolink = ko.computed(function(){ return self.variant().url?'window.open(\''+self.variant().url+'\')':false });
-	self.filename = ko.observable('Untitled');
+	self.filename = ko.observable('Untitled').extend({format:"nospace"});
 	self.fileext = ko.observable('.fa');
 	self.fileurl = ko.observable('');
 	self.includetree = ko.observable(false);
@@ -801,7 +860,7 @@ var koExport = function(){
 	self.savetargets = ko.computed(function(){
 		var openitem = librarymodel.openitem();
 		if(openitem && !openitem.shared){
-			var targets = [{name:'overwrite of current',type:'overwrite'},{name:'new',type:'new'},{name:'child of current',type:'child'}];
+			var targets = [{name:'overwrite of current',type:'overwrite'},{name:'new root',type:'new'},{name:'child of current',type:'child'}];
 			if(unwrap(openitem.parentid)) targets.push({name:'sibling of current',type:'sibling'});
 		} else { var targets = [{name:'new',type:'new'}]; }
 		self.savetarget(targets[targets.length-1]);
@@ -814,7 +873,7 @@ var exportmodel = new koExport();
 //Datamodel for seq. tools (hiding cols)
 var koTools = function(){
 	var self = this;
-	self.hidelimit = ko.observable(5);
+	self.hidelimit = ko.observable(10);
 	self.minhidelimit = ko.computed({
 		read: function(){ return self.hidelimit()==1; },
 		write: function(checked){ if(checked) self.hidelimit(1); }
@@ -831,18 +890,23 @@ var koTools = function(){
 		}
 	});
 	self.gapcount = [];
-	self.gaptype = ko.observable('');
-	self.gaptype.subscribe(function(){self.countgaps()});
+	self.gaptype = ko.observable('indels');
+	self.gaptype.subscribe(function(newg){ self.countgaps(); });
 	self.countgaps = function(){ //setup: count gaps in alignment columns
 		var l = '', gaps = [], rows = model.visiblerows(), cols = model.visiblecols();
 		self.gapcount = [];
-		if(!model.hasdot()||~self.gaptype().indexOf('in')) gaps.push('.',':');
-		if(!model.hasdot()||~self.gaptype().indexOf('del')) gaps.push('-','_');
+		if(~self.gaptype().indexOf('in')){ model.seqtype()=='codons'? gaps.push('...',':::') : gaps.push('.',':'); }
+		if(~self.gaptype().indexOf('del')){ model.seqtype()=='codons'? gaps.push('---','___') : gaps.push('-','_'); }
 		for(var c=model.alignlen(); c--;) self.gapcount[c] = 0;
 		$.each(rows,function(n,name){
-			$.each(cols,function(i,c){ if(~gaps.indexOf(sequences[name][c])) self.gapcount[i]++; }); //note: takes time on large data
+			setTimeout(function(){
+				$.each(cols,function(i,c){ if(~gaps.indexOf(sequences[name][c])) self.gapcount[i]++; }); //note: takes time on large data
+				if(n==rows.length-1){ //counting finished
+					$('#seqtool div.spinnercover').remove();
+					setTimeout(function(){  if(self.hidelimitperc()==10) self.hidelimitperc(9); else self.hidelimitperc(10); }, 16);
+				}	
+			}, 16);
 		});
-		self.hidelimitperc(10);
 	};
 	self.gaplen = ko.observable(0);
 	self.buflen = ko.observable(0);
@@ -857,7 +921,7 @@ var koTools = function(){
 			range = [];
 		};
 		$.each(self.gapcount,function(c,gaps){
-			if(rows-gaps<threshold){ if(!range.length) range[0] = c; }
+			if(rows-gaps<=threshold){ if(!range.length) range[0] = c; }
 			else if(range.length) processrange(c);
 		});
 		if(range.length) processrange(self.gapcount.length);
@@ -959,49 +1023,8 @@ var koPagan = function(){
 }
 var paganmodel = new koPagan();
 
-
-//HTML element transitions for KO viewmodel items
-ko.bindingHandlers.fadevisible = {
-	init: function(element){ $(element).css('display','none') },
-    update: function(element, accessor){
-    	var value = unwrap(accessor);
-        if(value) $(element).fadeIn(); else $(element).hide();
-    }
-};
-ko.bindingHandlers.tempfade = {
-	init: ko.bindingHandlers.fadevisible.init,
-	update: function(element, accessor){
-    	var value = unwrap(accessor);
-        if(value) $(element).fadeIn(); else $(element).hide();
-        setTimeout(function(){ wrap(accessor(),''); },3000); //clear value => rehide
-    }
-};
-ko.bindingHandlers.slidevisible = {
-	init: function(element){ $(element).css('display','none') },
-    update: function(element, accessor){
-        var value = unwrap(accessor);
-        if(value) $(element).slideDown(); else $(element).slideUp();
-    }
-};
-ko.bindingHandlers.fadeText = {
-    update: function(element, accessor){
-  		$(element).hide();
-        ko.bindingHandlers.text.update(element, accessor);
-        $(element).fadeIn(200);
-    }        
-};
-var slideadd = function(el){ $(el).css('display','none'); $(el).slideDown() };
-var slideremove = function(el){ $(el).slideUp(400,function(){ $(this).remove() }) };
-var marginadd = function(elarr){ setTimeout(function(){ elarr[0].style.marginTop = 0; },50); };
-var waitremove = function(el){ setTimeout(function(){ $(el).remove() },500) };
-
 /* Utility functions */
-function unwrap(v){ if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; } //read from (non)observable
-function wrap(v,newv,create){ //update/create (non)observable
-	if(typeof(v)=='function') v(newv); else if(create) v = ko.observable(newv); 
-	else if(create===false) return false; else v = newv; return true;
-}
-
+//prettyformat a number
 function numbertosize(number,type,min){ //prettyformat a number
 	if(isNaN(number)) return number;
 	if(!type) type = '';
@@ -1024,7 +1047,8 @@ function numbertosize(number,type,min){ //prettyformat a number
     }
 };
 
-function msectodate(msec){ //convert datestamps to  dates
+//convert datestamps to  dates
+function msectodate(msec){
 	msec = unwrap(msec);
 	if(!msec || isNaN(msec)) return 'Never';
 	var t = new Date(parseInt(msec)*1000);
@@ -1032,99 +1056,15 @@ function msectodate(msec){ //convert datestamps to  dates
 	  ' at '+t.getHours()+':'+('0'+t.getMinutes()).slice(-2);
 }
 
-function parseurl(url){ //get variables from url as Object
+//get variables from url as Object
+function parseurl(url){
 	if(!url) url = window.location.search;
 	if(~url.indexOf('?')){ url = url.split('?')[1]; }else{ return {}; }
 	try{ return JSON.parse('{"'+decodeURI(url).replace(/&/g,'","').replace(/=/g,'":"')+'"}'); }
 	catch(e){ console.log('URL error: '+e); return {}; }
 }
 
-
-/* UI buliding functions */
-//toolbar title pop-up menu
-function titlemenu(e){
-	e.preventDefault();
-	e.stopPropagation();
-	var $input = $('#toptitle>input');
-	if($input.hasClass('editable')) return false;
-	var title = '';
-	var menudata = {'Rename':function(){ $input.addClass('editable'); $input.focus(); }, 
-		'Save':function(){ savefile($('#toptitle>span.note')) }, 'Export':function(){ dialog('export') }};
-	if(librarymodel.openid()) menudata['View in Library'] = function(){ dialog('library') };
-	else title = 'Not in Library';
-	tooltip('',title,{target:$('#toptitle'), arrow:'top', shifty:-5, data:menudata, style:'white greytitle', id:'titlemenu'});
-}
-
-//titlebar menus
-function topmenu(e,btn,menuid){
-	var $btn = $(btn);
-	e.preventDefault();
-	e.stopPropagation();
-	var title = '', menudata = {};
-	if(!menuid) menuid = $btn.attr('id')+'menu';
-	var modeldata = model[menuid]() || {};
-	$.each(modeldata, function(i,rdata){
-		var row = {};
-		if(menuid == 'undostack'){
-			rdata.txt = i;
-			row.txt = rdata.name;
-			row.icon = rdata.type;
-			row.t = rdata.info;
-			row.css = {backgroundColor: rdata==model.activeundo.data()?'#ffcc66':'' };
-			row.click = function(){ model.selectundo(rdata) };
-		} else {
-			row.click = function(){dialog(rdata.act)};
-			row.icon = rdata.icn;
-			row.t = rdata.inf;
-			row.css = rdata.css||'';
-		}
-		if(!row.click) return true;
-		else menudata[rdata.txt] = row;
-	});
-	if(!Object.keys(menudata).length) title = 'No items';
-	tooltip('',title,{clear:true, target:btn, arrow:'top', data:menudata, style:'white topmenu greytitle', id:menuid});
-}
-
-//library window pop-up menu
-function librarymenu(itm,e){
-	if(e){ e.preventDefault(); e.stopPropagation(); }
-	var btn = $('#library a.back.gear');
-	var menutarget = $('#library span.dirtrail span.leftfade');
-	var libmode = settingsmodel.minlib()? 'Standard' : 'Compact';
-	var menudata = {'Refresh':function(){ communicate('getlibrary','',{restore:true,btn:btn,restorefunc:librarymenu}) }, 
-	'New folder': librarymodel.newdir };
-	menudata[libmode+' view'] = function(){ toggle(settingsmodel.minlib) };
-	tooltip('','',{target:menutarget, shiftx:'-14', arrow:'top', data:menudata, style:'white', id:'librarymenu'});
-}
-
-//hide/expand toolbar
-function toggletop(collapse){
-	if(typeof(collapse)=='undefined') collapse = !$('body').hasClass('mintop');
-	else if(collapse==$('body').hasClass('mintop')) return;
-	var arrows = $('#topcollapse>span');
-	if(collapse){
-		localStorage.collapse = "collapse";
-		$('body').addClass('mintop');
-		setTimeout(function(){
-			arrows.html('&#x25BC;<br>&#x25BC;');
-			$('#top .toptext, #top .title, #bottom').css('display','none');
-			$('#top').addClass('hidden');
-			$(window).trigger('resize');
-		},800);
-	} else {
-		localStorage.collapse = "";
-		$('#top .toptext, #bottom').css('display','');
-		if(!model.offline()) $('#top .title').css('display','');
-		setTimeout(function(){ $('body').removeClass('mintop') },100);
-		setTimeout(function(){
-			arrows.html('&#x25B2;<br>&#x25B2');
-			$(window).trigger('resize');
-			$('#top').removeClass('hidden');
-		},800);
-	}
-	
-}
-
+/* Server communication functions */
 //send and receive(+save) data from local server fn(str,obj,[str|obj])
 function communicate(action,senddata,options){
 	if(!action) return false;
@@ -1153,7 +1093,7 @@ function communicate(action,senddata,options){
     		options.btn.title = options.btntitle||'Click to retry';
     		$(options.btn).off('click').click(retryfunc);
     	}
-    }
+    };
     
     var parseResp = function(data, isJSON){ //check and parse server response
     	var errmsg = '', resp = data;
@@ -1187,11 +1127,12 @@ function communicate(action,senddata,options){
     }
     
     if(typeof(options.success)=='function') successfunc = options.success;
-    if(typeof(options.error)=='function') errorfunc = options.error;
-    else if(options.btn){ errorfunc = function(errmsg){
-    	options.btn.innerHTML = '<span class="label red" title="Error message: '+errmsg+'">Error</span>';
-    	setTimeout(restorefunc, 3000);
-    }}
+    var errorfunc = function(errmsg){
+    	if(options.btn) options.btn.innerHTML = '<span class="label red" title="Error message: '+errmsg+'">Error</span>';
+    	else dialog('error','Server error: '+errmsg);
+    	if(options.restore) setTimeout(restorefunc, 3000);
+    	if(typeof(options.error)=='function') options.error(errmsg);
+    };
     
     var afterfunc = ''; //follow-up action
     if(typeof(options.after)=='string' && options.btn){ //close window after done
@@ -1204,13 +1145,13 @@ function communicate(action,senddata,options){
       	dialog('error','You cannot modify shared data.<br>(Attempted to '+action+' on '+senddata.id+')');
       	return false;
       }
-      afterfunc = function(response){ //followup: refresh library
-      	if(options.aftersync && successfunc){
-      		options.success = successfunc; successfunc = afterfunc = ''; //delay successaction to after datasync
-    		communicate('getlibrary','',{success:function(){options.success(response)},after:options.after,btn:options.btn});
-    	} else communicate('getlibrary','',{after:options.after,btn:options.btn});
+      afterfunc = function(response, aftererror){ //followup: refresh library
+      	if(options.aftersync && successfunc && !aftererror){
+      		options.success = successfunc; successfunc = afterfunc = ''; //delay success action to after datasync
+    		communicate('getlibrary','',{success:function(){options.success(response)}, after:options.after, btn:options.btn});
+    	} else communicate('getlibrary','',{after:options.after||''});
     	
-    	if(action=='save') model.unsaved(false);
+    	if(action=='save' && !aftererror) model.unsaved(false);
       	if(settingsmodel.datalimit && actionnr>1){ //files added/removed. Get new library size.
       		communicate('checkserver','',{parse:'json', success:function(resp){ settingsmodel.datause(parseInt(resp.datause)); }});
       	}
@@ -1249,7 +1190,7 @@ function communicate(action,senddata,options){
     			if($(options.btn).css('opacity')==0) $(options.btn).css('opacity',1); //show downloadlink_btn
     		}
     		
-    		if(parseResp(rawdata)){ //no errors
+    		if(parseResp(rawdata) && !options.aftersync){ //no errors
     			if(successfunc) successfunc(options.parse?response:rawdata); //custom successfunc (data processing/import)
     			if(options.restore) setTimeout(restorefunc, restdelay); //restore original button state
     			if(model.offline()) model.offline(false);
@@ -1264,6 +1205,7 @@ function communicate(action,senddata,options){
     		if(status!="abort"){
     			if(status=="timeout" && options.fabtn){ closewindow(options.btn); }
     		    if(msg){ //server responded with error
+    		    	if(~msg.indexOf('nodename nor servname provided')) msg = 'No internet connection';
     		    	if(model.helsinki){ //for public Wasabi, log&send errors
     		    		var date = new Date();
     		    		date = date.toISOString();
@@ -1292,7 +1234,7 @@ function communicate(action,senddata,options){
         		setTimeout(restorefunc,3000);
         	}
     		
-    		if(afterfunc && typeof(options.after)!='string') setTimeout(function(){ afterfunc(msg||''); }, 500); //follow-up (data resync)
+    		if(afterfunc && typeof(options.after)!='string') setTimeout(function(){ afterfunc(msg||'','error'); }, 500); //follow-up (data resync)
     	},
     	xhr: function(){
  			var xhr = $.ajaxSettings.xhr();
@@ -1324,6 +1266,410 @@ function communicate(action,senddata,options){
     });
 }
 
+//Save current MSA data to server (library)
+function savefile(btn){
+	if(!$.isEmptyObject(sequences) || !$.isEmptyObject(treesvg)){
+		var savetarget = btn? exportmodel.savetarget().type : exportmodel.savetargets()[0].type; //manual or autosave
+		var filedata = parseexport('HSAML',{includetree:true,includeanc:true,tags:true,includehidden:true});
+		var nodeinfo = {};
+		var metadata = {writemode:savetarget, file:filedata, source:model.sourcetype(), parentid:librarymodel.openparent(), id:librarymodel.openid()};
+		$.each(leafnodes,function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
+		if(!$.isEmptyObject(nodeinfo)) metadata.nodeinfo = nodeinfo;
+		if(model.hiddenlen()) metadata.visiblecols = model.visiblecols();
+		if(!$.isEmptyObject(model.ensinfo())) metadata.ensinfo = model.ensinfo();
+		metadata.name = $('#savename').val() || exportmodel.savename();
+		var curitem = librarymodel.getitem();
+		if(savetarget == 'overwrite'){
+			if(curitem.parameters) metadata.parameters = curitem.parameters;
+			if(curitem.importurl||librarymodel.importurl) metadata.importurl = curitem.importurl||librarymodel.importurl;
+		}
+		communicate('save', metadata, {btn:btn,after:'closewindow'});
+	}
+	return false;
+}
+
+//submit an alignment job
+function sendjob(options){
+	var datalimit = settingsmodel.datalimit, joblimit = settingsmodel.joblimit;
+	if(datalimit){
+		var bplimit = datalimit*100000, liblimit = datalimit*1000000;
+		if(model.totalseqlen()>bplimit){
+			dialog('notice','Your sequence data size exceeds the server limit of '+numbertosize(bplimit,'bp')+
+			'.<br>Please reduce the input dataset size and try again.');
+			return false;
+		}
+		else if(parseInt(settingsmodel.dataperc())>98){
+			dialog('notice','Your '+numbertosize(liblimit,'byte')+' server space for your analysis library is full.'+
+			'<br>Please delete <a onclick="dialog(\'library\')">some</a> or <a onclick="dialog(\'settings\')">all</a> analyses and try again.');
+			return false;
+		}
+	}
+	else if(joblimit && librarymodel.runningjobs()>=joblimit){
+		dialog('notice','You already have the maximum of '+joblimit+' jobs running.'+
+		'<br>Terminate or wait for a job to finish before launching a new one.');
+		return false;
+	}
+	var alignbtn = options.btn;
+	if(!alignbtn.jquery) alignbtn = $(alignbtn);
+	alignbtn.unbind('click'); //prevent multiple clicks
+	alignbtn.click(closewindow);
+	alignbtn.attr('title','Click to close the window');
+	
+	var optdata = {btn:alignbtn[0]};
+	if(options.form) optdata.form = options.form;
+	var senddata = {};
+	senddata.name = options.name||exportmodel.savename()||'Realignment';
+	senddata.writemode = exportmodel.savetarget().type;
+	var exportdata = parseexport('fasta',{makeids:true,includehidden:exportmodel.includehidden()}); //{file:fastafile,nameids:{name:id}}
+	senddata.fasta = exportdata.file;
+	var idnames = {};
+	$.each(exportdata.nameids, function(name,id){ idnames[id] = name; });
+	senddata.idnames = idnames;
+	if(!$.isEmptyObject(treesvg) && (options.realign || options.ancestral || !options.form['newtree']['checked'])) senddata.newick = parseexport('newick',{tags:true,nameids:exportdata.nameids});
+	if(options.pagan){
+		senddata.pagan = true;
+		if(model.filesname()) senddata.queryfile = imported()[0];
+	} else {
+		senddata.dots = true;
+		if(options.realign) senddata.update = true;
+		if(options.ancestral){ senddata.e = true; if(senddata.id) senddata.writemode = 'overwrite'; }
+	}
+	if(librarymodel.openid()) senddata.id = librarymodel.openid();
+	if(librarymodel.openparent()) senddata.parentid = librarymodel.openparent();
+	var nodeinfo = {};
+	$.each(leafnodes,function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
+	if(!$.isEmptyObject(nodeinfo)) senddata.nodeinfo = nodeinfo;
+	if(!$.isEmptyObject(model.ensinfo())) senddata.ensinfo = model.ensinfo();
+	
+	var successfunc = optdata.success = function(resp){
+		alignbtn.html('Job sent');
+		try{ var data = JSON.parse(resp); }catch(e){ var data = {}; }
+		if(options.ancestral) librarymodel.autoimport = data.id||'';
+		else{
+			setTimeout(function(){
+				if(options.realign) model.treealtered(false);
+				closewindow(alignbtn); //close alignment setup winow
+			 },2000);
+		}
+	};
+	
+	var itemcount = serverdata.library().length;
+	optdata.error = function(msg){
+		if(~msg.indexOf('response')){ //no reponse. Check if job sent.
+			setTimeout(function(){
+				var newcount = serverdata.library().length;
+				if(newcount>itemcount) successfunc();
+			},2000);
+		}
+	};
+	optdata.timeout = 4000;
+	
+	communicate('startalign',senddata,optdata);
+	_paq.push(['trackEvent','align',options.pagan?'pagan':'prank']); //record event
+	return false;
+}
+
+//retrieve an analysis datafile from server
+function getfile(opt){
+	if(opt.btn){
+		if(!opt.btn.jquery) opt.btn = $(opt.btn);
+		opt.btn.html('<img class="icn" src="images/spinner.gif">');
+	}
+    imported([]);
+    var trycount = 0;
+    var download = function(fileopt){
+      if(!fileopt) fileopt = {};
+      var filename = fileopt.file || opt.file || "";
+      if(!opt.id && !filename){ console.log('download error: id or filename missing.'); return; }
+      var urlparams = (opt.id?"&getanalysis="+opt.id:"")+(filename?"&file="+filename:"")+(fileopt.dir?"&dir="+fileopt.dir:"");
+	  $.ajax({
+		type: "GET",
+		url: settingsmodel.userid+"?type=text"+urlparams,
+    	dataType: "text",
+    	success: function(data){
+    		if(typeof(fileopt.success)=='function'){ fileopt.success(data); }
+    		else if(!opt.noimport){ //load and parse filedata for import
+    			imported.push({name:[filename.replace(/^.*[\\\/]/,'')], data:data});
+        		setTimeout(function(){ parseimport({source:'import', id:opt.id, importbtn:opt.btn, share:opt.share, name:opt.name}) }, 300);
+        		if(settingsmodel.keepid()){
+        			localStorage.openid = opt.id;
+        			localStorage.openfile = filename;
+        		}
+        	}
+        	else if(opt.btn && opt.btn.prop('tagName')=='DIV') opt.btn.html('<pre>'+data+'</pre>'); //display filecontents inside a div
+    	},
+    	error: function(xhrobj,status,msg){ 
+        	if(!msg && status!="abort"){ //no response. try again
+        		if(trycount<1){ trycount++; setTimeout(function(){download(fileopt)},1000); return; }
+        		else{ msg = 'No response from server' }
+        	}
+        	if(opt.btn) opt.btn.html('<span class="label" title="'+msg+'">Download failed</span>');
+        	else if(typeof(fileopt.error)=='function'){ fileopt.error(msg); }
+        	else dialog('error','File download error: '+msg);
+        },
+        xhr: function(){
+ 			var xhr = $.ajaxSettings.xhr();
+ 			if(!opt.noimport && opt.btn){
+ 				xhr.tick = 1;
+ 				xhr.addEventListener('progress',function(d){ //listen for file download progress
+        			if(d.total && !(xhr.tick%2)){
+        				var perc = parseInt(d.loaded/(d.total/100));
+        				opt.btn.html('<span class="progressline"><span class="bar" style="width:'+perc+'%">'+
+        				'<span class="title">Downloading</span></span></span>');
+        			}
+        			xhr.tick++;
+        		}, false);
+        	}
+        	return xhr;
+  		},
+	  });
+	};
+	
+	if(!opt.noimport && opt.id){ //library import. get (meta)>importmeta>main_file
+		var libitem = librarymodel.getitem(opt.id);
+		var importpipeline  = function(){
+			if(!libitem){ //id not in library (shared id); get meta
+				var metaerror = function(e){ 
+					console.log('metadata error: '+e); 
+					if(!opt.file) opt.file = 'saved.xml'; 
+					download();
+				};
+				var metasuccess = function(filedata){
+					try{
+						var metadata = JSON.parse(filedata);
+						if(!opt.file) opt.file = metadata.outfile;
+						opt.name = metadata.name;
+						download();
+					} catch(e){ metaerror(e); }
+				}
+				download({file:'meta.txt', success:metasuccess, error:metaerror});
+			} else {
+				if(!opt.file) opt.file = libitem.outfile();
+				opt.name = libitem.name();
+				download();
+			}
+		};
+		
+		var showdir = function(){ dialog('library'); librarymodel.dirpath(librarymodel.getpath(opt.id)); };
+		
+		if(opt.dir && libitem) showdir(); //shared folder aleady in library
+		else{
+			download({file:"importmeta.txt", dir:opt.dir||'', success:function(filedata){
+				try{ serverdata.import = JSON.parse(filedata); if(typeof(serverdata.import.idnames)=='string') serverdata.import.idnames = JSON.parse(serverdata.import.idnames); }
+				catch(e){ console.log('importmeta parse error: '+e); }
+				if(opt.dir) showdir();
+				else importpipeline();
+			},
+			error:function(e){
+				if(e.indexOf('Invalid library ID')) dialog('error','Analysis ID <b>'+opt.id+'</b> was not found in library.<br>'+
+					'The data may have been deleted'+(opt.share?' or your sharing URL may be faulty':'')+'.');
+				else if(opt.dir) showdir();
+				else importpipeline();
+		}})}
+	}
+	else{ download(); } //import/display the requested file
+}
+
+//search for ensembl gene id
+function ensemblid(ensdata){
+	var ensbtn = document.getElementById('ensidbtn');
+	if(!ensdata){ //send request
+		if(!ensemblmodel.idspecies()||!ensemblmodel.idname()) return;
+		var urlstring = ('http://beta.rest.ensembl.org/xrefs/symbol/'+ensemblmodel.idspecies()+'/'+ensemblmodel.idname()+'?content-type=application/json;object=gene').replace(/ /g,'+');
+		communicate('geturl',{fileurl:urlstring},{success:function(data){ensemblid(data)},btn:ensbtn,retry:true,restore:true});
+		return false;
+	}
+	//process data
+	try{ ensdata = JSON.parse(ensdata); } catch(e){
+		if(~ensdata.indexOf('BaseHTTP')) ensdata = {error:'No response. Check network connectivity.'};
+		else ensdata = {error:'No match. Try different search.'};
+	}
+	if($.isArray(ensdata) && !ensdata.length) ensdata = {error:'No match. Try different search.'};
+	if(ensdata.error){
+		ensbtn.innerHTML = 'Error';
+		$('#enserror').text(ensdata.error||'Unknown error. Try again.'); $('#enserror').fadeIn();
+		setTimeout(function(){ ensbtn.innerHTML = 'Search'; $('#enserror').fadeOut(); },4000);
+		return false;
+	}
+	else if(ensdata[0].type == 'gene'){
+		ensemblmodel.ensid(ensdata[0].id);
+		ensbtn.innerHTML = 'Got ID';
+		setTimeout(function(){ ensbtn.innerHTML = 'Search'; },2000);
+	}
+	return false;
+}
+
+//check for a new version of a backend service
+function checkversion(btn){
+	if(btn) btn.innerHTML = 'checking...';
+	communicate('geturl',{fileurl:'http://wasabi2.biocenter.helsinki.fi/download/changelog.txt'},
+	{success:function(changelog){
+		var startind = changelog.indexOf('v.')+2, endind = changelog.indexOf('v.',startind+1);
+		if(endind==-1) endind = changelog.length;
+		var firstblock = changelog.substring(startind,endind);
+		var sepind = firstblock.indexOf('* ');
+		var lastver = parseInt(firstblock.substring(0,sepind-1)), lastchange = firstblock.substring(sepind+1);
+		if(!isNaN(lastver)){
+			model.version.remote(lastver);
+			model.version.lastchange = lastchange;
+			if(btn){
+				if(model.version.local < model.version.remote()){
+					btn.innerHTML = '<span style="color:green" title="Click for details">update available</span>';
+					settingsmodel.skipversion('');
+					btn.onclick = function(){ dialog('jobstatus'); };
+				} else { btn.innerHTML = '<span style="color:red" title="Click to recheck">no update</span>'; }
+			}
+		}
+	}});
+}
+
+/* File import & export */
+// Validation of files in import dialog
+function checkfiles(filearr,options){
+	if(!filearr) filearr = [];
+	else if(!filearr[0]) filearr = [filearr];
+	if(!options) options = {};
+	if(options.onefile && filearr.length>1) filearr = [filearr[0]];
+	var noimport = options.noimport||(options.mode&&options.mode=='noimport');
+	var windowid = options.windowid||'import';
+	var importurl = options.url||false;
+	var fileroute = options.fileroute || (window.File && window.FileReader && window.FileList ? 'localread' : 'upload');
+	var infowindow = $('#'+windowid).length? $('#'+windowid) : makewindow("Importing data",[],{id:windowid,icn:'import.png',btn:false,hidden:options.silent});
+	var backside = $('.back',infowindow).length;
+	var infodiv = backside? $('.back .windowcontent', infowindow) : $('.windowcontent', infowindow);
+	if(!infodiv.length) return;
+	var tickimg = $('<img class="icn mall" src="images/tick.png">'); //preload status icons
+	var spinimg = $('<img class="icn small" src="images/spinner.gif">');
+	var warnimg = $('<img class="icn small" src="images/warning.png">');
+	
+	//phase 1: display list of files //
+	var ajaxcalls=[];
+	if(!$('ul',infodiv).length){
+		var btn = $('<a class="button" style="padding-left:15px">&#x25C0; Back</a>');
+		btn.click(function(){
+			$.each(ajaxcalls,function(c,call){ if(call.readyState!=4){call.abort()}});
+			ajaxcalls = []; //cancel hanging filetransfers
+			imported([]);
+			infowindow.removeClass('finished flipped');
+			setTimeout(function(){ infowindow.addClass('finished') },900);
+		});
+		if(!backside){ btn.text('Cancel'); btn = $('<div class="btndiv" style="text-align:center">').append(btn); }
+		var list = $('<ul>');
+		$.each(filearr,function(i,file){
+			var filesize = file.size ? '<span class="note">('+numbertosize(file.size,'byte')+')</span> ' : '';
+			list.append('<li class="file">'+file.name+' '+filesize+'<span class="icon"></span></li>');
+		});
+		var filestitle = filearr.length? '<b>Files to import:</b><br>' : '';
+		infodiv.empty().append(filestitle,list,'<br><span class="errors note"></span><br>',btn);
+		if(backside && !options.silent) infowindow.addClass('flipped');
+	}
+	var errorspan = $('span.errors',infodiv);
+	
+	var namelist = [];
+	var checkprogress = function(){ //check if all files are imported
+		if(imported().length==filearr.length){
+        	ajaxcalls = []; checkfiles(namelist,options); //go to phase2
+        }
+	};
+	var showerror = function(msg){
+		errorspan.html('<span class="red">'+msg+'</span>');
+		if(options.silent){
+			infowindow.css('display','block');
+			if(backside) infowindow.addClass('flipped');
+		}
+		return false;
+	};
+	
+  	//phase 1: load filedata to global imported([]) //
+  	if(!filearr.length) return showerror('There is nothing to import');
+  	else if(typeof(filearr[0])=='object') imported([]); //first round
+  	
+	if(!imported().length){
+		errorspan.text('Loading files...');
+		$.each(filearr,function(i,file){
+			namelist.push(file.name||'unnamed'+i);
+  			$('li.file span.icon:eq('+i+')',infodiv).empty().append(spinimg);
+  			var senddata = '';
+  			if(file.share){
+  				var vars = file.share;
+  				if(vars.host=='http://'+window.location.host){
+  					setTimeout(function(){getfile({id:vars.share,file:vars.file,btn:errorspan,noimport:noimport})},500);
+  					return false;
+  				} else if(vars.file){
+  					senddata = {fileurl:vars.host+"?type=text&share=true&getanalysis="+vars.share+"&file="+vars.file}
+  					importurl = senddata.fileurl;
+  					if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = vars.file;
+  				} else return showerror('URLs from extenal Wasabi servers need \'file=\' parameter'); 
+  			}
+  			else if(file.url){
+  				senddata = {fileurl:file.url}
+  				importurl = file.url;
+  				if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = file.url.substring(file.url.lastIndexOf('/')+1);
+  			}
+  			else if(file.text){
+  				imported.push({name:[file.name], data:file.text});
+  				importurl = '';
+  				checkprogress();
+  			}
+  			else if(fileroute=='upload'){ senddata = {upfile:file} }
+  			else if(fileroute=='localread'){
+  				var reader = new FileReader(); 
+    			reader.onload = function(evt){
+    				imported.push({name:[file.name], data:evt.target.result});
+    				checkprogress();
+    		 	}
+    		 	reader.readAsText(file);
+  			}
+  				
+  			var successfunc = function(data){
+        		$('li.file span.icon:eq('+i+')',infodiv).empty();
+       			imported.push({name:[file.name], data:data});
+       			checkprogress();
+       		};
+        		
+       		if(senddata){
+        		if(model.offline()){
+  					return showerror('Import of this file needs Wasabi server, which is currently offline');
+  				} else {
+       				ajaxcalls.push(communicate(fileroute=='upload'?'echofile':'geturl',senddata,{retry:true, error:showerror, success:successfunc}));
+        		}
+        	}
+    	});
+  		return;
+  	}
+  
+	//phase2: check files in imported([])//
+	var iconimg = '', accepted, rejected = [];
+	ko.utils.arrayForEach(imported(),function(item){
+		accepted = parseimport({filenames:[item.name], mode:'check'});
+		if(accepted){ iconimg = tickimg.clone(); item.type = accepted; if(typeof(options.observable)=='function') options.observable(item.name); }
+		else{ rejected.push(item.name); iconimg = warnimg.clone(); }
+		$('li.file span.icon:eq('+filearr.indexOf(item.name)+')',infodiv).empty().append(iconimg);
+	});
+	
+	//phase2: import //
+	var importfunc = function(){
+		errorspan.text('Importing data...');
+		var source = options.source||(importurl===false?fileroute:'download');
+		setTimeout(function(){ parseimport({source:source,mode:options.mode||windowid,importurl:importurl,dialog:infowindow}) }, 800);
+	};
+	
+	if(rejected.length){
+		var s = rejected.length>1? 's' : '';
+		var msg = 'Cannot recognize the "!"-marked file'+s+'.<br><span style="color:#666">Please choose a different file';
+		var acceptlen = imported().length-rejected.length;
+		if(acceptlen>0 && !noimport){
+			$.each(rejected,function(r,name){ imported.remove(function(item){ return item.name==name }); });
+			var importbtn = $('<a class="button" style="padding-left:15px">Import</a>');
+			importbtn.click(function(){ importbtn.css('color','#999'); importfunc(); });
+			infodiv.append(importbtn);
+			msg += ',<br> or proceed to import the recognized file'+(acceptlen>1?'s':'');
+		}
+		return showerror(msg+'</span>.');
+	}
+	else if(noimport) closewindow(infowindow);
+	else importfunc();
+}
 
 /* Input file parsing */
 function parseimport(options){ //options{dialog:jQ,update:true,mode}
@@ -1344,6 +1690,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		if(options.share) options.source = 'shared data';
 		//if(!options.source) options.source = serverdata.library.getItemByIndex(options.id).source||'import';
 	}
+	_paq.push(['trackEvent','import',options.source||'unknown']); //record import event
 	
 	var parseseq = function(seqtxt,filename,format,nspecies,nchars){
 		if(Tsequences) seqoverwrite = true;
@@ -1442,7 +1789,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		}
 	};
 	
-	var filenames = options.filenames || Object.keys(filescontent);
+	var filenames = options.filenames || ko.utils.arrayMap(imported(),function(item){ return item.name });
 	if(!$.isArray(filenames)) filenames = [filenames];
 	filenames.sort(function(a,b){ //sort filelist: [nexus,xml,phylip,...,tre]
 		if(/\.tre/.test(a)) return 1; else if(/\.tre/.test(b)) return -1;
@@ -1451,9 +1798,10 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	
 	var datatype = '';
 	$.each(filenames,function(i,filename){
-		var file = filescontent[filename], marr = [], result = [];
+		var file = imported.get(filename), marr = [], result = [];
 		if(typeof(file)=='object' && file.hasOwnProperty('data')){ //Ensembl JSON object
 			if(!file.data[0].homologies) return;
+			if(options.mode=='check'){ datatype += 'seq:json '; return true; }
 			var gotsource = false; Tsequences = {};
 			$.each(file.data[0].homologies,function(j,data){
 				if(!gotsource){
@@ -1558,7 +1906,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
    		}
 	});//for each file
 	if(options.mode=='check') return datatype;
-	filescontent = {}; model.filestype('');
+	imported([]);
 	
 	if(options.mode=='importcdna'){
 		if(!Tseqsource) errors.push('No sequence data found');
@@ -1720,7 +2068,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
    	  		var sourcetype = src=='localread'||src=='upload'? 'local computer' : ~src.indexOf('import')? 'analysis library' : src=='download'? options.importurl? 'web address' : 'text input' : options.source;
    	  		model.sourcetype(sourcetype);
    	  	}
-   	  	librarymodel.importurl = options.importurl||filenames.join(',')||'';
+   	  	librarymodel.importurl = options.importurl||'';
    	  	
    	  	libitem = librarymodel.getitem(options.id)
    	  	if(options.id && libitem){ //library item imported. save import date to server.
@@ -1739,6 +2087,70 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
    	  	return true;
    	  }//no errors => import data
 }//parseimport()
+
+//import ensembl data
+function ensemblimport(){
+	imported([]);
+	var idformat = ensemblmodel.idformat().url;
+	var ensid = ensemblmodel.ensid() || ensemblmodel.idformat().example;
+	var ensbtn = document.getElementById('ensbtn');
+	var showerror = function(msg){ //display error message next to import button
+		ensbtn.innerHTML = 'Error';
+		$('#enserror').text(msg||'Unknown error. Try again.'); $('#enserror').fadeIn();
+		setTimeout(function(){ ensbtn.innerHTML = 'Import'; $('#enserror').fadeOut(); },4000);
+		return false;
+	}
+	
+	if(idformat=='epo'){ //import Ensembl EPO alignment
+		var marr = ensid.match(/(\w+):(\d+)\-(\d+)/);
+		if(!marr) return showerror('Sequence region in wrong format.');
+		var start = parseInt(marr[2]), end = parseInt(marr[3]);
+		if(end<start || end-start>10000) return showerror('Max. region length is 10Kb.');
+		var epotype = ensemblmodel.epotype().type, eposet = ensemblmodel.eposet(), mask = ensemblmodel.mask;
+		var params = {alignment: epotype=='EPO'?'EPO':'EPO_LOW_COVERAGE', set: eposet.name, species: eposet.ref,
+			seq_region: marr[1], seq_region_start: start, seq_region_end: end, output_file: ensemblmodel.outname+'.xml',
+			db: 'mysql://anonymous@ensembldb.ensembl.org/'+ensemblmodel.dbver, masked_seq: ensemblmodel.maskopt.indexOf(mask)};
+		
+		//ensbtn.innerHTML = '<img src="images/spinner.gif" class="icn"/>';
+		
+		communicate('startepo',params,{error:function(){ showerror('Wasabi server error. Try again.'); }, success:function(response){
+			response = JSON.parse(response);
+			if(response.status!='running') showerror('Failed to start EPO alignment fetcher. Try again.');
+			else{ //epo fetching started. start polling for progress.
+				ensemblmodel.epojob(response.id);
+				$(ensbtn).off('click');
+				closewindow(ensbtn, function(){ensemblmodel.epojob('')}); //add job cancelling to closebtn
+				communicate('getlibrary');
+			}
+		}});
+	}
+	else{ //import Ensembl gene or genetree
+		var urlopt = idformat=='genetree'? '?content-type=text/x-phyloxml+xml' : '?content-type=application/json';
+		if(idformat=='homology'){
+			urlopt += ';type='+ensemblmodel.homtype();
+			if(ensemblmodel.target()) urlopt += ';target_species='+ensemblmodel.target();
+		}
+		else if(ensemblmodel.aligned()) urlopt += ';aligned=True';
+		urlopt += ';sequence='+ensemblmodel.seqtype();
+		var urlstring = ('http://beta.rest.ensembl.org/'+idformat+'/id/'+ensid+urlopt).replace(/ /g,'+');
+		var processdata = function(ensdata){
+			try{ ensdata = JSON.parse(ensdata); } catch(e){ if(~ensdata.indexOf('BaseHTTP')) return showerror('No response. Check network connectivity.'); }
+			if(typeof(ensdata)=='object'){ //JSON => gene homology data
+				if(!ensdata.data) return showerror('Data is in unexpected format. Try other options.');
+				imported.push({name:[ensid+'.json'], data:ensdata, type:'seq:json'});
+			} else { //XHTML => genetree data
+				if(ensdata.indexOf('phyloxml')==-1) return showerror('Data is in unexpected format. Try other options.');
+				var xmlstr = ensdata.substring(ensdata.indexOf('<pre>'),ensdata.indexOf('</pre>')+6);
+				xmlstr = $(xmlstr).text().replace(/\s*\n\s*/g,'');
+				imported.push({name:[ensid+'.xml'], data:xmlstr, type:'seq:phyloxml tree:phyloxml'});
+			}
+			setTimeout(function(){ parseimport({source:'Ensembl',importbtn:$(ensbtn),importurl:urlstring,ensinfo:{type:idformat,id:ensid}}) },600);
+		}
+		//reqest data, then process it
+		communicate('geturl',{fileurl:urlstring},{success:processdata, btn:ensbtn, btntxt:'Import', restorefunc:ensemblimport, retry:true});
+	}
+	return false; //for onclick
+}
 
 /* Output file parsing */
 function parseexport(filetype,options){
@@ -1832,12 +2244,12 @@ function parseexport(filetype,options){
 		output = specount+" "+ntcount+"\n";
 		$.each(names,function(j,name){
 			seqline = parseseq(sequences[name]);
-			output += seqline+"\n";	
+			output += (nameids[name]||name)+"\n"+seqline+"\n";	
 		});
 	}
 	else if(filetype=='newick'){ output = treefile; }
 	
-	if(options.filename&&!options.exportdata) options.exportdata = filescontent[options.filename]||'';
+	if(options.filename&&!options.exportdata) options.exportdata = imported.get(options.filename)||'';
 	if(usemodel||options.exportdata){ //export data to exportwindow & make download url
 		if(options.exportdata){
 			output = options.exportdata;
@@ -1846,7 +2258,7 @@ function parseexport(filetype,options){
 		} else filename = exportmodel.filename()+exportmodel.fileext();
 		$('#exportpaper').text(output);
 		$('#export').addClass('flipped');
-		if(usemodel) communicate('makefile',{filename:filename,filedata:output},{saveto:exportmodel.fileurl});
+		if(usemodel) communicate('makefile',{filename:filename.replace(' ','_'),filedata:output},{saveto:exportmodel.fileurl});
 	}
 	else if(options.exporturl){ //export server file to exportwindow
 		$.get(options.exporturl,function(txt){$('#exportpaper').text(txt)},'text');
@@ -1856,27 +2268,13 @@ function parseexport(filetype,options){
 	}
 	if(options.exporturl || options.snapshot || options.exportdata) $('#export a.backbtn').css('display','none');
 	if(options.makeids) output = {file:output, nameids:nameids};
+	
+	_paq.push(['trackEvent','export',filetype]); //record event
 	return output;
 }
 
-//Save current MSA data to server (library)
-function savefile(btn){
-	if(!$.isEmptyObject(sequences) || !$.isEmptyObject(treesvg)){
-		var savetarget = btn? exportmodel.savetarget().type : exportmodel.savetargets()[0].type; //manual or autosave
-		var filedata = parseexport('HSAML',{includetree:true,includeanc:true,tags:true});
-		var nodeinfo = {};
-		$.each(leafnodes,function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
-		if($.isEmptyObject(nodeinfo)) nodeinfo = '';
-		var visiblecols = model.hiddenlen()? model.visiblecols() : '';
-		var ensinfo = $.isEmptyObject(model.ensinfo())? '' : model.ensinfo();
-		var savename = $('#savename').val() || exportmodel.savename();
-		communicate('save', {writemode:savetarget, file:filedata, name:savename, source:model.sourcetype(), parameters:librarymodel.importurl,
-			parentid:librarymodel.openparent(), id:librarymodel.openid(), ensinfo:ensinfo, nodeinfo:nodeinfo, visiblecols:visiblecols}, {btn:btn,after:'closewindow'});
-	}
-	return false;
-}
-
-/* Rendrering: tree & sequence alignment areas */
+/* Rendrering functions for tree & sequence alignment areas */
+//generate sequence colors according to selected colorscheme
 function makeColors(){
 	colors = []; symbols = {};
 	if(!settingsmodel) return;
@@ -2182,7 +2580,7 @@ function makeCanvases(){ //make canvases for sequence letters
 
 // render sequence tiles
 function makeImage(target,cleanup,slowfade){
-	var d = new Date(), starttime = d.getTime();
+	//var d = new Date(), starttime = d.getTime();
 	var targetx, targety, boxw = model.boxw(), boxh = model.boxh(), tilesize = {w:4000,h:2000};
 	var colstep = parseInt(tilesize.w/boxw), rowstep = parseInt(tilesize.h/boxh); //tile size limits
 	var visiblecols = model.visiblecols(), visiblerows = model.visiblerows();
@@ -2234,7 +2632,7 @@ function makeImage(target,cleanup,slowfade){
 					if(!sequences[seqname]){ canvasrow++; continue; } //no sequence data: skip row
 					for(var canvascol = c; canvascol<endcol; canvascol++){
 						seqletter = sequences[seqname][visiblecols[canvascol]];
-						if(!seqletter) continue; else if(!symbols[seqletter]) symbols[seqletter] = symbols['?'];
+						if(!seqletter) continue; else if(!symbols[seqletter]) symbols[seqletter] = symbols['?']||symbols['???'];
 						canv.drawImage(symbols[seqletter]['canvas'], (canvascol - c)*boxw, rowpx); //draw the letter
 					}
 					canvasrow++;
@@ -2243,7 +2641,7 @@ function makeImage(target,cleanup,slowfade){
 				tilediv.css({'left': c*boxw+'px', 'top': r*boxh+'px'});
 				tilediv.append(canvas);
 				dom.seq.append(tilediv);
-				d = new Date(); console.log((r-endrow)*(c-endcol)+'bp drawn on '+(cstep*boxw)+'*'+(rstep*boxh)+'px canvas: '+(d.getTime()-starttime)+'ms');
+				//d = new Date(); console.log((r-endrow)*(c-endcol)+'bp drawn on '+(cstep*boxw)+'*'+(rstep*boxh)+'px canvas: '+(d.getTime()-starttime)+'ms');
 				tilediv.fadeIn(fadespeed);
 				curcanvas++;
 				if(curcanvas==lastcanvas){ //last tile made => cleanup
@@ -2296,7 +2694,7 @@ function makeRuler(){
 	if(visiblecols[visiblecols.length-1] != model.alignlen()-1) $ruler.append(markerdiv(visiblecols[visiblecols.length-1]+1,model.alignlen()));
 }
 
-//Create drag-drop 'move tree node' mode
+//Drag-drop 'move tree node' mode
 function movenode(drag,movednode,movedtype){
 	if(!movednode) return false;
 	$("#left").addClass('dragmode');
@@ -2359,7 +2757,93 @@ function movenode(drag,movednode,movedtype){
 	 if(drag) return helper;
 }
 
-function treemenu(node){ //generate contents for tree node menu
+/* User interface building functions */
+//toolbar title pop-up menu
+function titlemenu(e){
+	e.preventDefault();
+	e.stopPropagation();
+	var $input = $('#toptitle>input');
+	if($input.hasClass('editable')) return false;
+	var title = '';
+	var menudata = {'Rename':function(){ $input.addClass('editable'); $input.focus(); }, 
+		'Save':function(){ savefile($('#toptitle>span.note')) }, 'Export':function(){ dialog('export') }};
+	if(librarymodel.openid()) menudata['View in Library'] = function(){ dialog('library') };
+	else title = 'Not in Library';
+	tooltip('',title,{target:$('#toptitle'), arrow:'top', shifty:-5, data:menudata, style:'white greytitle', id:'titlemenu'});
+}
+
+//titlebar menus
+function topmenu(e,btn,menuid){
+	var $btn = $(btn);
+	e.preventDefault();
+	e.stopPropagation();
+	var title = '', menudata = {};
+	if(!menuid) menuid = $btn.attr('id')+'menu';
+	var modeldata = model[menuid]() || {};
+	$.each(modeldata, function(i,rdata){
+		var row = {};
+		if(menuid == 'undostack'){
+			rdata.txt = i;
+			row.txt = rdata.name;
+			row.icon = rdata.type;
+			row.t = rdata.info;
+			row.css = {backgroundColor: rdata==model.activeundo.data()?'#ffcc66':'' };
+			row.click = function(){ model.selectundo(rdata) };
+		} else {
+			row.click = function(){dialog(rdata.act)};
+			row.icon = rdata.icn;
+			row.t = rdata.inf;
+			row.css = rdata.css||'';
+		}
+		if(!row.click) return true;
+		else menudata[rdata.txt] = row;
+	});
+	if(!Object.keys(menudata).length) title = 'No items';
+	tooltip('',title,{clear:true, target:btn, arrow:'top', data:menudata, style:'white topmenu greytitle', id:menuid});
+}
+
+//library window pop-up menu
+function librarymenu(itm,e){
+	if(e){ e.preventDefault(); e.stopPropagation(); }
+	var btn = $('#library a.back.gear');
+	var menutarget = $('#library span.dirtrail span.leftfade');
+	var libmode = settingsmodel.minlib()? 'Standard' : 'Compact';
+	var menudata = {'Refresh':function(){ communicate('getlibrary','',{restore:true,btn:btn,restorefunc:librarymenu}) }, 
+	'New folder': librarymodel.newdir };
+	menudata[libmode+' view'] = function(){ toggle(settingsmodel.minlib) };
+	tooltip('','',{target:menutarget, shiftx:'-14', arrow:'top', data:menudata, style:'white', id:'librarymenu'});
+}
+
+//hide/expand toolbar
+function toggletop(collapse){
+	if(typeof(collapse)=='undefined') collapse = !$('body').hasClass('mintop');
+	else if(collapse==$('body').hasClass('mintop')) return;
+	var arrows = $('#topcollapse>span');
+	if(collapse){
+		localStorage.collapse = "collapse";
+		$('body').addClass('mintop');
+		setTimeout(function(){
+			arrows.html('&#x25BC;<br>&#x25BC;');
+			$('#top .toptext, #top .title, #bottom').css('display','none');
+			$('#top').addClass('hidden');
+			$(window).trigger('resize');
+		},800);
+	} else {
+		localStorage.collapse = "";
+		$('#top .toptext, #bottom').css('display','');
+		if(!model.offline()) $('#top .title').css('display','');
+		setTimeout(function(){ $('body').removeClass('mintop') },100);
+		setTimeout(function(){
+			arrows.html('&#x25B2;<br>&#x25B2');
+			$(window).trigger('resize');
+			$('#top').removeClass('hidden');
+		},800);
+	}
+	
+}
+
+//generate contents for tree node menu
+function treemenu(node){
 	var hidemenu = node.parent?{'Hide this node':{icon:'hide', t:'Collapse node and its children', click:function(){node.hideToggle()}}}:{};
     	$.each(node.children,function(i,child){ //build child nodes hiding submenu
     	if (child.type == 'ancestral') return true; //skip anc.
@@ -2466,8 +2950,8 @@ function tooltip(evt,title,options){
     			}
     		}
     	}
-    	if(!target.x) target.x = evt.pageX+5;
-    	if(!target.y) target.y = evt.pageY+5;
+    	if(!target.x) target.x = evt.pageX+5||0;
+    	if(!target.y) target.y = evt.pageY+5||0;
     	if(!target.height) target.height = 0;
     }
     else{ var target = { x: evt.pageX+5, y: evt.pageY+5 }; } //tooltip next to cursor
@@ -2586,6 +3070,7 @@ function tooltip(evt,title,options){
 }
 
 var activenode = ''; //id of selected treenode
+//Hide/remove a tooltip/pop-up menu
 function hidetooltip(include,exclude,nodeid){
 	if(activenode && (!nodeid || activenode!=nodeid)){
 		try{ treesvg.data.root.getById(activenode).highlight(false); }catch(e){}
@@ -2598,357 +3083,6 @@ function hidetooltip(include,exclude,nodeid){
 		tip.removeClass('opaque');
 		setTimeout(function(){ tip.remove(); },200);
 	});
-}
-
-function selectionsize(e,id,type){ //make or resize a sequence selection box
-	if(typeof(type)=='undefined'){ var type = 'rb', start = {}; }
-	else if(typeof(type)=='object'){ //type => mouse startpos{x,y} || columns [start,end]
-		var start = type.length? {x:type[0]*model.boxw(),w:type[1]-type[0]} : type.x&&type.y? {x:type.x,y:type.y} : {x:0,y:0};
-		if(type.length && (type[1]*model.boxw()<Math.abs(dom.wrap.position().left) || type[0]*model.boxw()>Math.abs(dom.wrap.position().left)+dom.seqwindow.innerWidth())) return; //outside of seqwindow
-		if(e){
-			var dx = e.pageX-type.x, dy = e.pageY-type.y;
-			if(dx<10||dy<10) return; else type = 'rb';
-		}
-	}
-	id = id || model.activeid();
-	if(!id){ //create new selectionbox
-		id = $("div[id^='selection']").length+1;
-		var x=0, y=0, w=1, h=1;
-		dom.seq.append('<div id="selection'+id+'" class="selection"><div class="description"></div><div class="ltresize"></div><div class="rbresize"></div></div>\
-			<div id="vertcross'+id+'" class="selectioncross"><div class="lresize"></div><div class="rresize"></div></div>\
-			<div id="horicross'+id+'" class="selectioncross"><div class="tresize"></div><div class="bresize"></div></div>');
-		if(typeof(type)=='object'){ //coordinates given
-			x = start.x||x;
-			y = start.y||model.boxh()*model.visiblerows().length-model.boxh();
-			w = start.w||w;
-		}else{ //coordinates from mouse
-			x = (start.x||e.pageX)-dom.seq.offset().left-2;
-			y = (start.y||e.pageY)-dom.seq.offset().top;
-			model.activeid(id);
-		}
-		x = x-(x%model.boxw()); y = y-(y%model.boxh()); //snap to grid
-		if(x<0) x=0; if(y<0) y=0;
-		$("#selection"+id).css({'left':x,'top':y,'width':model.boxw()*w,'height':model.boxh()*h,'display':'block'});
-		$("#vertcross"+id).css({'left':x,'top':'0','width':model.boxw()*w,'height':dom.seq.innerHeight(),'display':model.selmode()=='columns'?'block':'none'});
-		$("#horicross"+id).css({'left':'0','top':y,'width':dom.seq.innerWidth(),'height':model.boxh()*h,'display':model.selmode()=='rows'?'block':'none'});
-		dom.seqwindow.mouseup(function(){ //attach resize handles
-			$("#selection"+id).mouseenter(function(){ $("#selection"+id+" div.rbresize, #selection"+id+" div.ltresize").css('opacity','1'); });
-			$("#selection"+id).mouseleave(function(){ $("#selection"+id+" div.rbresize, #selection"+id+" div.ltresize").css('opacity','0'); });
-			$("#vertcross"+id).mouseenter(function(){ $("#vertcross"+id+" div.lresize, #vertcross"+id+" div.rresize").css('opacity','1'); });
-			$("#vertcross"+id).mouseleave(function(){ $("#vertcross"+id+" div.lresize, #vertcross"+id+" div.rresize").css('opacity','0'); });
-			$("#horicross"+id).mouseenter(function(){ $("#horicross"+id+" div.tresize, #horicross"+id+" div.bresize").css('opacity','1'); });
-			$("#horicross"+id).mouseleave(function(){ $("#horicross"+id+" div.tresize, #horicross"+id+" div.bresize").css('opacity','0'); });
-			$("#selection"+id+" div.rbresize").mousedown(function(){
-				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'rb'); });
-			});
-			$("#selection"+id+" div.ltresize").mousedown(function(){
-				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'lt'); });
-			});
-			$("#vertcross"+id+" div.rresize").mousedown(function(){
-				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'r'); });
-			});
-			$("#vertcross"+id+" div.lresize").mousedown(function(){
-				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'l'); });
-			});
-			$("#horicross"+id+" div.bresize").mousedown(function(){
-				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'b'); });
-			});
-			$("#horicross"+id+" div.tresize").mousedown(function(){
-				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'t'); });
-			});
-		});
-	} else { //resize existing selection
-		var over = e.target.id ? e.target : e.target.parentNode;
-		if(over.tagName=='DIV'&&id!=over.id.substr(0-id.toString().length)){ return false; }//avoid overlap
-		var seldiv = $("#selection"+id);
-		if(!seldiv.length) return;
-		if(type!='b'&&type!='t'){
-			if(type=='r'||type=='rb'){
-				var w = e.pageX-seldiv.offset().left-5;
-				w = w-(w%model.boxw())+model.boxw();
-			} else if(type=='l'||type=='lt'){
-				var l = e.pageX-seldiv.parent().offset().left+5;
-				l = l-(l%model.boxw());
-				var redge = seldiv.position().left+seldiv.innerWidth();
-				if(l>redge-model.boxw()){ l=redge-model.boxw(); }
-				var w = redge-l;
-				seldiv.css('left',l);
-				$("#vertcross"+id).css('left',l);
-			}
-			if(w<model.boxw()){ w = model.boxw(); }
-			seldiv.css('width',w);
-			$("#vertcross"+id).css('width',w);
-		}
-		if(type!='r'&&type!='l'){
-			if(type=='b'||type=='rb'){
-				var h = e.pageY-seldiv.offset().top-5;
-				h = h-(h%model.boxh())+model.boxh();
-			} else if(type=='t'||type=='lt'){
-				var t = e.pageY-seldiv.parent().offset().top+5;
-				t = t-(t%model.boxh());
-				var bedge = seldiv.position().top+seldiv.innerHeight();
-				if(t>bedge-model.boxh()){ t=bedge-model.boxh(); }
-				var h = bedge-t;
-				seldiv.css('top',t);
-				$("#horicross"+id).css('top',t);
-			}
-		 	if(h<model.boxh()){ h = model.boxh(); }
-			seldiv.css('height',h);
-			$("#horicross"+id).css('height',h);
-		}
-		if(seldiv.innerHeight()>20 && seldiv.innerWidth()>40){//show selection size
-			if(seldiv.innerWidth()>140){ var r=' rows | ',c=' columns';}else{ var r='x',c=''; }
-			$("#selection"+id+' div.description').css('display','block'); 
-			$("#selection"+id+' div.description').text(parseInt(seldiv.innerHeight()/model.boxh())+r+parseInt(seldiv.innerWidth()/model.boxw())+c);
-		} else { $("#selection"+id+' div.description').css('display','none'); }
-	}
-}
-
-function registerselections(id){//set flags in seq. selection vectors
-	colflags = []; rowflags=[]; selections = [];
-	var selector = id ? '#selection'+id : 'div[id^="selection"]';
-	$(selector).each(function(){
-		var sel = $(this);
-		var colstart = parseInt(sel.position().left/model.boxw());
-		var colend = parseInt((sel.position().left + sel.width())/model.boxw());
-		var rowstart = parseInt(sel.position().top/model.boxh());
-		var rowend = parseInt((sel.position().top + sel.height())/model.boxh());
-		for(var c=colstart;c<colend;c++){ colflags[c] = 1; }
-		for(var r=rowstart;r<rowend;r++){ rowflags[r] = 1; }
-		selections.push({'rowstart':rowstart,'rowend':rowend,'colstart':colstart,'colend':colend});
-	});
-}
-
-function clearselection(id){
-	id = typeof(id)=='undefined' ? false : id;
-	if(id){ $("#selection"+id).remove(); $("#vertcross"+id).remove(); $("#horicross"+id).remove(); }
-	else{ $("#seq div[id*='selection'],#seq div[id*='cross']").remove(); }
-	model.activeid('');
-}
-
-function toggleselection(type,id,exclude){ //toggle row/column selection
-	if(typeof(id)=='undefined') id=''; if(typeof(exclude)=='undefined') exclude='';
-	if(~type.indexOf('tmp') && model.selmode()!='default') return;
-	if(type=='default'){ toggleselection('hide rows',id); type='hide columns'; } //actions for selection mode change
-	else if(type=='columns'){ toggleselection('hide rows',id); type='show columns'; }
-	else if(type=='rows'){ toggleselection('show rows',id); type='hide columns'; }
-	var divs = ~type.indexOf('rows')? $('div[id^="horicross'+id+'"]') : ~type.indexOf('columns')? $('div[id^="vertcross'+id+'"]') : $('div[id$="cross'+id+'"]');
-	if(exclude) divs = divs.not('div[id$="cross'+exclude+'"]'); //filter out some divs
-	$(divs).each(function(){ if(~type.indexOf('show')) $(this).stop().fadeIn(200); else $(this).fadeOut(200); }); 
-}
-
-function seqinfo(e){ //generate character info tooltip content
-	if(!e.pageX||!e.pageY) return false;
-	var x = e.pageX-dom.seq.offset().left-2;
-	x = parseInt(x/model.boxw());
-	var y = e.pageY-dom.seq.offset().top-2;
-	y = parseInt(y/model.boxh());
-	if(x<0){ x=0; } if(y<0){ y=0; }
-	var col = model.visiblecols()[x]; var name = model.visiblerows()[y];
-	if(!sequences[name]) return false;
-	var suppl = col==x ? '' : '<br>(column '+(col+1)+' if uncollapsed)';
-	var seqpos = sequences[name].slice(0,col+1).join('').replace(/[_\-.:]/g,'').length;
-	var symb = typeof(sequences[name][col])=='undefined' ? '' : sequences[name][col];
-	symb = canvaslabels[symb]||symb;
-	var symbcanvas = model.boxh()>12 && typeof(symbols[symb])!='undefined'? cloneCanvas(symbols[symb]['canvas']) : '<span style="color:orange">'+symb+'</span>';
-	if(leafnodes[name]) name = leafnodes[name].displayname||name;
-	var content = $('<span style="color:orange">'+name+'</span><br>').add(symbcanvas).add('<span> position '+seqpos+' column '+(x+1)+suppl+'</span>');
-	return {content:content, col:x, row:y, x:x*model.boxw(), y:y*model.boxh(), width:model.boxw(), height:model.boxh()}
-}
-
-function hidecolumns(selectionid, skipundo){ //make columns hidden (based on [selections =>]columnflags)
-	if(typeof(selectionid)=='string') registerselections(selectionid);
-	var undodata = (skipundo || !settingsmodel.undo())? false : [];
-	var range = [], col = 0;
-	for(var c=0,adj=0; c<colflags.length; c++){
-		if(undodata){
-			col = model.visiblecols()[c-adj];
-			if(colflags[c]){ if(!range.length) range[0] = col; }
-			else if(range.length){ range[1] = col; undodata.push(range); range = []; } 
-		}
-		if(colflags[c]){ model.visiblecols.splice(c-adj,1); adj++; } //remove columns from rendering pipeline
-	}
-	if(undodata){
-		if(range.length){ range[1] = col+1; undodata.push(range); }
-		if(undodata.length){
-			var s = undodata.length==1? ' was' : 's were';
-			var undodesc = undodata.length+' alignment column range'+s+' collapsed.';
-			model.addundo({name:'Collapse columns',seqtype:model.seqtype(),type:'seq',data:undodata,info:undodesc,
-			undoaction:'show columns',redoaction:'hide columns'});
-		}
-	}
-	redraw();
-}
-
-function showcolumns(gaparr, hidetip, seqtype){ //make columns visible again (based on input ranges)
-	if(hidetip) hidetooltip();
-	if(gaparr=='all'){
-		for(var c=model.alignlen(), colarr=[]; c--;) colarr[c] = c;
-		model.visiblecols(colarr); //mark all columns as visible
-		redraw(); return;
-	}
-	var visiblecols = model.visiblecols();
-	$.each(gaparr, function(i,gapcols){
-		if(gapcols.length!=2) return true;
-		if(seqtype) gapcols = translatecolumns(seqtype, model.seqtype(), gapcols);
-		var scol = gapcols[0], ecol = gapcols[gapcols.length-1], start = 0, del = 0, fill = [];
-		$.each(visiblecols,function(i,c){ if(c>=scol){ //indexes to fill in
-				if(i&&!start) start = i;
-				if(c<ecol) del++; else return false;
-		}});
-		for(var f=scol;f<ecol;f++){ fill.push(f); }
-		if(scol>=visiblecols.length) start = visiblecols.length;
-		model.visiblecols.splice.apply(model.visiblecols,[start,del].concat(fill));
-	});
-}
-
-function removecolumns(removecols){ //remove collapsed alignment columns
-	var undodata = (removecols||!settingsmodel.undo())? false : {};
-	if(!removecols){
-		var removecols = [], range = [];
-		$("#right div.marker").each(function(){
-			range = $(this).data('colrange');
-			for(var i=range[0]; i<range[1]; i++){ removecols.push(i); }
-		});
-	}
-	if(!removecols.length) return;
-	if(undodata) undodata.removecols = removecols;
-	for(var name in sequences){
-		var seqdata = [];
-		for(var c=0; c<removecols.length; c++){
-			seqdata.push(sequences[name].splice(removecols[c]-c,1)[0]);
-		}
-		if(undodata) undodata[name] = seqdata;
-	}
-	if(undodata) model.addundo({name:'Remove columns', type:'seq', seqtype:model.seqtype(), undoaction:'addcolumns', redoaction:'removecolumns', data: undodata, info:removecols.length+' alignment columns were removed'});
-	showcolumns('all');
-}
-
-function addcolumns(data, seqtype){ //restore removed alignment columns
-	if(!data||!seqtype) return;
-	if(model.seqtype() != seqtype) translateseq(seqtype);
-	for(var name in data){
-		if(!sequences[name]) continue;	
-		for(var c=0; c<data.removecols.length; c++){
-			sequences[name].splice(data.removecols[c], 0, data[name][c]);
-		}
-	}
-	redraw();
-}
-
-function hiderows(selectionid){ //hide seq. rows from seq. area
-	var namearr = [];
-	action = 'hide';
-	registerselections(selectionid);
-	for(var r=0;r<rowflags.length;r++){ if(rowflags[r]){ namearr.push(model.visiblerows()[r]); }}
-	$.each(namearr,function(n,name){ if(leafnodes[name]) leafnodes[name].hideToggle('hide'); });
-	refresh();
-}
-
-function maskdata(action,selectionid){ //mask a sequence region
-	var target = ~action.indexOf('rows')? 'rows' : ~action.indexOf('columns')? 'columns' : 'selections';
-	if(~action.indexOf('unmask')){ var symboltype = 'unmasked'; var flag = false; } else { var symboltype = 'masked'; var flag = 1; }
-	registerselections(selectionid);
-	var undodata = {}, undodesc = '';
-	
-	if(~action.indexOf('all')){
-		for(var name in sequences){ for(var c=0;c<sequences[name].length;c++) sequences[name][c] = symbols[sequences[name][c]][symboltype]; }
-	}
-	else if(action=='hidemaskedcols'){
-		for(var c=0;c<maskedcols.length;c++){ 
-			if(maskedcols[c]){
-				var colind = model.visiblecols.indexOf(c);
-				if(~colind){ model.visiblecols.splice(colind,1); }
-			} 
-		}
-	}
-	else if(target=='columns'){
-		undodata._columns = []; var firstrow = true;
-		for(var name in sequences){ if(~model.visiblerows.indexOf(name)){
-			if(flag) undodata[name] = 'columns';
-			for(var c=0;c<colflags.length;c++){ if(colflags[c]){
-					var colid = model.visiblecols()[c];
-					sequences[name][colid] = symbols[sequences[name][colid]][symboltype];
-					maskedcols[colid] = flag;
-					if(flag && firstrow) undodata._columns.push(colid);
-			}}
-			firstrow = false;
-		}}
-		undodesc = undodata._columns.length+' '+model.seqtype()+' alignment columns were masked.';
-	}
-	else if(target=='rows'){
-		for(var r=0;r<rowflags.length;r++){ if(rowflags[r]){
-				var name = model.visiblerows()[r];
-				if(flag) undodata[name] = 'all';
-				for(var c=0;c<sequences[name].length;c++){ sequences[name][c] = symbols[sequences[name][c]][symboltype]; }
-		}}
-		undodesc = Object.keys(undodata).length+' sequences were masked.';
-	}
-	else if(target=='selections'){
-		for(var s=0;s<selections.length;s++){
-			var sel = selections[s];
-			for(var r=sel.rowstart;r<sel.rowend;r++){
-				var name = model.visiblerows()[r];
-				if(!undodata[name]) undodata[name] = [];
-				for(var c=sel.colstart;c<=sel.colend;c++){
-					var colid = model.visiblecols()[c];
-					sequences[name][colid] = symbols[sequences[name][colid]][symboltype];
-					if(flag) undodata[name].push(colid);
-					else maskedcols[colid] = false;
-				}
-			}
-		}
-		undodesc = selections.length+' alignment blocks were masked.';
-	}
-	if(!$.isEmptyObject(undodata)){
-		model.addundo({name:'Mask '+target,seqtype:model.seqtype(),type:'seq',data:undodata,info:undodesc,undoaction:'unmask',redoaction:'mask'});
-	}
-	redraw();
-}
-
-function undoseq(seqtype, undodata, action){ //undo/redo sequence actions
-	if(~action.indexOf('mask')){ //(un)mask seq. areas/rows/columns
-		var symboltype = ~action.indexOf('unmask')? 'unmasked' : 'masked';
-		var columns = undodata._columns? undodata._columns : [];
-		for(name in undodata){
-			if(!sequences[name]) continue;
-			if(undodata[name]==='all'){
-				for(var c=0;c<sequences[name].length;c++) sequences[name][c] = symbols[sequences[name][c]][symboltype];
-			} else {
-				if(undodata[name]!=='columns') columns = undodata[name];
-				columns = translatecolumns(seqtype, model.seqtype(), columns);
-				for(var c=0;c<columns.length;c++) sequences[name][columns[c]] = symbols[sequences[name][columns[c]]][symboltype];
-			}
-		}
-	}
-	else if(~action.indexOf('show')){ showcolumns(undodata, false, seqtype); }
-	else if(~action.indexOf('hide')){ //rehide columns
-		colflags = [];
-		var c = 0, i = 0; visiblecols = model.visiblecols();
-		$.each(undodata,function(i,range){
-			if(range.length!=2) return true;
-			range = translatecolumns(seqtype, model.seqtype(), range);
-			var scol = range[0], ecol = range[range.length-1];
-			for(;i<visiblecols.length;i++){ //column range=>colflags
-				c = visiblecols[i];
-				if(c>=scol){ if(c<ecol) colflags[i] = 1; else break; }
-			}
-		});
-		hidecolumns(false,'skipundo');
-	}
-	else if(~action.indexOf('add')){ addcolumns(undodata, seqtype); } //restore removed columns
-	else if(~action.indexOf('remove')){ removecolumns(translatecolumns(seqtype, model.seqtype(), undodata.removecols)); }
-	redraw();
-}
-
-// Delegated closing of dialog windows
-function closewindow(elem,addfunc){
-	if(!elem) elem = $(this||'div.popupwindow');
-	else if(typeof(elem)=='string') elem = elem=='all'? $('div.popupwindow') : $('#'+elem);
-	else elem = $(elem);
-	var windiv = elem.hasClass('popupwindow')? elem : elem.hasClass('popupwrap')? $(elem[0]) : elem.closest('div.popupwindow');
-	if(typeof(addfunc)=='function') windiv.find('.closebtn').click(addfunc);
-	else windiv.find('.closebtn').click();
 }
 
 /* Generate pop-up windows */
@@ -3039,7 +3173,17 @@ function makewindow(title,content,options){ //(string,array(,obj{flipside:'front
 	return windowdiv;
 }
 
-//create arrowed titles for collapsible divs
+// Delegated closing of dialog windows
+function closewindow(elem,addfunc){
+	if(!elem) elem = $(this||'div.popupwindow');
+	else if(typeof(elem)=='string') elem = elem=='all'? $('div.popupwindow') : $('#'+elem);
+	else elem = $(elem);
+	var windiv = elem.hasClass('popupwindow')? elem : elem.hasClass('popupwrap')? $(elem[0]) : elem.closest('div.popupwindow');
+	if(typeof(addfunc)=='function') windiv.find('.closebtn').click(addfunc);
+	else windiv.find('.closebtn').click();
+}
+
+//make arrow+title for collapsible window section
 function expandtitle(options){
 	var arrow = $('<span class="rotateable">&#x25BA;</span>');
 	var titlespan = $('<span class="action" title="'+(options.desc||'Click to toggle content')+'">'+(options.title||'View/hide')+'</span>');
@@ -3066,7 +3210,7 @@ function expandtitle(options){
 	return titlediv;
 }
 
-//Content for different types of pop-up windows
+//Generate content for pop-up windows
 function dialog(type,options){
 	if(typeof(type.act)!='undefined') type = type.act;
 	//window laready created. bring it to front.
@@ -3108,10 +3252,10 @@ function dialog(type,options){
 		selectbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
 		var or = $('<div style="display:inline-block;font-size:18px;"> or </div>');
 		
-		var otherhelp = 'Type a web address of a remote data file or Wasabi share link, or paste a raw text of sequence/tree data';
+		var otherhelp = 'Type a web address of a remote data file or Wasabi share link/ID, or paste a raw text of sequence/tree data';
 		var remoteheader = '<br><br><div class="sectiontitle"><img src="images/web.png"><span>Import from other sources</span><span class="svg" title="'+otherhelp+'">'+svgicon('info')+'</span></div><br>';
 		var urladd = $('<a title="Add another input field" class="button urladd">+</a>'); //url inputs+buttons
-		var urlinput = $('<textarea type="url" class="url" placeholder="Type a web address or raw data">');
+		var urlinput = $('<textarea type="url" class="url" placeholder="Type a web address, Wasabi ID or raw data">');
 		var expbtn = $('<span class="action icon" style="margin-left:-4px;vertical-align:7px" title="Expand/collapse the input field">&#x25BC;</span>');
 		expbtn.click(function(){
 			var self = $(this), field = self.prev("textarea");
@@ -3135,6 +3279,9 @@ function dialog(type,options){
 			$('#'+winid+' .front .windowcontent textarea.url').each(function(i,input){
 				var val = $(input).val();
 				if(!val) return true;
+				if(~val.length==6){
+					urlarr.push({share:{share:val, host:'http://'+window.location.host}});
+				}
 				if(~val.indexOf('share=')){
 					var urlind = val.lastIndexOf('?');
 					var urlvars = parseurl(val.substring(urlind+1));
@@ -3279,8 +3426,9 @@ function dialog(type,options){
 		var opttitle = expandtitle({title:'Alignment options', desc:'Click to toggle options', onshow:function(){infospan.fadeIn()}, onhide:function(){infospan.fadeOut()}}).append(infospan);
 		var tunetitle = expandtitle({title:'Fine-tuning', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
 		var treecheck = $.isEmptyObject(treesvg)?'checked="" disabled=""':''; //new tree needed
-		var writetarget = (exportmodel.savetargets().length?'<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input (currently open) analysis">Save as</span> <select data-bind="visible:exportmodel.savetargets().length>1, options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':'Will be saved as new')+
-		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
+		var writetarget = (exportmodel.savetargets().length>1? '<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input '+
+		'(currently open) analysis">Save as</span> <select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':
+		'The result will be saved as new root')+' analysis in the <a onclick="dialog(\'library\')">library</a>.<br>';
 		exportmodel.savetarget(exportmodel.savetargets()[exportmodel.savetargets().length-1]); //default: sibling||child||new
 		
 		
@@ -3326,13 +3474,13 @@ function dialog(type,options){
 		var header = 'Currently open sequence data will be aligned with <a href="http://pagan-msa.googlecode.com" target="_blank">Pagan</a> aligner.<br>';
 		var nameinput = $('<input type="text" class="hidden" value="Pagan realignment" title="Click to edit">');
 		var namespan = $('<span class="note">Name the results: </span>').append(nameinput);
-		var presets = '<hr><span>Saved options:</span> <select style="margin-bottom:5px" data-bind="fadevisible:!edit(), options:serverdata.params.pagan, '+
+		/*var presets = '<hr><span>Saved options:</span> <select style="margin-bottom:5px" data-bind="fadevisible:!edit(), options:serverdata.params.pagan, '+
 		'value:selected, optionsText:\'name\', optionsCaption:\'Choose a preset\'"></select> '+
 		'<input data-bind="fadevisible:edit,value:name" style="width:180px" placeholder="Type new preset name" title="Edit preset name"></input> '+
 		'<a class="button small square" data-bind="visible:selected()&&!edit(),click:function(){edit(true)},text:\'Edit\'" title="Edit this preset"></a>'+
 		'<a class="button small square red" data-bind="visible:edit,click:remove"  title="Remove this preset">Delete</a> '+
 		'<a class="button small square" data-bind="visible:!selected(),click:add" title="Add new preset">Create</a>'+
-		'<div style="color:red" data-bind="tempfade:error,text:error"></div>';
+		'<div style="color:red" data-bind="tempfade:error,text:error"></div>';*/
 		
 		var infospan = $('<span class="note" style="display:none;margin-left:20px" data-bind="text:note"></span>');
 		var opttitle = expandtitle({title:'Edit options', desc:'Click to toggle options', onshow:function(){infospan.fadeIn()}, onhide:function(){infospan.fadeOut()}}).append(infospan);
@@ -3340,7 +3488,7 @@ function dialog(type,options){
 		var writetarget = (exportmodel.savetargets().length>1?'<span class="label" title="Specify the saving place '+
 		'for the new analysis in the library, relative the to the input (currently open) analysis">Save as</span> '+
 		'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':
-		'Will be saved as new')+' analysis in the <a onclick="dialog(\'library\')">library</a>.';
+		'The result will be saved as new root')+' analysis in the <a onclick="dialog(\'library\')">library</a>.<br>';
 		exportmodel.savetarget(exportmodel.savetargets()[exportmodel.savetargets().length-1]);
 		
 		var inclhidden = '<br><input name="includehidden" type="checkbox" data-bind="checked:exportmodel.includehidden">'+
@@ -3351,7 +3499,7 @@ function dialog(type,options){
 		if($.isEmptyObject(treesvg)){ paganmodel.on.newtree(true); var treedis = 'disabled=""'; } //new tree needed
 		else treedis = '';
 		optform.append('<input type="checkbox" name="newtree" data-bind="checked:on.newtree" '+treedis+'><span class="label" title="Create a new phylogenetic tree to guide the sequence alignment process (uncheck to use the current tree)">create a guidetree</span>');
-		var treetitle = expandtitle({title:'More options', desc:'Tree manipulation options', inline:true});
+		/*var treetitle = expandtitle({title:'More options', desc:'Tree manipulation options', inline:true});
 		var treediv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
 		'<span data-bind="visible:on.newtree"><input type="checkbox" name="raxml-tree" data-bind="enable:on.newtree">'+
 		'<span class="label" title="use RAxML for guide tree computation (default: BppDist)">create RAxML tree</span><br></span>'+
@@ -3360,10 +3508,10 @@ function dialog(type,options){
 		'Use <input type="checkbox" name="real-branches" data-bind="checked:on.realb"><span class="label" title="use real tree branch lengths">real</span> '+
 		'<span data-bind="visible:!on.realb()">or <span class="label" title="fixed length for tree branches">fixed</span> <input type="text" name="fixed-branches" data-bind="disable:on.realb"></span> branch lengths<br>'+
 		'<span class="label" title="minimum length for tree branches">min. branch length</span> <input type="text" name="min-branch-length">');
-		optform.append(treetitle,treediv);
+		optform.append(treetitle,treediv);*/
 		
 		optform.append('<br><input type="checkbox" checked="checked" name="anchor"><span class="label" title="Use Exonerate anchoring to speed up alignment">alignment anchoring</span>');
-		var anchortitle = expandtitle({title:'More options', desc:'Exonerate anchoring options', inline:true});
+		/*var anchortitle = expandtitle({title:'More options', desc:'Exonerate anchoring options', inline:true});
 		var anchordiv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
 		'<span class="label" title="Exonerate hit length for anchor">exonerate hit length</span> <input type="text" name="exonerate-hit-length" placeholder="30"> '+
 		'<span class="label" title="Exonerate hit score for anchor">exonerate hit score</span> <input type="text" name="exonerate-hit-score"><br>'+
@@ -3371,10 +3519,10 @@ function dialog(type,options){
 		'<span class="label" title="anchoring coverage threshold for skipping">anchoring threshold</span> <input type="text" name="anchoring-threshold" placeholder="0.50"><br>'+
 		'<input type="checkbox" name="use-prefix-anchors" data-bind="checked:on.useprefix"><span class="label" title="use prefix approach to anchor alignment">use prefix anchors</span> '+
 		'<span data-bind="visible:on.useprefix">with <span class="label" title="prefix hit length for anchor">prefix hit length</span> <input type="text" name="prefix-hit-length" placeholder="30" data-bind="enable:on.useprefix">');
-		optform.append(anchortitle,anchordiv);
+		optform.append(anchortitle,anchordiv);*/
 		
-		filescontent = {}; model.filestype('');
-		var filediv = $('<div><div class="sectiontitle small"><span>Alignment extension</span></div></div>');
+		imported([]);
+		var filediv = $('<div><div class="sectiontitle small"><span class="label" title="Extend current alignment with sequences from a query file">Alignment extension</span></div></div>');
 		var filedrag = $('<div class="filedrag">Drag query file here</div>');
 		filedrag.bind('dragover',function(evt){ //file drag area
 			filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
@@ -3392,11 +3540,11 @@ function dialog(type,options){
 		
 		var filelist = $('<div data-bind="visible:model.filestype">Extend with <img class="icn" src="images/file.png"> <span data-bind="text:model.filesname"></span></div>');
 		var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;">'+svgicon('close')+'</span>');
-		filedel.click(function(e){ filescontent={}; model.filestype(''); return false; });
+		filedel.click(function(e){ imported([]); return false; });
 		var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{filename:model.filesname})}">View</a>');
-		filelist.append(filedel, fileview); filediv.append(importdiv, filelist);
+		filelist.append(filedel, fileview); filediv.append(importdiv, filelist); optform.append(filediv);
 
-		var extentitle = expandtitle({title:'Alignment extension options', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
+		/*var extentitle = expandtitle({title:'Alignment extension options', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
 		var extendiv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
 		'Correct for <input type="checkbox" name="454"><span class="label" title="correct homopolymer error (DNA)">454</span> '+
 		'<input type="checkbox" name="homopolymer"><span class="label" title="correct homopolymer error (more agressively)">homopolymer</span> errors.<br>'+
@@ -3436,7 +3584,7 @@ function dialog(type,options){
 		'<span data-bind="visible:!on.nofastq()">or <span class="label" title="threshold to mask low Q-score sites">require min.</span> <input type="text" name="qscore-minimum" placeholder="10" data-bind="disable:on.nofastq"> </span>fastq quality score<br>'+
 		'<input type="checkbox" name="perfect-reference"><span class="label" title="assume perfect reference alignment">perfect reference</span></div>');
 		extendiv.append(extentitle2,extendiv2);
-		optform.append(filediv,extentitle,extendiv);
+		optform.append(extentitle,extendiv);
 
 		var exontitle = expandtitle({title:'Exonerate options', desc:'Click to toggle additional parameters'}).css('margin-top','5px');
 		var exondiv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
@@ -3487,13 +3635,13 @@ function dialog(type,options){
 		'<span class="label" title="Transition/transversion rate ratio in substitution model (kappa)">K</span> <input type="text" name="dna-kappa"> '+
 		'<span class="label" title="Purine/pyrimidine rate ratio in substitution model (rho)">P</span> <input type="text" name="dna-rho"><br></span>'+
 		'<input type="checkbox" name="use-aa-groups"><span class="label" title="reconstruct amino-acid parsimony with 51 groups">use amino-acid groups</span></div>');
-		optform.append(aligntitle,aligndiv);
+		optform.append(aligntitle,aligndiv);*/
 		
 		var optdiv = $('<div class="insidediv" style="display:none">').append(writetarget, inclhidden, optform);
 		var alignbtn = $('<a class="button orange">Start alignment</a>');
 		alignbtn.click(function(){ sendjob({form:$('form',optdiv)[0],btn:alignbtn,name:nameinput.val(),pagan:true}); });
 		
-		var dialogwindow = makewindow("Pagan alignment",[header,namespan,presets,opttitle,optdiv,'<br>'],{id:type, btn:alignbtn, icn:'icon_prank', nowrap:true});
+		var dialogwindow = makewindow("Pagan alignment",[header,namespan,opttitle,optdiv,'<br>'],{id:type, btn:alignbtn, icn:'icon_prank', nowrap:true});
 		ko.applyBindings(paganmodel,dialogwindow[0]);
 	}
 // notifications & submitted job status window
@@ -3505,13 +3653,14 @@ function dialog(type,options){
 		
 		var treenotif = $('<div data-bind="visible:treealtered" class="sectiontext">'+
 		'The tree phylogeny has been changed and the sequence alignment needs to be updated to reflect the new tree.<br>'+
+		'<a class="button square" onclick="model.treealtered(false);return false;" title="Hide this notification">Dismiss</a>'+
 		'<a class="button square red" data-bind="visible:treebackup" onclick="model.selectundo(\'firsttree\'); model.undo(); return false;" title="Undo tree modifications">Revert changes</a></div>');
 		var realignbtn = $('<a class="button square orange" title="Realign current dataset with PRANK">Realign</a>');
-		var writetarget = 'Realigned data will be saved as '+(exportmodel.savetargets().length?'<select data-bind="visible:exportmodel.savetargets().length>1, options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':'new')+
+		var writetarget = 'Realigned data will be saved as '+(exportmodel.savetargets().length>1?'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':'new root')+
 		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
 		exportmodel.savetarget(exportmodel.savetargets()[0]);
 		realignbtn.click(function(){ sendjob({btn:realignbtn,realign:true}) });
-		treenotif.append(realignbtn,writetarget,'<hr>');
+		treenotif.append(realignbtn,'<br>',writetarget,'<hr>');
 		
 		var ancnotif = $('<div data-bind="visible:noanc" class="sectiontext">'+
 		'Current phylogenetic tree is missing sequences for ancestral nodes. Wasabi can use the PRANK aligner to infer the ancestral sequences and add it to the dataset.<br>'+
@@ -3524,7 +3673,7 @@ function dialog(type,options){
 		var errornotif = $('<div data-bind="visible:errors" class="sectiontext">An error occured when communicating with Wasabi server, so some functions may not work.<br>'+
 		'The list of errors has been saved. In addition, your feedback would help us to fix the issue.<br>'+
 		'<a class="button square" onclick="model.errors(\'\');">Dismiss</a> <a class="button square" onclick="dialog(\'errorlog\')">View errors</a> '+
-		'<a class="button square" href="http://wasabi2.biocenter.helsinki.fi/feedback" traget="_blank">Contact us</a> <hr></div>');
+		'<a class="button square" href="http://wasabi2.biocenter.helsinki.fi/feedback" target="_blank">Contact us</a> <hr></div>');
 		
 		var newver = model.version.remote();
 		var updatenotif = $('<div data-bind="visible:update" class="sectiontext">'+
@@ -3559,14 +3708,12 @@ function dialog(type,options){
 		  '<span class="note">Status:</span> <span data-bind="text:[status(),\'Failed\',\'Finished\'][st()], css:{red:st()==1,label:true},'+
 		  'attr:{title:st()==1?(outfile()?\'Job cancelled. Exit code \'+status():\'No output file\'):\'No errors\'}"></span><br>'+
 		  '<span class="note">Job type:</span> <span data-bind="text:$data.type?type():\'Realignment\'"></span>'+
-		  '<a class="button itembtn" data-bind="text:[\'Kill\',\'Delete\',\'Import\'][st()], css:{red:st()!=2},'+
-		    'attr:{title:[\'Cancel job\',\'Delete data\',\'Import to library\'][st()]},'+
-		    'click:st()==2?$parent.importitem:$parent.removeitem"></a><br>'+
-		  '<span class="note">Created:</span> <span data-bind="text:msectodate(unwrap(starttime))"></span> '+
-		  '<span class="importtick" title="Moves files to analysis library without loading it to the browser" data-bind="visible:st()==2">'+
-		    '<input type="checkbox"><span class="label">Just move data</span></span>'+
-		  '<a class="button itembtn" style="top:65%" data-bind="visible:st()==1&&~log().indexOf(\'done\'),click:$parent.importitem" '+
-		    'title="Move data to analysis library (for further inspection)">Move to library</a><br>'+
+		  '<a class="button itembtn" data-bind="text:[\'Kill\',\'Delete\',\'Open\'][st()], css:{red:st()!=2},'+
+		    'attr:{title:[\'Cancel job\',\'Delete files\',\'Move dataset to library and open it in Wasabi\'][st()]},'+
+		    'click:st()==2?$parent.importitem:$parent.removeitem"></a>'+
+		  '<a class="button itembtn round gear" title="Click for more options" style="right:0" data-bind="visible:st,'+
+		    'click:$parent.jobmenu"><span class="svgicon" style="padding:4px">'+svgicon('gear')+'</span></a><br>'+
+		  '<span class="note">Created:</span> <span data-bind="text:msectodate(unwrap(starttime))"></span><br>'+
 		  '<span class="note">Job ID:</span> <span data-bind="text:id"></span><br>'+
 		  '<span class="note">Feedback:</span> <span class="logline action" '+
 		    'data-bind="click:function(itm,evt){ $parent.showfile(itm,evt,itm.logfile) },'+
@@ -3599,7 +3746,8 @@ function dialog(type,options){
 		  '<span class="note">Created:</span> <span data-bind="text:msectodate($data.starttime)"></span><br>'+
 		  '<span class="note">Last saved:</span> <span data-bind="text:msectodate($data.savetime)"></span><br>'+
 		  '<span class="note">Data source:</span> <span data-bind="text:$data.aligner?aligner+\' alignment\':'+
-		    '$data.source?\'Imported from \'+$data.source:\'Unknown\', css:{label:$data.parameters}, attr:{title:$data.parameters?\'Started with: \'+$data.parameters:\'\'}"></span>'+
+		    '$data.source?\'Imported from \'+$data.source:\'Unknown\', css:{label:$data.parameters}, '+
+		    	'attr:{title:$data.parameters?\'Launched with: \'+$data.parameters: $data.importurl?\'Imported from \'+$data.importurl: \'\'}"></span>'+
 		    '<span data-bind="visible:$data.shared" class="label" style="color:#6D98B6;margin-left:5px" title="You can read or (re)move this dataset in your library but only the owner can modify its content">(shared)</span>'+
 		  '<a class="button itembtn childbtn" data-bind="visible:children, click:function(data){$parent.dirpath.push(data.id)},'+
 		    'css:{activeitem:~$parent.openpath().indexOf(id)}" title="View subanalyses"><span class="svg">'+svgicon('children')+
@@ -3636,10 +3784,11 @@ function dialog(type,options){
 	}
 // batch filter/collapse for sequence area
 	else if(type=='seqtool'){
-		var content = $('<div class="sectiontitle"><span>Filter alignment columns</span></div><div class="sectiontext">'+
+		var content = $('<div class="spinnercover"><span>Counting gaps...</span></div>'+
+		'<div class="sectiontitle"><span>Filter alignment columns</span></div><div class="sectiontext">'+
 		'Hide all sequence alignment columns where: '+
 		'<ul><li><input type="checkbox" data-bind="checked:minhidelimit"> there is no sequence data, or</li>'+
-		'<li>less than <input id="hidecolinp" type="text" class="num nogap" data-bind="value:hidelimit,valueUpdate:\'afterkeydown\'"> '+
+		'<li><input id="hidecolinp" type="text" class="num nogap" data-bind="value:hidelimit,valueUpdate:\'afterkeydown\'"> or less '+
 		'<span class="note" style="min-width:85px;text-align:center" data-bind="text:\'(or <\'+hidelimitperc()+\'% of)\'"></span> rows contain sequence data.<br>'+
 		'<span class="note">0%</span><span class="draggerline"></span><span class="note">100%</span></li>'+
 		'<li>gaps <span data-bind="visible:model.hasdot">represent <select data-bind="options:[\'indels\',\'insertions\',\'deletions\'],value:gaptype"></select></span>'+
@@ -3647,6 +3796,7 @@ function dialog(type,options){
 		'<li>keep <input type="text" class="num nogap" data-bind="value:buflen,valueUpdate:\'afterkeydown\'"> columns from each gap edge visible.</li></ul>'+
 		'</div><div>This will <span class="label" title="To permanently remove the collapsed columns, go to sequence &gt; right-click &gt; remove hidden columns">collapse</span> <span data-bind="text:hidecolcount"></span> columns '+
 		'<span class="note" data-bind="text:\'(\'+hidecolperc()+\'%)\'"></span> of sequence alignment.</div>');
+		_paq.push(['trackEvent','tools','gap_hiding']); //record event
 		
 		var slider = $('<span class="dragger" data-bind="style:{marginLeft:\'-7px\',left:hidelimitperc()+\'%\'}"></span>');
 		var sliderline = $('.draggerline',content);
@@ -3665,13 +3815,14 @@ function dialog(type,options){
 			containment: 'parent',
 			drag: function(e,elem){ toolsmodel.hidelimitperc((elem.position.left+4)/slidew*100) }
 		});
-		setTimeout(function(){toolsmodel.countgaps()},800);
 		ko.applyBindings(toolsmodel,dialogwindow[0]);
+		setTimeout(function(){toolsmodel.countgaps()},500);
 	}
 //batch edit/hide for tree area
 	else if(type=='treetool'){
 		var title = $('<div class="sectiontitle"><span>Prune tree leafs</span></div>');
 		var content = $('<div class="sectiontext">You can mark/unmark tree leafs by clicking on a leaf name<br>or by dragging in the sequence area.<br><br></div>');
+		_paq.push(['trackEvent','tools','tree_pruning']); //record event
 		
 		var emptyleaves = [];
 		$.each(leafnodes,function(name,node){ if(!sequences[name]) emptyleaves.push(name); });
@@ -3764,6 +3915,7 @@ function dialog(type,options){
 		'<a class="button left disabled" onclick="translateseq(\'dna\')" data-bind="css:{pressed:seqtype()==\'dna\'||seqtype()==\'rna\',disabled:!dnasource()}">nucleotides</a>'+
 		'<a class="button middle" onclick="translateseq(\'codons\')" data-bind="css:{pressed:seqtype()==\'codons\',disabled:!dnasource()}">codons</a>'+
 		'<a class="button right pressed" onclick="translateseq(\'protein\')" data-bind="css:{pressed:seqtype()==\'protein\'}">protein</a></span><div>';
+		_paq.push(['trackEvent','tools','translate']); //record event
 		
 		var dnaimport = $('<div data-bind="visible:!dnasource()">To backtranslate a protein sequence, Wasabi needs the cDNA sequences used for the protein alignment.<br>'+
 		'Drag or select data file(s) with the source cDNA.<br></div>');
@@ -3810,6 +3962,8 @@ function dialog(type,options){
 		var str = '<div class="sectiontitle"><span>Welcome to Wasabi</span></div>'+
 		'Wasabi is a streamlined application for phylogenetic sequence analysis uniting multiple innovative tools and features into a polished user interface.<br>'+
 		'<a href="http://wasabi.biocenter.helsinki.fi" target="_blank">Learn more &gt;&gt;</a><br><br>';
+		_paq.push(['trackEvent','user','new_user']); //record event
+		
 		if(options.oldid) str += svgicon('info',{span:true})+'There was no account with ID <b>'+options.oldid+'</b>.<br>';
 		str += 'Wasabi created you a new account where to keep your future analyses.<br>'+
 		'<a title="'+window.location+'" onclick="dialog(\'share\',{url:\''+window.location+'\',library:true})">Current web page address</a> is the key to access your data in the future,<br>so please write it down';
@@ -3848,6 +4002,7 @@ function dialog(type,options){
 		var errorlog = '<div class="insidediv"><ul class="wrap"><li>'+model.errors().replace(/ \*/g,'</li><li>')+'</li></ul></div>';
 		makewindow('Error log',['Wasabi server errors:',errorlog],{id:type, icn:'info', btn:'OK'});
 	}
+	//data sharing window
 	else if(type=='share'){
 		var opt = options || {};
 		if(!opt.id) opt.id = librarymodel.openid();
@@ -3856,6 +4011,8 @@ function dialog(type,options){
 		var ckey = navigator.userAgent.match(/Mac/i)? '&#x2318;' : 'crtl';
 		var dirtoggle = dirurl = '';
 		settingsmodel.sharedir(false);
+		_paq.push(['trackEvent','share',opt.id]); //record sharing event
+		
 		if(opt.library){
 			var desc = '<br>to launch Wasabi with your analysis library';
 			url = librarymodel.sharelink()+'/'+settingsmodel.userid;
@@ -3880,11 +4037,11 @@ function dialog(type,options){
 		setTimeout(function(){input[0].select()},500);
 		var email = $('<input style="width:183px" type="email" placeholder="e-mail address">');
 		var emailbtn = $('<a class="button square" style="margin-left:3px">Send</a>');
-		var sendmail = function(){ if(~email.val().indexOf('@')) communicate('sendmail',{email:email.val(),url:options.url},{btn:emailbtn,restore:true}); }
+		var sendmail = function(){ if(~email.val().indexOf('@')) communicate('sendmail',{email:email.val(),url:input.val()},{btn:emailbtn,restore:true}); }
 		emailbtn.click(sendmail);
 		content.push(input, '<div class="inputdesc">Press '+ckey+'+C to copy the link to clipboard</div>', dirtoggle);
 		if(settingsmodel.email) content.push('Share the link: ', email, emailbtn);
-		var openbtn = $('<a class="button blue" href="'+options.url+'" target="_blank">Open link</a>');
+		var openbtn = $('<a class="button blue" href="'+url+'" target="_blank">Open link</a>');
 		var windowdiv = makewindow('Share data',content,{id:type, icn:'info', btn:['OK',openbtn]})[0];
 		ko.applyBindings(settingsmodel,windowdiv);
 	}
@@ -3892,433 +4049,599 @@ function dialog(type,options){
 	return false;
 }
 
-//submit an alignment job
-function sendjob(options){
-	var datalimit = settingsmodel.datalimit, joblimit = settingsmodel.joblimit;
-	if(datalimit){
-		var bplimit = datalimit*100000, liblimit = datalimit*1000000;
-		if(model.totalseqlen()>bplimit){
-			dialog('notice','Your sequence data size exceeds the server limit of '+numbertosize(bplimit,'bp')+
-			'.<br>Please reduce the input dataset size and try again.');
-			return false;
-		}
-		else if(parseInt(settingsmodel.dataperc())>98){
-			dialog('notice','Your '+numbertosize(liblimit,'byte')+' server space for your analysis library is full.'+
-			'<br>Please delete <a onclick="dialog(\'library\')">some</a> or <a onclick="dialog(\'settings\')">all</a> analyses and try again.');
-			return false;
-		}
-	}
-	else if(joblimit && librarymodel.runningjobs()>=joblimit){
-		dialog('notice','You already have the maximum of '+joblimit+' jobs running.'+
-		'<br>Terminate or wait for a job to finish before launching a new one.');
-		return false;
-	}
-	var alignbtn = options.btn;
-	if(!alignbtn.jquery) alignbtn = $(alignbtn);
-	alignbtn.unbind('click'); //prevent multiple clicks
-	alignbtn.click(closewindow);
-	alignbtn.attr('title','Click to close the window');
-	
-	var optdata = {btn:alignbtn[0]};
-	if(options.form) optdata.form = options.form;
-	var senddata = {};
-	senddata.name = options.name||exportmodel.savename()||'Realignment';
-	senddata.writemode = exportmodel.savetarget().type;
-	var exportdata = parseexport('fasta',{makeids:true,includehidden:exportmodel.includehidden()}); //{file:fastafile,nameids:{name:id}}
-	senddata.fasta = exportdata.file;
-	var idnames = {};
-	$.each(exportdata.nameids, function(name,id){ idnames[id] = name; });
-	senddata.idnames = idnames;
-	if(!$.isEmptyObject(treesvg) && (options.realign || options.ancestral || !options.form['newtree']['checked'])) senddata.newick = parseexport('newick',{tags:true,nameids:exportdata.nameids});
-	if(options.pagan){
-		senddata.pagan = true;
-		if(model.filesname) senddata.queryfile = filescontent[model.filesname];
-	} else {
-		senddata.dots = true;
-		if(options.realign) senddata.update = true;
-		if(options.ancestral){ senddata.e = true; if(senddata.id) senddata.writemode = 'overwrite'; }
-	}
-	if(librarymodel.openid()) senddata.id = librarymodel.openid();
-	if(librarymodel.openparent()) senddata.parentid = librarymodel.openparent();
-	var nodeinfo = {};
-	$.each(leafnodes,function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
-	if(!$.isEmptyObject(nodeinfo)) senddata.nodeinfo = nodeinfo;
-	if(!$.isEmptyObject(model.ensinfo())) senddata.ensinfo = model.ensinfo();
-	
-	var successfunc = optdata.success = function(resp){
-		alignbtn.html('Job sent');
-		try{ var data = JSON.parse(resp); }catch(e){ var data = {}; }
-		if(options.ancestral) librarymodel.autoimport = data.id||'';
-		else{
-			setTimeout(function(){
-				if(options.realign) model.treealtered(false);
-				closewindow(alignbtn); //close alignment setup winow
-			 },2000);
-		}
-	};
-	var errorfunc = function(msg){
-		if(!msg) msg = 'No response from server.';
-		alignbtn.html('Request failed <span class="svgicon" style="margin-right:-10px">'+svgicon('info')+'</span>');
-		alignbtn.attr('title',msg+' Reopen the window to try again.');
-	};
-	var itemcount = serverdata.library().length;
-	optdata.error = function(msg){
-		if(~msg.indexOf('response')){ //no reponse. Check if job sent.
-			setTimeout(function(){
-				var newcount = serverdata.library().length;
-				if(newcount>itemcount) successfunc();
-				else errorfunc();
-			},2000);
-		}else{ errorfunc(msg); }
-	};
-	optdata.timeout = 4000;
-	
-	communicate('startalign',senddata,optdata);
-	return false;
-}
+//constructor for creating and storing a dynamic interface for third party tools (plugins)
+function interfaceModel(data){
+	var self = this;
 
-//import ensembl data
-function ensemblimport(){
-	filescontent = {}; model.filestype('');
-	var idformat = ensemblmodel.idformat().url;
-	var ensid = ensemblmodel.ensid() || ensemblmodel.idformat().example;
-	var ensbtn = document.getElementById('ensbtn');
-	var showerror = function(msg){ //display error message next to import button
-		ensbtn.innerHTML = 'Error';
-		$('#enserror').text(msg||'Unknown error. Try again.'); $('#enserror').fadeIn();
-		setTimeout(function(){ ensbtn.innerHTML = 'Import'; $('#enserror').fadeOut(); },4000);
-		return false;
-	}
-	
-	if(idformat=='epo'){ //import Ensembl EPO alignment
-		var marr = ensid.match(/(\w+):(\d+)\-(\d+)/);
-		if(!marr) return showerror('Sequence region in wrong format.');
-		var start = parseInt(marr[2]), end = parseInt(marr[3]);
-		if(end<start || end-start>10000) return showerror('Max. region length is 10Kb.');
-		var epotype = ensemblmodel.epotype().type, eposet = ensemblmodel.eposet(), mask = ensemblmodel.mask;
-		var params = {alignment: epotype=='EPO'?'EPO':'EPO_LOW_COVERAGE', set: eposet.name, species: eposet.ref,
-			seq_region: marr[1], seq_region_start: start, seq_region_end: end, output_file: ensemblmodel.outname+'.xml',
-			db: 'mysql://anonymous@ensembldb.ensembl.org/'+ensemblmodel.dbver, masked_seq: ensemblmodel.maskopt.indexOf(mask)};
-		
-		//ensbtn.innerHTML = '<img src="images/spinner.gif" class="icn"/>';
-		
-		communicate('startepo',params,{error:function(){ showerror('Wasabi server error. Try again.'); }, success:function(response){
-			response = JSON.parse(response);
-			if(response.status!='running') showerror('Failed to start EPO alignment fetcher. Try again.');
-			else{ //epo fetching started. start polling for progress.
-				ensemblmodel.epojob(response.id);
-				$(ensbtn).off('click');
-				closewindow(ensbtn, function(){ensemblmodel.epojob('')}); //add job cancelling to closebtn
-				communicate('getlibrary');
+	//Add dynamic function to interface element
+	self.processRule = function(rule, rulevar, rootrulevar, bool){
+		var str = "";
+		if(rulevar===true){ bool = true; rulevar = false; } else if(rootrulevar===true){ bool = true; rootrulevar = false; }
+		if($.isArray(rule)){
+			for(i=0;i<rule.length;i++){
+				str += self.processRule(rule[i], rulevar, rootrulevar, bool);
+				if(i<rule.length-1) str+= (bool?"||":":");
 			}
-		}});
-	}
-	else{ //import Ensembl gene or genetree
-		var urlopt = idformat=='genetree'? '?content-type=text/x-phyloxml+xml' : '?content-type=application/json';
-		if(idformat=='homology'){
-			urlopt += ';type='+ensemblmodel.homtype();
-			if(ensemblmodel.target()) urlopt += ';target_species='+ensemblmodel.target();
 		}
-		else if(ensemblmodel.aligned()) urlopt += ';aligned=True';
-		urlopt += ';sequence='+ensemblmodel.seqtype();
-		var urlstring = ('http://beta.rest.ensembl.org/'+idformat+'/id/'+ensid+urlopt).replace(/ /g,'+');
-		var processdata = function(ensdata){
-			try{ ensdata = JSON.parse(ensdata); } catch(e){ if(~ensdata.indexOf('BaseHTTP')) return showerror('No response. Check network connectivity.'); }
-			if(typeof(ensdata)=='object'){ //JSON => gene homology data
-				if(!ensdata.data) return showerror('Data is in unexpected format. Try other options.');
-				filescontent[ensid+'.json'] = ensdata;
-				model.filestype('seq:json');
-			} else { //XHTML => genetree data
-				if(ensdata.indexOf('phyloxml')==-1) return showerror('Data is in unexpected format. Try other options.');
-				var xmlstr = ensdata.substring(ensdata.indexOf('<pre>'),ensdata.indexOf('</pre>')+6);
-				xmlstr = $(xmlstr).text().replace(/\s*\n\s*/g,'');
-				filescontent[ensid+'.xml'] = xmlstr;
-				model.filestype('seq:phyloxml tree:phyloxml');
-			}
-			setTimeout(function(){ parseimport({source:'Ensembl',importbtn:$(ensbtn),importurl:urlstring,ensinfo:{type:idformat,id:ensid}}) },600);
-		}
-		//reqest data, then process it
-		communicate('geturl',{fileurl:urlstring},{success:processdata, btn:ensbtn, btntxt:'Import', restorefunc:ensemblimport, retry:true});
-	}
-	return false; //for onclick
-}
-
-//search for ensembl gene id
-function ensemblid(ensdata){
-	var ensbtn = document.getElementById('ensidbtn');
-	if(!ensdata){ //send request
-		if(!ensemblmodel.idspecies()||!ensemblmodel.idname()) return;
-		var urlstring = ('http://beta.rest.ensembl.org/xrefs/symbol/'+ensemblmodel.idspecies()+'/'+ensemblmodel.idname()+'?content-type=application/json;object=gene').replace(/ /g,'+');
-		communicate('geturl',{fileurl:urlstring},{success:function(data){ensemblid(data)},btn:ensbtn,retry:true,restore:true});
-		return false;
-	}
-	//process data
-	try{ ensdata = JSON.parse(ensdata); } catch(e){
-		if(~ensdata.indexOf('BaseHTTP')) ensdata = {error:'No response. Check network connectivity.'};
-		else ensdata = {error:'No match. Try different search.'};
-	}
-	if($.isArray(ensdata) && !ensdata.length) ensdata = {error:'No match. Try different search.'};
-	if(ensdata.error){
-		ensbtn.innerHTML = 'Error';
-		$('#enserror').text(ensdata.error||'Unknown error. Try again.'); $('#enserror').fadeIn();
-		setTimeout(function(){ ensbtn.innerHTML = 'Search'; $('#enserror').fadeOut(); },4000);
-		return false;
-	}
-	else if(ensdata[0].type == 'gene'){
-		ensemblmodel.ensid(ensdata[0].id);
-		ensbtn.innerHTML = 'Got ID';
-		setTimeout(function(){ ensbtn.innerHTML = 'Search'; },2000);
-	}
-	return false;
-}
-
-/* Validation of files in import dialog */
-function checkfiles(filearr,options){
-	if(!filearr) filearr = [];
-	else if(!filearr[0]) filearr = [filearr];
-	if(!options) options = {};
-	if(options.onefile && filearr.length>1) filearr = [filearr[0]];
-	var noimport = options.noimport||(options.mode&&options.mode=='noimport');
-	var windowid = options.windowid||'import';
-	var importurl = options.url||false;
-	var fileroute = options.fileroute || (window.File && window.FileReader && window.FileList ? 'localread' : 'upload');
-	var infowindow = $('#'+windowid).length? $('#'+windowid) : makewindow("Importing data",[],{id:windowid,icn:'import.png',btn:false,hidden:options.silent});
-	var backside = $('.back',infowindow).length;
-	var infodiv = backside? $('.back .windowcontent', infowindow) : $('.windowcontent', infowindow);
-	if(!infodiv.length) return;
-	var tickimg = $('<img class="icn mall" src="images/tick.png">'); //preload status icons
-	var spinimg = $('<img class="icn small" src="images/spinner.gif">');
-	var warnimg = $('<img class="icn small" src="images/warning.png">');
-	
-	//phase 1: display list of files //
-	var ajaxcalls=[];
-	if(!$('ul',infodiv).length){
-		var btn = $('<a class="button" style="padding-left:15px">&#x25C0; Back</a>');
-		btn.click(function(){
-			$.each(ajaxcalls,function(c,call){ if(call.readyState!=4){call.abort()}});
-			ajaxcalls = []; //cancel hanging filetransfers
-			filescontent = {}; model.filestype('');
-			infowindow.removeClass('finished flipped');
-			setTimeout(function(){ infowindow.addClass('finished') },900);
-		});
-		if(!backside){ btn.text('Cancel'); btn = $('<div class="btndiv" style="text-align:center">').append(btn); }
-		var list = $('<ul>');
-		$.each(filearr,function(i,file){
-			var filesize = file.size ? '<span class="note">('+numbertosize(file.size,'byte')+')</span> ' : '';
-			list.append('<li class="file">'+file.name+' '+filesize+'<span class="icon"></span></li>');
-		});
-		var filestitle = filearr.length? '<b>Files to import:</b><br>' : '';
-		infodiv.empty().append(filestitle,list,'<br><span class="errors note"></span><br>',btn);
-		if(backside && !options.silent) infowindow.addClass('flipped');
-	}
-	var errorspan = $('span.errors',infodiv);
-	
-	var namelist = [];
-	var checkprogress = function(){ //check if all files are in filescontent{}
-		if(Object.keys(filescontent).length==filearr.length){
-        	ajaxcalls = []; checkfiles(namelist,options); //go to phase2
-        }
-	};
-	var showerror = function(msg){
-		errorspan.html('<span class="red">'+msg+'</span>');
-		if(options.silent){
-			infowindow.css('display','block');
-			if(backside) infowindow.addClass('flipped');
-		}
-		return false;
-	};
-	
-  	//phase 1: load filedata to global filescontent{} //
-  	if(!filearr.length) return showerror('There is nothing to import');
-  	else if(typeof(filearr[0])=='object'){ filescontent = {}; model.filestype(''); }//first round
-  	
-	if($.isEmptyObject(filescontent)){
-		errorspan.text('Loading files...');
-		$.each(filearr,function(i,file){
-			namelist.push(file.name||'unnamed'+i);
-  			$('li.file span.icon:eq('+i+')',infodiv).empty().append(spinimg);
-  			var senddata = '';
-  			if(file.share){
-  				var vars = file.share;
-  				if(vars.host=='http://'+window.location.host){
-  					setTimeout(function(){getfile({id:vars.share,file:vars.file,btn:errorspan,noimport:noimport})},500);
-  					return false;
-  				} else if(vars.file){
-  					senddata = {fileurl:vars.host+"?type=text&share=true&getlibrary="+vars.share+"&file="+vars.file}
-  					importurl = senddata.fileurl;
-  					if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = vars.file;
-  				} else return showerror('URLs from extenal Wasabi servers need \'file=\' parameter'); 
-  			}
-  			else if(file.url){
-  				senddata = {fileurl:file.url}
-  				importurl = file.url;
-  				if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = file.url.substring(file.url.lastIndexOf('/')+1);
-  			}
-  			else if(file.text){
-  				filescontent[file.name] = file.text;
-  				importurl = '';
-  				checkprogress();
-  			}
-  			else if(fileroute=='upload'){ senddata = {upfile:file} }
-  			else if(fileroute=='localread'){
-  				var reader = new FileReader(); 
-    			reader.onload = function(evt){
-    				filescontent[file.name] = evt.target.result;
-    				checkprogress();
-    		 	}
-    		 	reader.readAsText(file);
-  			}
-  				
-  			var successfunc = function(data){
-        		$('li.file span.icon:eq('+i+')',infodiv).empty();
-       			filescontent[file.name] = data;
-       			checkprogress();
-       		};
-        		
-       		if(senddata){
-        		if(model.offline()){
-  					return showerror('Import of this file needs Wasabi server, which is currently offline');
-  				} else {
-       				ajaxcalls.push(communicate(fileroute=='upload'?'echofile':'geturl',senddata,{retry:true, error:showerror, success:successfunc}));
-        		}
-        	}
-    	});
-  		return;
-  	}
-  
-	//phase2: check files in filescontent{}//
-	var iconimg = '', accepted, rejected = [];
-	$.each(filescontent,function(name){
-		accepted = parseimport({filenames:[name],mode:'check'});
-		if(accepted){ iconimg = tickimg.clone(); model.filestype(model.filestype()+' '+accepted); }
-		else{ rejected.push(name); iconimg = warnimg.clone(); }
-		$('li.file span.icon:eq('+filearr.indexOf(name)+')',infodiv).empty().append(iconimg);
-	});
-	
-	//phase2: import //
-	var importfunc = function(){
-		errorspan.text('Importing data...');
-		var source = options.source||(importurl===false?fileroute:'download');
-		setTimeout(function(){ parseimport({source:source,mode:options.mode||windowid,importurl:importurl,dialog:infowindow}) }, 800);
-	};
-	
-	if(rejected.length){
-		var s = rejected.length>1? 's' : '';
-		var msg = 'Cannot recognize the "!"-marked file'+s+'.<br><span style="color:#666">Please choose a different file';
-		var acceptlen = Object.keys(filescontent).length-rejected.length;
-		if(acceptlen>0 && !noimport){
-			$.each(rejected,function(r,name){ delete(filescontent[name]); });
-			var importbtn = $('<a class="button" style="padding-left:15px">Import</a>');
-			importbtn.click(function(){ importbtn.css('color','#999'); importfunc(); });
-			infodiv.append(importbtn);
-			msg += ',<br> or proceed to import the recognized file'+(acceptlen>1?'s':'');
-		}
-		return showerror(msg+'</span>.');
-	}
-	else if(noimport) closewindow(infowindow);
-	else importfunc();
-}
-
-//retrieve an analysis datafile from server
-function getfile(opt){
-	if(opt.btn){
-		if(!opt.btn.jquery) opt.btn = $(opt.btn);
-		opt.btn.html('<img class="icn" src="images/spinner.gif">');
-	}
-    filescontent = {};
-    model.filestype('');
-    var trycount = 0;
-    var download = function(fileopt){
-      if(!fileopt) fileopt = {};
-      var filename = fileopt.file || opt.file || "";
-      if(!opt.id && !filename){ console.log('download error: id or filename missing.'); return; }
-      var urlparams = (opt.id?"&getlibrary="+opt.id:"")+(filename?"&file="+filename:"")+(fileopt.dir?"&dir="+fileopt.dir:"");
-	  $.ajax({
-		type: "GET",
-		url: settingsmodel.userid+"?type=text"+urlparams,
-    	dataType: "text",
-    	success: function(data){
-    		if(typeof(fileopt.success)=='function'){ fileopt.success(data); }
-    		else if(!opt.noimport){ //load and parse filedata for import
-    			filescontent[filename.replace(/^.*[\\\/]/,'')] = data;
-        		setTimeout(function(){ parseimport({source:'import', id:opt.id, importbtn:opt.btn, share:opt.share, name:opt.name}) }, 300);
-        		if(settingsmodel.keepid()){
-        			localStorage.openid = opt.id;
-        			localStorage.openfile = filename;
-        		}
-        	}
-        	else if(opt.btn && opt.btn.prop('tagName')=='DIV') opt.btn.html('<pre>'+data+'</pre>'); //display filecontents inside a div
-    	},
-    	error: function(xhrobj,status,msg){ 
-        	if(!msg && status!="abort"){ //no response. try again
-        		if(trycount<1){ trycount++; setTimeout(function(){download(fileopt)},1000); return; }
-        		else{ msg = 'No response from server' }
-        	}
-        	if(opt.btn) opt.btn.html('<span class="label" title="'+msg+'">Download failed</span>');
-        	else if(typeof(fileopt.error)=='function'){ fileopt.error(msg); }
-        	else dialog('error','File download error: '+msg);
-        },
-        xhr: function(){
- 			var xhr = $.ajaxSettings.xhr();
- 			if(!opt.noimport && opt.btn){
- 				xhr.tick = 1;
- 				xhr.addEventListener('progress',function(d){ //listen for file download progress
-        			if(d.total && !(xhr.tick%2)){
-        				var perc = parseInt(d.loaded/(d.total/100));
-        				opt.btn.html('<span class="progressline"><span class="bar" style="width:'+perc+'%">'+
-        				'<span class="title">Downloading</span></span></span>');
-        			}
-        			xhr.tick++;
-        		}, false);
-        	}
-        	return xhr;
-  		},
-	  });
-	};
-	
-	if(!opt.noimport && opt.id){ //library import. get (meta)>importmeta>main_file
-		var libitem = librarymodel.getitem(opt.id);
-		var importpipeline  = function(){
-			if(!libitem){ //id not in library (shared id); get meta
-				var metaerror = function(e){ 
-					console.log('metadata error: '+e); 
-					if(!opt.file) opt.file = 'saved.xml'; 
-					download();
-				};
-				var metasuccess = function(filedata){
-					try{
-						var metadata = JSON.parse(filedata);
-						if(!opt.file) opt.file = metadata.outfile;
-						opt.name = metadata.name;
-						download();
-					} catch(e){ metaerror(e); }
-				}
-				download({file:'meta.txt', success:metasuccess, error:metaerror});
+		else if(typeof(rule)=='object'){
+			if(Object.keys(rule).length>1){ // multirule object => array of rules
+				var rulearr = [];
+				$.each(rule,function(expr,val){ var robj={}; robj[expr] = val; rulearr.push(robj); });
+				str = self.processRule(rulearr, rulevar, rootrulevar, bool);
 			} else {
-				if(!opt.file) opt.file = libitem.outfile();
-				opt.name = libitem.name();
-				download();
+				var valuevar = Object.keys(rule)[0]; //"rulevar":{"valuevar":"value"} => rulevar==valuevar?value
+				str = self.processRule(rule[valuevar], valuevar, rulevar, bool);
 			}
-		};
-		
-		var showdir = function(){ dialog('library'); librarymodel.dirpath(librarymodel.getpath(opt.id)); };
-		
-		if(opt.dir && libitem) showdir(); //shared folder aleady in library
+		}
 		else{
-			download({file:"importmeta.txt", dir:opt.dir||'', success:function(filedata){
-				try{ serverdata.import = JSON.parse(filedata); }
-				catch(e){ console.log('importmeta parse error: '+e); }
-				if(opt.dir) showdir();
-				else importpipeline();
-			},
-			error:function(e){
-				if(e.indexOf('Invalid library ID')) dialog('error','Analysis ID <b>'+opt.id+'</b> was not found in library.<br>'+
-					'The data may have been deleted'+(opt.share?' or your sharing URL may be faulty':'')+'.');
-				else if(opt.dir) showdir();
-				else importpipeline();
-		}})}
+			var val = str = rule = self.processValue(rule);
+			if(rulevar){
+				rootrulevar = self.processValue(rootrulevar||"");
+				rulevar = self.processValue(rulevar||"");
+				var compare = function(rule){ return !~["!","=","<",">","~"].indexOf(rule.charAt(0))? "=="+rule : rule; }
+				if(rootrulevar) str = bool? rootrulevar+"["+rulevar+"]"+compare(val) : rootrulevar+compare(rulevar)+"?"+val;
+				else  str = bool? rulevar+compare(rule) : rulevar+"?"+val;
+			}
+		}
+		if(typeof(bool)=='undefined' && str.lastIndexOf("?")>str.lastIndexOf(":")){ bool = false; str += ":\'\'"; }
+		return str;
 	}
-	else{ download(); } //import/display the requested file
+
+	//Escape strings (and not tracked variables) in a value string
+	self.processValue = function(expr){
+		if(typeof(expr)=='string'){
+			expr = expr.trim();
+			if(typeof(self[expr])=='function') expr = "$data['"+expr+"']()";
+			else{
+			  expr = expr.replace(/'.+'|is not|\w+/g, function(variable){ 
+				if(variable=="is") variable = "=="; //keywords: is, not, yes, no, ...
+				else if(variable=="not"||variable=="invert") variable = "!";
+				else if(variable=="is not") variable = "!=";
+				else if(variable=="and") variable = "&&";
+				else if(variable=="or") variable = "||";
+				else if(~["no","off","disable"].indexOf(variable)) variable = "false";
+				else if(~["yes","on","ticked","selected"].indexOf(variable)) variable = "true";
+				else{
+					var variablestr = variable.indexOf("'")==0? variable : "'"+variable+"'";
+					if(typeof(self[variable])=='function') variable = "$data["+variablestr+"]()";
+					else variable = variablestr;
+				}
+				if(variable=="!") variable = self._tname? "!$data["+self._tname+"]()":"''";
+				return variable;
+			  });
+			}
+		}
+		return expr+"";
+	}
+	
+	//Create a plugin interface (input) element
+	self.processOption = function(data){
+		if(typeof(data)=='string'){
+			data = $(data);
+			$("a", data).each(function(i,el){ if(this.hasAttribute("href")) this.setAttribute("target","_blank"); });
+			return $('<div>').append(data);
+		} else if (typeof(data)!='object') return '';
+		var t = !data.type? "text" : data.type.trim();
+		if(data.select && data.options){ t = "select"; data.title = data.select; }
+		var el = t=="select"? $("<select>") : $("<input>"); //create input element
+		if(t=="library name") el.addClass("hidden");
+		el.attr("type",(t=="tickbox"||t=="bool"?"checkbox":~["hidden","file","checkbox"].indexOf(t)?t:"text"));
+		var trackname = self._tname = data.name||data.option||"trackName"+Object.keys(self).length;
+		self[trackname] = ko.observable('');
+		var kovar = '$data[\''+trackname+'\']';
+		if(data.option) el.attr("name", data.option);
+		kobind = "value:$data['"+trackname+"'], name:'"+trackname+"'";
+		if(~["number","float","int"].indexOf(t)) self[trackname].extend({format: t});
+		if(data.fixed) kobind += ", enable:"+self.processRule(data.fixed,true);
+		var elems = [];
+		if(t=="select"){ //build selectable list of options/values
+			if(!$.isArray(data.options)){ console.log('Wasabi API Error: "select" element needs "options" array!'); data.options = []; }
+			var optarr = "selectionOpt"+Object.keys(self).length; var placeholder = false;
+			self[optarr] = [];
+			$.each(data.options||[],function(i,opt){ //add values to list
+				if(typeof(opt)=='string') self[optarr].push({t:opt,v:opt});
+				else if(typeof(opt)=='object'){
+					if(!opt.title){ console.log('Wasabi API Error: an object in "select" element needs "title" attribute!'); return true; }
+					var optval = opt.value||opt.title;
+					if(optval=="no value"){ optval = ""; placeholder = true; }
+					self[optarr].push({t:opt.title,v:optval});
+					if(opt.default){ self[trackname](optval); placeholder = true; }
+					if(typeof(opt.desc)=='string'){
+						self[optarr][self[optarr].length-1].d = opt.desc;
+						if(!self[trackname].desc){
+							self[trackname].desc = ko.computed(function(){
+								var val = self[trackname]();
+								return ko.utils.arrayFirst(self[optarr], function(o){ return o.v == val; }).d||'';
+							});
+							elems.push('<div class="inputdesc" data-bind="text:'+kovar+'.desc">');
+						}
+					}
+					if(typeof(opt.option)=='string'){
+						self[opt.option] = ko.computed(function(){ return self[trackname]()==optval; });
+						elems.push('<input type="hidden" name="'+opt.option+'" data-bind="value:$data[\''+opt.option+'\']">');
+					}
+				}
+			});
+			self[trackname].sindex = ko.computed(function(){
+				var val = self[trackname]();
+				return ko.utils.arrayFirst(self[optarr], function(o){ return o.v == val; }).d||0;
+			});
+			
+			var dstr = "option";
+			if(data.extendable){ //editable select list
+				self[trackname].edit = ko.observable(false);
+				self[trackname].editSave = function(){
+					var editindex = self[trackname].edit();
+					if(isNaN(editindex)){ //enable edit mode
+						self[trackname].edit(self[trackname].sindex());
+					} else { //save edits
+						if(editindex==-1){ //add new
+							var newv = self[trackname]();
+							self[optarr].push{t:newv,v:newv};
+						} else { self[optarr][editindex].v = newv; }
+						self[trackname].edit(false);
+					}
+				};
+				self[trackname].rem = function(){
+					var editindex = self[trackname].edit();
+					if(editindex==-1){ self[trackname](self[optarr][sindex].t); }
+					else{ self[optarr].splice(editindex, 1); }
+					self[optarr].edit(false);
+				};
+				if(data.extendable=="configurations"){ dstr = 'preset'; data.title = "Saved options:"; }
+				
+				elems.unshift('<input data-bind="fadevisible:!isNaN('+kovar+'.edit()),value:'+kovar+'" style="width:180px" placeholder="Type new '+dstr+'"></input>'+
+				'<a class="button small square" data-bind="click:'+kovar+'.editSave,text:isNaN('+
+					kovar+'.edit())?\'Edit\':\'Save\',attr:{title:isNaN('+kovar+'.edit())?\'Edit this '+dstr+'\':\'Save changes\'"></a> '+
+				'<a class="button small square" data-bind="visible:'+kovar+'.edit()>0,click:function(){'+kovar+'(\'\');'+kovar+'.edit(-1)}" title="Add new '+dstr+'">New</a>'+
+				'<a class="button small square red" data-bind="visible:!isNaN('+kovar+'.edit()),click:'+kovar+'.rem"  title="Remove this '+dstr+'">Remove</a>');	
+			}
+			if(!placeholder) self[optarr].unshift({t:"Choose "+dstr, v:""});
+			
+			kobind += ", options:"+optarr+", optionsValue:v, optionsText:t";
+		} //if select
+		else if(data.default) kobind += ", default:"+self.processRule(data.default);
+		el.attr("data-bind", kobind);
+		
+		if(t=="file"){
+			el.attr({"type":"hidden","format":data.format||"fasta"});
+			if(data.source == "import" || ~data.source.indexOf("filedrop")){ //data source: import
+				self[trackname].filename = ko.observable();
+				self[trackname] = ko.computed(function(){ var item = imported.get(self[trackname].filename()); return item?~item.type.indexOf('seq')?"sequence":~item.type.indexOf('tree')?"tree":"OK":""; });
+			
+				if(~data.source.indexOf("filedrop")){
+					var filedrag = $('<div class="filedrag">'+(data.desc||'Drop file here')+'</div>'); data.desc = '';
+					filedrag.bind('dragover',function(evt){ //file drag area
+						filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+						evt.originalEvent.dataTransfer.dropEffect = 'copy';
+					}).bind('dragleave',function(evt){
+						filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+					}).bind('drop',function(evt){
+						filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+						checkfiles(evt.originalEvent.dataTransfer.files, {mode:'noimport', onefile:true, silent:true, observable:self[trackname].filename});
+					});
+				} else var filedrag = ''; 
+				if(~data.source.indexOf("import")){ //import button
+					var or = filedrag? $('<span style="display:inline-block;font-size:18px;"> or </span>') : '';
+					var importbtn = $('<a class="button" style="vertical-align:0">Import</a>');
+					importbtn.click(function(e){ return dialog('import', {mode:'noimport', onefile:true, observable:self[trackname].filename}); });
+				} else { var or = '', importbtn = ''; }
+				var importdiv = $('<div data-bind="visible:!'+kovar+'()">').append(filedrag, or, importbtn);
+				
+				var filelist = $('<div data-bind="visible:'+kovar+'">Imported: <img class="icn" src="images/file.png"> <span data-bind="text:'+kovar+'.filename"></span></div>');
+				var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;">'+svgicon('close')+'</span>');
+				filedel.click(function(e){ self[trackname](false); imported([]); return false; });
+				var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{filename:'+kovar+'.filename()})}">View</a>');
+				filelist.append(filedel, fileview);
+				elems.push(importdiv,filelist);
+			} else { el.attr("source",data.source||""); }
+		}
+		
+		if(data.required && t!="hidden"){ //input validation
+			if(typeof(data.required)=="string") self[trackname].errmsg = function(){ return !self[trackname]()?data.required:""; }
+			else{ retstr = self.processRule(data.required).replace("$data","self"); self[trackname].errmsg = eval("function(){ return "+retstr+"; }"); }
+			elems.push('<p style="color:red;border:1px solid red;" data-bind="text:'+obsv+'.errmsg,slidevisible:'+obsv+'.errmsg"></p>');
+			kobind += ', style:{borderColor:'+obsv+'.errmsg()?\'red\':\'\'}';
+		}
+		
+		var title = data.title? $('<span>'+data.title+'</span>') : ''; //wrap up
+		if(data.desc){ if(title) title.addClass('label'); (title||el).attr('title',data.desc); }
+		if(title){ el = el.attr('type')=='checkbox'? el.add(title) : title.add(el); }
+		var box = $("<div>").append.apply(this,elems);
+		if(data.enable) box.attr("data-bind","slidevisible:"+self.processRule(data.enable,true));
+		else if(data.disable) box.attr("data-bind","slidevisible:!("+self.processRule(data.disable,true)+")");
+		console.log($("<div>").append(el).text());
+		return $("<div>").append(el);
+	}
+	
+	//Iterate thorugh the plugin description data and build its interface
+	self.buildUI = function(data){
+		var UI = $('<div>');
+		if(data.options && $.isArray(data.options) && !data.select){
+			if(data.group){
+				UI = expandtitle({title:data.group||'', desc:data.desc, inline:true}).css('margin-top','5px');
+				UI = UI.add('<div class="insidediv numinput" style="display:none;margin-bottom:0"></div>');
+			}
+			else if(data.section) UI.append('<div class="sectiontitle small"><span>'+data.section+'</span></div>');
+			$.each(data.options, function(i,elemdata){ UI.append(buildUI(elemdata)); });
+			if(data.line){ UI.prepend('<span>'+data.line+'<span>'); $('div',UI).css('display','inline-block'); }
+			if(data.enable) UI.attr("data-bind","slidevisible: "+self.processRule(data.enable,true));
+		} else { UI = self.processOption(data); }
+		return UI;
+	}
+	
+	self.dna = model.isdna;
+	self.codons = ko.computed(function(){ return model.seqtype()=='codons'; });
+	self.protein = ko.computed(function(){ return model.seqtype()=='protein'; });
+	self.sequence = ko.computed(function(){ return self.dna()?'dna':model.seqtype(); });
+	self.tree = model.treesource;
+	self.UI = self.buildUI(data);
+}
+var uimodel = new interfaceModel({});
+
+var interfaces = {}; //placeholder for plugin interfaces
+
+//Returns interface HTML for a Wasabi plugin
+function plugin_UI(name, data){ //data: JSON-formatted interface specification (see Wasabi plugin API)
+	data = data || serverdata.plugins.name || '';
+	if(!name||!data) dialog('error','No data available for building a plugin interface.');
+	if(typeof(data)=='string'){ try{ data = JSON.parse(data); }catch(e){ dialog('error','The interface description is not properly JSON-formatted: '+e); } }
+	if(!interfaces[name]) interfaces[name] = new interface_model(data);
+	return interfaces[name]['UI'];
+}
+
+/* functions for sequence manipulation */
+//make or resize a sequence selection box
+function selectionsize(e,id,type){
+	if(typeof(type)=='undefined'){ var type = 'rb', start = {}; }
+	else if(typeof(type)=='object'){ //type => mouse startpos{x,y} || columns [start,end]
+		var start = type.length? {x:type[0]*model.boxw(),w:type[1]-type[0]} : type.x&&type.y? {x:type.x,y:type.y} : {x:0,y:0};
+		if(type.length && (type[1]*model.boxw()<Math.abs(dom.wrap.position().left) || type[0]*model.boxw()>Math.abs(dom.wrap.position().left)+dom.seqwindow.innerWidth())) return; //outside of seqwindow
+		if(e){
+			var dx = e.pageX-type.x, dy = e.pageY-type.y;
+			if(dx<10||dy<10) return; else type = 'rb';
+		}
+	}
+	id = id || model.activeid();
+	if(!id){ //create new selectionbox
+		id = $("div[id^='selection']").length+1;
+		var x=0, y=0, w=1, h=1;
+		dom.seq.append('<div id="selection'+id+'" class="selection"><div class="description"></div><div class="ltresize"></div><div class="rbresize"></div></div>\
+			<div id="vertcross'+id+'" class="selectioncross"><div class="lresize"></div><div class="rresize"></div></div>\
+			<div id="horicross'+id+'" class="selectioncross"><div class="tresize"></div><div class="bresize"></div></div>');
+		if(typeof(type)=='object'){ //coordinates given
+			x = start.x||x;
+			y = start.y||model.boxh()*model.visiblerows().length-model.boxh();
+			w = start.w||w;
+		}else{ //coordinates from mouse
+			x = (start.x||e.pageX)-dom.seq.offset().left-2;
+			y = (start.y||e.pageY)-dom.seq.offset().top;
+			model.activeid(id);
+		}
+		x = x-(x%model.boxw()); y = y-(y%model.boxh()); //snap to grid
+		if(x<0) x=0; if(y<0) y=0;
+		$("#selection"+id).css({'left':x,'top':y,'width':model.boxw()*w,'height':model.boxh()*h,'display':'block'});
+		$("#vertcross"+id).css({'left':x,'top':'0','width':model.boxw()*w,'height':dom.seq.innerHeight(),'display':model.selmode()=='columns'?'block':'none'});
+		$("#horicross"+id).css({'left':'0','top':y,'width':dom.seq.innerWidth(),'height':model.boxh()*h,'display':model.selmode()=='rows'?'block':'none'});
+		dom.seqwindow.mouseup(function(){ //attach resize handles
+			$("#selection"+id).mouseenter(function(){ $("#selection"+id+" div.rbresize, #selection"+id+" div.ltresize").css('opacity','1'); });
+			$("#selection"+id).mouseleave(function(){ $("#selection"+id+" div.rbresize, #selection"+id+" div.ltresize").css('opacity','0'); });
+			$("#vertcross"+id).mouseenter(function(){ $("#vertcross"+id+" div.lresize, #vertcross"+id+" div.rresize").css('opacity','1'); });
+			$("#vertcross"+id).mouseleave(function(){ $("#vertcross"+id+" div.lresize, #vertcross"+id+" div.rresize").css('opacity','0'); });
+			$("#horicross"+id).mouseenter(function(){ $("#horicross"+id+" div.tresize, #horicross"+id+" div.bresize").css('opacity','1'); });
+			$("#horicross"+id).mouseleave(function(){ $("#horicross"+id+" div.tresize, #horicross"+id+" div.bresize").css('opacity','0'); });
+			$("#selection"+id+" div.rbresize").mousedown(function(){
+				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'rb'); });
+			});
+			$("#selection"+id+" div.ltresize").mousedown(function(){
+				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'lt'); });
+			});
+			$("#vertcross"+id+" div.rresize").mousedown(function(){
+				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'r'); });
+			});
+			$("#vertcross"+id+" div.lresize").mousedown(function(){
+				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'l'); });
+			});
+			$("#horicross"+id+" div.bresize").mousedown(function(){
+				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'b'); });
+			});
+			$("#horicross"+id+" div.tresize").mousedown(function(){
+				dom.seqwindow.mousemove(function(evt){ selectionsize(evt,id,'t'); });
+			});
+		});
+	} else { //resize existing selection
+		var over = e.target.id ? e.target : e.target.parentNode;
+		if(over.tagName=='DIV'&&id!=over.id.substr(0-id.toString().length)){ return false; }//avoid overlap
+		var seldiv = $("#selection"+id);
+		if(!seldiv.length) return;
+		if(type!='b'&&type!='t'){
+			if(type=='r'||type=='rb'){
+				var w = e.pageX-seldiv.offset().left-5;
+				w = w-(w%model.boxw())+model.boxw();
+			} else if(type=='l'||type=='lt'){
+				var l = e.pageX-seldiv.parent().offset().left+5;
+				l = l-(l%model.boxw());
+				var redge = seldiv.position().left+seldiv.innerWidth();
+				if(l>redge-model.boxw()){ l=redge-model.boxw(); }
+				var w = redge-l;
+				seldiv.css('left',l);
+				$("#vertcross"+id).css('left',l);
+			}
+			if(w<model.boxw()){ w = model.boxw(); }
+			seldiv.css('width',w);
+			$("#vertcross"+id).css('width',w);
+		}
+		if(type!='r'&&type!='l'){
+			if(type=='b'||type=='rb'){
+				var h = e.pageY-seldiv.offset().top-5;
+				h = h-(h%model.boxh())+model.boxh();
+			} else if(type=='t'||type=='lt'){
+				var t = e.pageY-seldiv.parent().offset().top+5;
+				t = t-(t%model.boxh());
+				var bedge = seldiv.position().top+seldiv.innerHeight();
+				if(t>bedge-model.boxh()){ t=bedge-model.boxh(); }
+				var h = bedge-t;
+				seldiv.css('top',t);
+				$("#horicross"+id).css('top',t);
+			}
+		 	if(h<model.boxh()){ h = model.boxh(); }
+			seldiv.css('height',h);
+			$("#horicross"+id).css('height',h);
+		}
+		if(seldiv.innerHeight()>20 && seldiv.innerWidth()>40){//show selection size
+			if(seldiv.innerWidth()>140){ var r=' rows | ',c=' columns';}else{ var r='x',c=''; }
+			$("#selection"+id+' div.description').css('display','block'); 
+			$("#selection"+id+' div.description').text(parseInt(seldiv.innerHeight()/model.boxh())+r+parseInt(seldiv.innerWidth()/model.boxw())+c);
+		} else { $("#selection"+id+' div.description').css('display','none'); }
+	}
+}
+
+//save positions of selection areas
+function registerselections(id){
+	colflags = []; rowflags=[]; selections = [];
+	var selector = id ? '#selection'+id : 'div[id^="selection"]';
+	$(selector).each(function(){
+		var sel = $(this);
+		var colstart = parseInt(sel.position().left/model.boxw());
+		var colend = parseInt((sel.position().left + sel.width())/model.boxw());
+		var rowstart = parseInt(sel.position().top/model.boxh());
+		var rowend = parseInt((sel.position().top + sel.height())/model.boxh());
+		for(var c=colstart;c<colend;c++){ colflags[c] = 1; }
+		for(var r=rowstart;r<rowend;r++){ rowflags[r] = 1; }
+		selections.push({'rowstart':rowstart,'rowend':rowend,'colstart':colstart,'colend':colend});
+	});
+}
+
+//delete a selection area
+function clearselection(id){
+	id = typeof(id)=='undefined' ? false : id;
+	if(id){ $("#selection"+id).remove(); $("#vertcross"+id).remove(); $("#horicross"+id).remove(); }
+	else{ $("#seq div[id*='selection'],#seq div[id*='cross']").remove(); }
+	model.activeid('');
+}
+
+//toggle coulmn/row selection mode
+function toggleselection(type,id,exclude){
+	if(typeof(id)=='undefined') id=''; if(typeof(exclude)=='undefined') exclude='';
+	if(~type.indexOf('tmp') && model.selmode()!='default') return;
+	if(type=='default'){ toggleselection('hide rows',id); type='hide columns'; } //actions for selection mode change
+	else if(type=='columns'){ toggleselection('hide rows',id); type='show columns'; }
+	else if(type=='rows'){ toggleselection('show rows',id); type='hide columns'; }
+	var divs = ~type.indexOf('rows')? $('div[id^="horicross'+id+'"]') : ~type.indexOf('columns')? $('div[id^="vertcross'+id+'"]') : $('div[id$="cross'+id+'"]');
+	if(exclude) divs = divs.not('div[id$="cross'+exclude+'"]'); //filter out some divs
+	$(divs).each(function(){ if(~type.indexOf('show')) $(this).stop().fadeIn(200); else $(this).fadeOut(200); }); 
+}
+
+//create content for sequence position info tooltip
+function seqinfo(e){ 
+	if(!e.pageX||!e.pageY) return false;
+	var x = e.pageX-dom.seq.offset().left-2;
+	x = parseInt(x/model.boxw());
+	var y = e.pageY-dom.seq.offset().top-2;
+	y = parseInt(y/model.boxh());
+	if(x<0){ x=0; } if(y<0){ y=0; }
+	var col = model.visiblecols()[x]; var name = model.visiblerows()[y];
+	if(!sequences[name]) return false;
+	var suppl = col==x ? '' : '<br>(column '+(col+1)+' if uncollapsed)';
+	var seqpos = sequences[name].slice(0,col+1).join('').replace(/[_\-.:]/g,'').length;
+	var symb = typeof(sequences[name][col])=='undefined' ? '' : sequences[name][col];
+	symb = canvaslabels[symb]||symb;
+	var symbcanvas = model.boxh()>12 && typeof(symbols[symb])!='undefined'? cloneCanvas(symbols[symb]['canvas']) : '<span style="color:orange">'+symb+'</span>';
+	if(leafnodes[name]) name = leafnodes[name].displayname||name;
+	var content = $('<span style="color:orange">'+name+'</span><br>').add(symbcanvas).add('<span> position '+seqpos+' column '+(x+1)+suppl+'</span>');
+	return {content:content, col:x, row:y, x:x*model.boxw(), y:y*model.boxh(), width:model.boxw(), height:model.boxh()}
+}
+
+//collapse MSA columns (based on [selections =>]columnflags)
+function hidecolumns(selectionid, skipundo){
+	if(typeof(selectionid)=='string') registerselections(selectionid);
+	var undodata = (skipundo || !settingsmodel.undo())? false : [];
+	var range = [], col = 0;
+	for(var c=0,adj=0; c<colflags.length; c++){
+		if(undodata){
+			col = model.visiblecols()[c-adj];
+			if(colflags[c]){ if(!range.length) range[0] = col; }
+			else if(range.length){ range[1] = col; undodata.push(range); range = []; } 
+		}
+		if(colflags[c]){ model.visiblecols.splice(c-adj,1); adj++; } //remove columns from rendering pipeline
+	}
+	if(undodata){
+		if(range.length){ range[1] = col+1; undodata.push(range); }
+		if(undodata.length){
+			var s = undodata.length==1? ' was' : 's were';
+			var undodesc = undodata.length+' alignment column range'+s+' collapsed.';
+			model.addundo({name:'Collapse columns',seqtype:model.seqtype(),type:'seq',data:undodata,info:undodesc,
+			undoaction:'show columns',redoaction:'hide columns'});
+		}
+	}
+	redraw();
+}
+
+//make collapsed columns visible again (based on input ranges)
+function showcolumns(gaparr, hidetip, seqtype){ 
+	if(hidetip) hidetooltip();
+	if(gaparr=='all'){
+		for(var c=model.alignlen(), colarr=[]; c--;) colarr[c] = c;
+		model.visiblecols(colarr); //mark all columns as visible
+		redraw(); return;
+	}
+	var visiblecols = model.visiblecols();
+	$.each(gaparr, function(i,gapcols){
+		if(gapcols.length!=2) return true;
+		if(seqtype) gapcols = translatecolumns(seqtype, model.seqtype(), gapcols);
+		var scol = gapcols[0], ecol = gapcols[gapcols.length-1], start = 0, del = 0, fill = [];
+		$.each(visiblecols,function(i,c){ if(c>=scol){ //indexes to fill in
+				if(i&&!start) start = i;
+				if(c<ecol) del++; else return false;
+		}});
+		for(var f=scol;f<ecol;f++){ fill.push(f); }
+		if(scol>=visiblecols.length) start = visiblecols.length;
+		model.visiblecols.splice.apply(model.visiblecols,[start,del].concat(fill));
+	});
+}
+
+//remove collapsed alignment columns from dataset
+function removecolumns(removecols){
+	var undodata = (removecols||!settingsmodel.undo())? false : {};
+	if(!removecols){
+		var removecols = [], range = [];
+		$("#right div.marker").each(function(){
+			range = $(this).data('colrange');
+			for(var i=range[0]; i<range[1]; i++){ removecols.push(i); }
+		});
+	}
+	if(!removecols.length) return;
+	if(undodata) undodata.removecols = removecols;
+	for(var name in sequences){
+		var seqdata = [];
+		for(var c=0; c<removecols.length; c++){
+			seqdata.push(sequences[name].splice(removecols[c]-c,1)[0]);
+		}
+		if(undodata) undodata[name] = seqdata;
+	}
+	if(undodata) model.addundo({name:'Remove columns', type:'seq', seqtype:model.seqtype(), undoaction:'addcolumns', redoaction:'removecolumns', data: undodata, info:removecols.length+' alignment columns were removed'});
+	showcolumns('all');
+}
+
+//restore removed alignment columns
+function addcolumns(data, seqtype){
+	if(!data||!seqtype) return;
+	if(model.seqtype() != seqtype) translateseq(seqtype);
+	for(var name in data){
+		if(!sequences[name]) continue;	
+		for(var c=0; c<data.removecols.length; c++){
+			sequences[name].splice(data.removecols[c], 0, data[name][c]);
+		}
+	}
+	redraw();
+}
+
+//collapse MSA rows
+function hiderows(selectionid){
+	var namearr = [];
+	action = 'hide';
+	registerselections(selectionid);
+	for(var r=0;r<rowflags.length;r++){ if(rowflags[r]){ namearr.push(model.visiblerows()[r]); }}
+	$.each(namearr,function(n,name){ if(leafnodes[name]) leafnodes[name].hideToggle('hide'); });
+	refresh();
+}
+
+//mask a MSA block
+function maskdata(action,selectionid){
+	var target = ~action.indexOf('rows')? 'rows' : ~action.indexOf('columns')? 'columns' : 'selections';
+	if(~action.indexOf('unmask')){ var symboltype = 'unmasked'; var flag = false; } else { var symboltype = 'masked'; var flag = 1; }
+	registerselections(selectionid);
+	var undodata = {}, undodesc = '';
+	
+	if(~action.indexOf('all')){
+		for(var name in sequences){ for(var c=0;c<sequences[name].length;c++) sequences[name][c] = symbols[sequences[name][c]][symboltype]; }
+	}
+	else if(action=='hidemaskedcols'){
+		for(var c=0;c<maskedcols.length;c++){ 
+			if(maskedcols[c]){
+				var colind = model.visiblecols.indexOf(c);
+				if(~colind){ model.visiblecols.splice(colind,1); }
+			} 
+		}
+	}
+	else if(target=='columns'){
+		undodata._columns = []; var firstrow = true;
+		for(var name in sequences){ if(~model.visiblerows.indexOf(name)){
+			if(flag) undodata[name] = 'columns';
+			for(var c=0;c<colflags.length;c++){ if(colflags[c]){
+					var colid = model.visiblecols()[c];
+					sequences[name][colid] = symbols[sequences[name][colid]][symboltype];
+					maskedcols[colid] = flag;
+					if(flag && firstrow) undodata._columns.push(colid);
+			}}
+			firstrow = false;
+		}}
+		undodesc = undodata._columns.length+' '+model.seqtype()+' alignment columns were masked.';
+	}
+	else if(target=='rows'){
+		for(var r=0;r<rowflags.length;r++){ if(rowflags[r]){
+				var name = model.visiblerows()[r];
+				if(flag) undodata[name] = 'all';
+				for(var c=0;c<sequences[name].length;c++){ sequences[name][c] = symbols[sequences[name][c]][symboltype]; }
+		}}
+		undodesc = Object.keys(undodata).length+' sequences were masked.';
+	}
+	else if(target=='selections'){
+		for(var s=0;s<selections.length;s++){
+			var sel = selections[s];
+			for(var r=sel.rowstart;r<sel.rowend;r++){
+				var name = model.visiblerows()[r];
+				if(!undodata[name]) undodata[name] = [];
+				for(var c=sel.colstart;c<=sel.colend;c++){
+					var colid = model.visiblecols()[c];
+					sequences[name][colid] = symbols[sequences[name][colid]][symboltype];
+					if(flag) undodata[name].push(colid);
+					else maskedcols[colid] = false;
+				}
+			}
+		}
+		undodesc = selections.length+' alignment blocks were masked.';
+	}
+	if(!$.isEmptyObject(undodata)){
+		model.addundo({name:'Mask '+target,seqtype:model.seqtype(),type:'seq',data:undodata,info:undodesc,undoaction:'unmask',redoaction:'mask'});
+	}
+	redraw();
+}
+
+//undo/redo sequence manipulation actions
+function undoseq(seqtype, undodata, action){
+	if(~action.indexOf('mask')){ //(un)mask seq. areas/rows/columns
+		var symboltype = ~action.indexOf('unmask')? 'unmasked' : 'masked';
+		var columns = undodata._columns? undodata._columns : [];
+		for(name in undodata){
+			if(!sequences[name]) continue;
+			if(undodata[name]==='all'){
+				for(var c=0;c<sequences[name].length;c++) sequences[name][c] = symbols[sequences[name][c]][symboltype];
+			} else {
+				if(undodata[name]!=='columns') columns = undodata[name];
+				columns = translatecolumns(seqtype, model.seqtype(), columns);
+				for(var c=0;c<columns.length;c++) sequences[name][columns[c]] = symbols[sequences[name][columns[c]]][symboltype];
+			}
+		}
+	}
+	else if(~action.indexOf('show')){ showcolumns(undodata, false, seqtype); }
+	else if(~action.indexOf('hide')){ //rehide columns
+		colflags = [];
+		var c = 0, i = 0; visiblecols = model.visiblecols();
+		$.each(undodata,function(i,range){
+			if(range.length!=2) return true;
+			range = translatecolumns(seqtype, model.seqtype(), range);
+			var scol = range[0], ecol = range[range.length-1];
+			for(;i<visiblecols.length;i++){ //column range=>colflags
+				c = visiblecols[i];
+				if(c>=scol){ if(c<ecol) colflags[i] = 1; else break; }
+			}
+		});
+		hidecolumns(false,'skipundo');
+	}
+	else if(~action.indexOf('add')){ addcolumns(undodata, seqtype); } //restore removed columns
+	else if(~action.indexOf('remove')){ removecolumns(translatecolumns(seqtype, model.seqtype(), undodata.removecols)); }
+	redraw();
 }
 
 //sequence row highlight
@@ -4326,12 +4649,11 @@ var hideborder = false;
 function rowborder(data,hiding){
 	if(hideborder) clearTimeout(hideborder);
 	var rborder = $("#rborder");
-	var hidefunc = function(){ rborder.removeClass('opaque'); setTimeout(function(){ rborder.css('display','none') },300); };
+	var hidefunc = function(){ rborder.css('opacity',0); setTimeout(function(){ rborder.css('display','none') },300); };
 	if(hiding=='hide'){ hidefunc(); return; }
 	var top = data.y||seqinfo(data).y||0;
 	rborder.css('top',top);
-	if(rborder.css('display')=='none') rborder.css({display:'block',height:model.boxh()+1});
-	rborder.addClass('opaque');
+	if(rborder.css('display')=='none') rborder.css({display:'block', opacity:1, height:model.boxh()-1});
 	if(hiding!='keep') hideborder = setTimeout(hidefunc,3000);
 }
 
@@ -4351,6 +4673,7 @@ function translatecolumns(from,to,colarr){
 	return colarr2;
 }
 
+//translate sequence data (dna<=>codons<=>protein)
 function translateseq(totype){
 	var fromtype = model.seqtype(), cdna = model.dnasource();
 	if(fromtype==totype || !cdna) return;
@@ -4440,7 +4763,8 @@ function translateseq(totype){
 	return false;
 }
 
-function seqmenu(selectid){ //generate content for sequence area pop-up menu
+//generate content for sequence area pop-up menu
+function seqmenu(selectid){
 	var maskcount = 0, menu = {};
 	for(var c=0;c<maskedcols.length;c++){ if(maskedcols[c]) maskcount++; }
 	var mode = model.selmode();
@@ -4499,30 +4823,7 @@ function seqmenu(selectid){ //generate content for sequence area pop-up menu
 	return menu;
 }
 
-//check for a new version of a backend service
-function checkversion(btn){
-	if(btn) btn.innerHTML = 'checking...';
-	communicate('geturl',{fileurl:'http://wasabi2.biocenter.helsinki.fi/download/changelog.txt'},
-	{success:function(changelog){
-		var startind = changelog.indexOf('v.')+2, endind = changelog.indexOf('v.',startind+1);
-		if(endind==-1) endind = changelog.length;
-		var firstblock = changelog.substring(startind,endind);
-		var sepind = firstblock.indexOf('* ');
-		var lastver = parseInt(firstblock.substring(0,sepind-1)), lastchange = firstblock.substring(sepind+1);
-		if(!isNaN(lastver)){
-			model.version.remote(lastver);
-			model.version.lastchange = lastchange;
-			if(btn){
-				if(model.version.local < model.version.remote()){
-					btn.innerHTML = '<span style="color:green" title="Click for details">update available</span>';
-					settingsmodel.skipversion('');
-					btn.onclick = function(){ dialog('jobstatus'); };
-				} else { btn.innerHTML = '<span style="color:red" title="Click to recheck">no update</span>'; }
-			}
-		}
-	}});
-}
-
+/* Launch Wasabi */
 //load startup data from server
 function startup(response){
 	try{ var data = JSON.parse(response); }catch(e){ model.offline(true); return; }
@@ -4568,7 +4869,7 @@ function startup(response){
 	communicate('getlibrary','',{success: function(){
 		if(urlvars.id||urlvars.share){ //import from library
 			getfile({id:urlvars.id||urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', share:true});
-			//dialog('export',{exporturl:settingsmodel.userid+'?type=text&getlibrary='+urlvars.share+'&file='+urlvars.file+'&share=true'});
+			//dialog('export',{exporturl:settingsmodel.userid+'?type=text&getanalysis='+urlvars.share+'&file='+urlvars.file+'&share=true'});
 		}
 		else if(urlvars.file){ getfile({file:urlvars.file}); } //import local file
 		else if(urlvars.url){ //import remote file

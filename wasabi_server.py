@@ -4,32 +4,34 @@
 # Back-end server to support Wasabi web application
 # Written by Andres Veidenberg [andres.veidenberg{at}helsinki.fi] and Alan Medlar, University of Helsinki [2012]
 
-import os
-import string
-import random
-import cgi
-import urllib2
-import subprocess
-import time
-import json
-import socket
-import shutil
-import sys
-import threading
-import Queue
-import multiprocessing
-import tempfile
-import ConfigParser
-import logging
-import webbrowser
 import argparse
-import smtplib
-import zipfile
+import cgi
+import ConfigParser
+import json
+import logging
+import logging.handlers
+import multiprocessing
+import os
+import Queue
+import random
 import re
+import shutil
+import smtplib
+import socket
+import string
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib
+import urllib2
+import webbrowser
+import zipfile
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 
-
+#define some globals
 wasabiexec = os.path.realpath(__file__)
 appdir = os.path.dirname(wasabiexec) #get wasabi homedir
 wasabidir = os.path.realpath(os.path.join(appdir,os.pardir))
@@ -56,20 +58,23 @@ config = ConfigParser.ConfigParser()
 defaultsettings = os.path.join(appdir,'default_settings.cfg')
 config.read(defaultsettings)
 dataroot = os.path.realpath(getconf('datadir') or 'wasabi_data')
-if not os.path.exists(dataroot): os.makedirs(dataroot,0775)
+if not os.path.exists(dataroot): os.makedirs(dataroot, 0775)
 settingsfile = os.path.join(dataroot,'wasabi_settings.cfg')
 if not os.path.isfile(settingsfile):
-    try: shutil.copy(defaultsettings, settingsfile)
-    except IOError as why: print "Could not create settings file: "+str(why) 
+    try:
+        shutil.copy(defaultsettings, settingsfile)
+        try: os.chmod(defaultsettings, 0664)
+        except (OSError, IOError): pass
+    except (OSError, IOError) as why: print "Setup error: Could not create settings file: "+str(why) 
 else: config.read(settingsfile)
 datadir = os.path.join(dataroot,'analyses')
 if not os.path.exists(datadir):
-    os.makedirs(datadir,0775)
+    os.makedirs(datadir, 0775)
     try: shutil.copytree(os.path.join(appdir,'example'), os.path.join(datadir,'example'))
-    except IOError as why: print "Could not create analysis library directory: "+str(why)
+    except (OSError, IOError) as why: print "Setup error: Could not create analysis library directory: "+str(why)
 sys.stdout.flush()
 exportdir = os.path.join(dataroot,'exports')
-if not os.path.exists(exportdir): os.makedirs(exportdir,0775)
+if not os.path.exists(exportdir): os.makedirs(exportdir, 0775)
 #set globals from config file
 serverport = getconf('serverport','int') or 8000
 num_workers = getconf('workerthreads','int') or multiprocessing.cpu_count()
@@ -85,14 +90,37 @@ gmail = getconf('gmail')
 browsername = getconf('browser') or 'default'
 userexpire = getconf('userexpire','int')
 userlog = os.path.join(datadir,'user.log')
-if useraccounts: open(userlog,'wb').close()
+userheader = ''
 linuxdesktop = getconf('linuxdesktop','bool')
 
 #set up logging
-logfile = os.path.join(dataroot,'server.log') if logtofile else False
-if logfile: open(logfile,'wb').close()
-loglevel = logging.DEBUG if(debug) else logging.INFO
-logging.basicConfig(level=loglevel, filename=logfile, format='%(asctime)s - %(message)s', datefmt='%d.%m.%y %H:%M:%S')
+class TimedFileHandler(logging.handlers.TimedRotatingFileHandler):    
+    def _open(self):
+        gwmask = os.umask(0o002) #make logfile group writable
+        fstream = logging.handlers.TimedRotatingFileHandler._open(self)
+        os.umask(gwmask)
+        return fstream
+        
+def start_logging():
+    if logtofile:
+        loghandler = TimedFileHandler(os.path.join(dataroot,'server.log'), when='d', interval=1, backupCount=1)
+    else:
+        loghandler = logging.StreamHandler()
+    loglevel = logging.DEBUG if(debug) else logging.INFO
+    loghandler.setLevel(loglevel)
+    loghandler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', '%d.%m.%y %H:%M:%S'))
+    logging.getLogger().setLevel(loglevel)
+    logging.getLogger().addHandler(loghandler)
+    
+    global userlog
+    if useraccounts:
+        try:
+            open(userlog,'wb').close()
+            try: os.chmod(userlog, 0664)
+            except (OSError, IOError): pass
+        except (OSError, IOError) as why:
+            logging.error('Setup error: Could not access user log file: '+str(why))
+            userlog = False
 
 #create linux shortcut
 if(sys.platform.startswith('linux') and linuxdesktop):
@@ -106,11 +134,12 @@ if(sys.platform.startswith('linux') and linuxdesktop):
             deskconf.set('Desktop Entry','Icon',os.path.join(appdir,'images','icon.png'))
             with open(deskfile,'wb') as fhandle: deskconf.write(fhandle)
             shutil.copy(deskfile, os.path.expanduser('~/Desktop'))
-    except (ConfigParser.Error, shutil.Error, IOError) as why: logging.error('Could not create desktop shortcut: '+str(why))
+    except (ConfigParser.Error, shutil.Error, OSError, IOError) as why: print 'Setup error: Could not create Linux desktop shortcut: '+str(why)
 
 #change to directory to be served (for GET requests)
 os.chdir(appdir)
 
+#utility functions
 def apath(path, d=wasabidir, uid=''): #confines a filepath
     path = os.path.realpath(path)
     testdir = os.path.realpath(d)
@@ -169,7 +198,7 @@ def librarypaths(libraryid, inclroot=False): #get all subfolder paths
 def getlibrary(jobid='', uid='', checkowner=False): #search analyses library
     if os.path.isabs(jobid): return jobid
     if jobid: #return a directory path
-        if(uid and checkowner and uid!=librarypath(jobid,True)): raise IOError(404,'Permission denied for '+jobid)
+        if(uid and checkowner and uid!=librarypath(jobid,True)): raise IOError(404,'Access denied to analysis ID '+jobid)
         if(jobid not in libdirs): maplibrary() #remap and try again
         if(jobid not in libdirs): raise IOError(404, "Invalid library ID: "+jobid)
         return librarypath(jobid)
@@ -206,7 +235,7 @@ def create_job_dir(d='', uid='', newlibrary=False, newfolder=False):
     while(os.path.basename(newdir) in libdirs): #check for uniqueness
         os.rmdir(newdir)
         newdir = tempfile.mkdtemp(prefix='', dir=d)
-    os.chmod(newdir,0775)
+    os.chmod(newdir, 0775)
     
     if(newlibrary): #create library folder for a new user
         md = Metadata.create(newdir, name="Library root folder", imported=True)
@@ -217,10 +246,13 @@ def create_job_dir(d='', uid='', newlibrary=False, newfolder=False):
             try:
                 for dname in os.listdir(datadir):
                     dpath = os.path.join(datadir,dname)
-                    if(not os.path.isdir(dpath)): continue
+                    if(not os.path.isdir(dpath) or dname=='example'): continue
                     lasttime = os.path.getmtime(dpath) #faulty in Windows?
                     dirage = (time.time()-lasttime)/86400
-                    if(dirage > userexpire): shutil.rmtree(apath(dpath,datadir,uid='skip'))
+                    if(dirage > userexpire):
+                    	jdirs = len([d for d in os.walk(dpath).next()[1] if not d.startswith('.')])
+                        shutil.rmtree(apath(dpath,datadir,uid='skip'))
+                        logging.debug('Cleanup: removed account '+dname+' ('+jdirs+' analyses, last visit '+str(int(dirage))+' days ago)')
             except (OSError, IOError) as why: logging.error('Library cleanup failed: '+str(why))
     else: #create files for keeping metadata
         if newfolder: Metadata.create(newdir, name="new folder", imported=True)
@@ -250,18 +282,15 @@ def change_ids(d='', uid=''): #replace IDs of library item(s)
     return newids
             
 
-def info(msg):
-    if(logfile): logging.info(msg)
-    else:
-        print str(msg)
-        sys.stdout.flush()
+def info(msg): logging.info(msg)
 
 def getsize(start_path = '.'): #get total filesize of a dirpath
     total_size = 0
     for dirpath, dirnames, filenames in os.walk(start_path):
         for f in filenames:
             fp = os.path.join(dirpath, f)
-            total_size += os.path.getsize(fp)
+            try: total_size += os.path.getsize(fp)
+            except OSError: pass
     return total_size
 
 
@@ -297,9 +326,9 @@ class WasabiServer(BaseHTTPRequestHandler):
         except IOError:
             self.sendError(404,'File Not Found: %s' % self.path,'HEAD')
     
-    #serve files        
+    #serve files (GET requests)        
     def do_GET(self):
-        url = self.path
+        url = urllib.unquote(self.path)
         urldir = ''
         params = ''
         filecontent = ''
@@ -308,36 +337,35 @@ class WasabiServer(BaseHTTPRequestHandler):
             
         if url.startswith("/"): url = url[1:]
         if url.endswith("/"): url += "index.html"
+        
         if('?' in url):
             urlarr = url.split('?')
             url = urlarr[0]
             params = dict([x.split('=') for x in urlarr[1].split('&')])
-                
+            if('type' not in params): params = {}
+            else: logging.debug("Get: userid=%s %s" % (userid, str(params)))  
+                 
         if("." not in url and "/" not in url):
             if(url in libdirs): userid = url #check user ID   
             url = "index.html"
             
-        if params :
-            logging.debug("Get: userid=%s %s" % (userid, str(params)))
             
         if 'type' in params:
-            ctype = 'text/plain' if(params['type'] is 'text') else 'application/octet-stream'
-        elif 'file' in params or 'getlibrary' in params or 'getexport' in params:
-            ctype = 'text/plain'
+            ctype = 'text/plain' if('text' in params['type']) else 'application/octet-stream'
         elif url.endswith(".html") or url.endswith(".css") or url.endswith(".js"): #send as text
             ctype = 'text/css' if url.endswith(".css") else 'text/javascript' if url.endswith(".js") else 'text/html'
         else: #send as binary
             ctype = 'image' if url.endswith(".jpg")|url.endswith(".png")|url.endswith(".gif") else 'application/octet-stream'
            
-        if 'getlibrary' in params and params['getlibrary']: #access datafiles from library directory
+        if 'getanalysis' in params and params['getanalysis']: #access datafiles from library directory
             filename = params['file'] if 'file' in params else 'meta.txt'
             if 'dir' in params and params['dir']: #check requested ID
                 childpath = librarypath(params['dir'])
                 if userid: #add shared ID to user library
                     md = Metadata(librarypath(userid))
                     idlist = md['shared'] or [] 
-                    if params['getlibrary'] not in idlist: md.update({'shared':idlist+[params['getlibrary']]})
-            url = os.path.join(librarypath(params['getlibrary']), filename)
+                    if params['getanalysis'] not in idlist: md.update({'shared':idlist+[params['getanalysis']]})
+            url = os.path.join(librarypath(params['getanalysis']), filename)
             root = datadir
         elif 'file' in params and local: #local wasabi installation permits unrestricted file reading
             url = params['file']
@@ -348,7 +376,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             filename = params['getexport']
             root = exportdir
         else: root = wasabidir
-            
+
         try:    
             f = open(apath(url,root)) if 'text' in ctype else open(apath(url,root),'rb') #symlink check
             filecontent = f.read()
@@ -424,7 +452,9 @@ class WasabiServer(BaseHTTPRequestHandler):
     #store form fields
     def _add_if_present(self, store, form, key):
         val = form.getvalue(key,'')
-        if val: store[key] = val
+        if val:
+            try: store[key] = json.loads(val)
+            except ValueError: store[key] = val
   
     #save files to libary
     def post_save(self, form, userid):
@@ -449,17 +479,18 @@ class WasabiServer(BaseHTTPRequestHandler):
         response = {}
         emptyfolder = True if action=='save' and 'file' not in form else False
         
-        if(not userid):
+        if(useraccounts and (not userid or userid not in libdirs)):
             if(currentid in libdirs): userid = getlibrarypath(currentid, getroot=True)
             else: userid = os.path.basename(create_job_dir(newlibrary=True))
             response["userid"] = userid
             
-        parentdir = getlibrary(jobid=parentid, uid=userid, checkowner=True) if parentid else ''
+        parentdir = getlibrary(jobid=parentid, uid=userid, checkowner=True) if parentid and writemode in ['sibling','overwrite'] else ''
         
-        logging.debug("%s: userid=%s parentid=%s currentid=%s writemode=%s" % (action, userid, parentid, currentid, writemode))
+        newu = "(new)" if "userid" in response else ""
+        logging.debug("%s: userid=%s %s parentid=%s currentid=%s writemode=%s" % (action, userid, newu, parentid, currentid, writemode))
         
         if(writemode=='child' or writemode=='sibling'):  #create a child job
-            if writemode=='child': parentid = currentid
+            if writemode=='child': parentdir = getlibrary(jobid=currentid, uid=userid, checkowner=True)
             odir = create_job_dir(d=parentdir, uid=userid, newfolder=emptyfolder)
         elif(writemode=='overwrite' and currentid):  #rerun of job, use same directory
             odir = getlibrary(jobid=currentid, uid=userid, checkowner=True)
@@ -543,7 +574,7 @@ class WasabiServer(BaseHTTPRequestHandler):
     def post_writemeta(self, form, userid):
         jobid = form.getvalue('id', '')
         if(not jobid): raise IOError(404,'No jobID given for writemeta')
-        if(userid and userid!=librarypath(jobid,True)): raise IOError(404,'Permission denied')
+        if(userid and userid!=librarypath(jobid,True)): raise IOError(404, 'Write access denied: not the owner of analysis '+jobid)
         key = form.getvalue('key', 'imported')
         value = form.getvalue('value', str(time.time()))
         try :
@@ -594,7 +625,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         targetid = form.getvalue('target','') or userid or os.path.basename(datadir)
         duplicate = form.getvalue('copy','')
         if(not jobid): raise IOError(404,'Item ID not given')
-        if(userid and userid!=librarypath(targetid,getroot=True)): raise IOError(404,'Permission denied')
+        if(userid and userid!=librarypath(targetid,getroot=True)): raise IOError(404,'Permission denied for analysis ID '+targetid)
         sourcepath = librarypath(jobid)
         targetpath = librarypath(targetid)
         if(not duplicate and os.path.dirname(sourcepath)==targetpath):
@@ -631,7 +662,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         global job_queue
         jobid = form.getvalue('id','')
         if(not jobid): raise IOError(404,'No jobID given')
-        if(userid and userid!=librarypath(jobid,True)): raise IOError(404,'Permission denied')
+        if(userid and userid!=librarypath(jobid,True)): raise IOError(404,'Permission denied for analysis ID '+jobid)
         
         job_queue.terminate(jobid)
         md = Metadata(jobid) #check result
@@ -665,12 +696,13 @@ class WasabiServer(BaseHTTPRequestHandler):
     def post_errorlog(self, form, userid=''):
         global datadir
         global userlog
-        global currentheader
+        global userheader
         errorheader = '\n'+userid+' : '+(self.client_address[0] or '')+':\n'
-        if(currentheader!=errorheader): currentheader = errorheader
+        if(userheader!=errorheader): userheader = errorheader
         else: errorheader = ''
         errorlog = errorheader+form.getvalue('errorlog','')+'\n'
-        with open(userlog,'a') as userlogfile: userlogfile.write(errorlog)
+        if(userlog):
+            with open(userlog,'a') as userlogfile: userlogfile.write(errorlog)
         self.sendOK('Done')
         
     #send a welcome email
@@ -681,7 +713,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         url = form.getvalue('url','')
         webaddr = 'http://'+self.headers.get('Host')
         msg = 'Wasabi is a web application for phylogenetic sequence analysis.\r\n'
-        msg += 'You can learn more about Wasabi from http://wasabi.biocenter.helsinki.fi\r\n\r\n'
+        msg += 'You can learn more about Wasabi from http://wasabiapp.org\r\n\r\n'
         if url:
             subj = 'Shared data from Wasabi'
             msg += 'To view the dataset that was shared with you, go to '+webaddr+'?'+url.split('?')[-1]
@@ -727,7 +759,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         if(os.path.isdir(oldappdir) and os.listdir(oldappdir)):  #make a backup
             archive = os.path.join(dataroot,'backups')
             try:
-                if(not os.path.isdir(archive)): os.makedirs(archive,0775)
+                if(not os.path.isdir(archive)): os.makedirs(archive, 0775)
                 basepath, ext = os.path.splitext(oldappdir)
                 safedir = basepath+str(len(os.listdir(archive)) or '')+ext
                 os.rename(oldappdir,safedir)
@@ -788,7 +820,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             if(action!='getlibrary'): logging.debug("Post: %s, userid=%s" % (action, userid))
             if(useraccounts and action not in ['checkserver','errorlog','terminate','save']): #userid check
                 if(not userid or userid not in libdirs or libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'):
-                    raise IOError(404,'Post '+action+' => Invalid user ID:'+userid)
+                    raise IOError(404,'Request '+action+' => Invalid user ID:'+(userid if userid else '[Userid required but missing]'))
                     
             getattr(self, "post_%s" % action)(form, userid)
             
@@ -796,7 +828,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             if hasattr(e, 'reason'): self.sendError(404,"URL does not exist. %s" % e.reason, action)
             else: self.sendError(404, str(e), action)
         except shutil.Error as why:
-            self.sendError(501,"File operation failed: %s" %why)
+            self.sendError(501,"File operation failed: %s" % why)
         except OSError as e:
             self.sendError(501,"System error. %s" % e.strerror, action)
         except AttributeError as e:
@@ -946,6 +978,7 @@ class Metadata(object):
         f = tempfile.NamedTemporaryFile(suffix=os.path.basename(self.md_file), prefix='', dir=self.jobdir, delete=False)
         json.dump(self.metadata, f, indent=2)
         f.close()
+        os.chmod(f.name, 0664)
         os.rename(f.name, self.md_file)
     
     def update_log(self) :
@@ -975,8 +1008,10 @@ class Metadata(object):
         return feedback
 
     @staticmethod
-    def create(dpath, filename="meta.txt", name="unnamed", imported="") :
-        f = open(joinp(dpath, filename), 'wb')
+    def create(dpath, filename="meta.txt", name="unnamed", imported=""):
+        fpath = joinp(dpath, filename)
+        f = open(fpath, 'wb')
+        os.chmod(fpath, 0664)
         curtime = str(time.time())
         if imported: imported = curtime
         f.write('{"id":"'+os.path.basename(dpath)+'"')
@@ -1192,11 +1227,11 @@ class PrankJob(Job):
         self.begin()
 
         logfile = open(self.files['logfile'], 'wb')
-        #limit cpu load
-        cputime = ['ulimit','-t',str(cpulimit*3600)+';'] if(cpulimit) else []
-        self.popen = subprocess.Popen(cputime+['nice','-n','20']+self.params, stdout=logfile, stderr=logfile, close_fds=True)
+        #limit cpu time (default settings: 5 hours)
+        cputime = 'ulimit -t '+str(cpulimit*3600)+';' if(cpulimit) else ''
+        self.popen = subprocess.Popen(cputime+'nice -n 20 '+' '.join(self.params), stdout=logfile, stderr=logfile, close_fds=True, shell=True)
         
-        self.unlock_status()
+        self.unlock_status()  
         ret = self.popen.wait()
 
         self.lock_status()
@@ -1265,9 +1300,9 @@ class PaganJob(Job):
         self.begin()
 
         logfile = open(self.files['logfile'], 'wb')
-        #limit cpu load
-        cputime = ['ulimit','-t',str(cpulimit*3600)+';'] if(cpulimit) else []
-        self.popen = subprocess.Popen(cputime+['nice','-n','20']+self.params, stdout=logfile, stderr=logfile, close_fds=True)
+        #limit cpu time (by default 5 hours)
+        cputime = 'ulimit -t '+str(cpulimit*3600)+';' if(cpulimit) else ''
+        self.popen = subprocess.Popen(cputime+'nice -n 20 '+' '.join(self.params), stdout=logfile, stderr=logfile, close_fds=True, shell=True)
         
         self.unlock_status()
         ret = self.popen.wait()
@@ -1286,6 +1321,7 @@ def main():
     global num_workers
     global local
     global debug
+    global logtofile
     global browsername
     global osxbundle
     
@@ -1294,14 +1330,18 @@ def main():
     vgroup = parser.add_mutually_exclusive_group()
     vgroup.add_argument("-v", "--verbose", action='store_true', help="show server traffic %s" % ("(default)" if debug else ""), default=debug)
     vgroup.add_argument("-q", "--quiet", action='store_true', help="minimal feedback %s" % ("(default)" if not debug else ""))
+    fgroup = parser.add_mutually_exclusive_group()
+    fgroup.add_argument("-f", "--filelog", action='store_true', help="print feedback to file %s" % ("(default)" if logtofile else ""), default=logtofile)
+    fgroup.add_argument("-c", "--console", action='store_true', help="print feedback to console %s" % ("(default)" if not logtofile else ""))
     lgroup = parser.add_mutually_exclusive_group()
     lgroup.add_argument("-l", "--local", action='store_true', help="autolaunch web browser %s" % ("(default)" if local else ""), default=local)
     lgroup.add_argument("-r", "--remote", action='store_true', help="just start the server %s" % ("(default)" if not local else ""))
     args = parser.parse_args()
     serverport = args.port
     debug = False if args.quiet else args.verbose
+    logtofile = False if args.console else args.filelog
     local = False if args.remote else args.local
-    if not debug: logging.disable(logging.DEBUG)
+    start_logging()
 
     info('Starting server...\n') #start task queue
     job_queue = WorkQueue(num_workers)
