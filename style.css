@@ -2137,7 +2137,7 @@ span.itemexpand{
 	left: 5px;
     top: 1px;
     margin: 0;
-    z-index: 1;
+    z-index: 2;
 }
 #library span.svgicon{
 	padding-right: 0;
@@ -2158,21 +2158,67 @@ a.button span.svgicon path{ fill: #333; }
 span.svgicon.action{ cursor: pointer; }
 span.svgicon.share:hover path, span.svgicon.action:hover path, a.button:hover span.svgicon path{ fill: orange; }
 
-#library span.dirtrail{
+
+span.dirtrail{
 	display: inline-block;
 	position: relative;
-	margin-left: 15px;
-	margin-right: 145px;
-	max-width: 245px;
+	max-width: 400px;
+	height: 22px;
 	overflow: hidden;
 	font-weight: bold;
-	color: #666;
 	white-space: nowrap;
 }
-#library span.dirtrail>span.text{
-	float: right;
-	margin-left: 10px;
+#library span.dirtrail { margin: -2px 145px 0 10px; max-width: 245px; }
+span.dirtrail>span{ float: right; margin-right: 10px; }
+span.dirtrail a{
+	display: inline-block;
+	position: relative;
+	font-size: 14px;
+	line-height: 20px;
+	padding: 0 0 0 15px;
+	height: 20px;
+	border-radius: 5px;
+	margin: 0 0 0 -4px;
+	box-shadow: 0 0 1px 1px rgba(255,255,255,.8) inset, 0 1px 0 rgba(255,255,255,.6);
 }
+span.dirtrail a:first-child{ vertical-align: top; margin: 0; }
+#moveitem span.dirtrail:first-child a{ cursor: default; }
+#moveitem span.dirtrail a:last-child{ background: white; }
+span.dirtrail a>span{
+	max-width: 40px;
+	padding-right: 5px;
+	overflow: hidden;
+	transition: max-width 0.4s;
+	-webkit-transition: max-width 0.4s;
+}
+span.dirtrail a:first-child>span{
+	height: 16px;
+    margin: 2px 6px 0 -3px;
+    width: 16px;
+}
+span.dirtrail a:hover{ background: white; }
+span.dirtrail a:hover>span{ max-width: 100px; }
+#moveitem span.dirtrail a:last-child>span{ max-width: 200px; }
+span.dirtrail a:after {
+	content: '';
+	position: absolute;
+	top: 0; 
+	right: -9px;
+	width: 20px; 
+	height: 20px;
+	background-color: #d0d0d0;
+    background: -webkit-linear-gradient(135deg, #f9f9f9, #d0d0d0);
+    background: linear-gradient(135deg, #f9f9f9, #d0d0d0);
+    border: 1px solid #666;
+    border-left: none;
+    border-bottom: none;
+    -webkit-transform: scale(0.707) rotate(45deg);
+	transform: scale(0.707) rotate(45deg);
+	z-index: 1;
+	border-radius: 0 5px 0 50px;
+}
+#moveitem span.dirtrail a:last-child:after{ content: none; }
+span.dirtrail a:hover:after{ background: white; }
 
 /* fading-end textline */
 span.logline{

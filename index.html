@@ -30,8 +30,8 @@
     <div id="startup">Starting up...</div>
     
 	<div id="top" class="away">
-	  <div id="toptitle" class="title" data-bind="visible:!offline()&&(seqsource()||treesource())" title="Analysis name. Click for more options">
-	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename,valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off"><span class="note" data-bind="html:unsaved()?'(unsaved)':librarymodel.shareicon(librarymodel.openitem())"></span>
+	  <div id="toptitle" class="title" data-bind="visible:!offline()&&(seqsource()||treesource())">
+	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename,valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off" title="Analysis name. Click for more options"><span class="note" data-bind="html:unsaved()?'(unsaved)':librarymodel.shareicon(librarymodel.openitem())"></span>
 	  </div>
 	  
 	  <div id="topcollapse" title="Click to toggle menubar collapse" onclick="toggletop()"><span>&#x25B2;<br>&#x25B2;</span><br>...</div>

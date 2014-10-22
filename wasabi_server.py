@@ -43,6 +43,7 @@ os.chdir(wasabidir)
 #for tracking library content
 job_queue = None
 libdirs = {}
+datestamp = '' #last cleanup date
 
 def getconf(opt='',vtype=''): #parse conf file values
     try:
@@ -88,7 +89,7 @@ local = getconf('local','bool')
 eposcript = getconf('eposcript')
 gmail = getconf('gmail')
 browsername = getconf('browser') or 'default'
-userexpire = getconf('userexpire','int')
+userexpire = getconf('userexpire','int') or ''
 userlog = os.path.join(datadir,'user.log')
 userheader = ''
 linuxdesktop = getconf('linuxdesktop','bool')
@@ -163,10 +164,22 @@ def write_file(filename, filecontents):
     f.close()
     return f.name
     
-def maplibrary(libraryid=''): #index library directories
+def maplibrary(rootid=''): #index library directories
     global libdirs
-    libdirs = {}
-    libroot = getlibrary(jobid=libraryid) if libraryid else datadir
+    
+    def getkids(libid): #flatten librarytree
+	    kidarr = [libid]
+	    for kidid in libdirs[libid]['children']:
+	        kidarr = kidarr + getkids(kidid)
+	    return kidarr
+    
+    if(rootid and rootid in libdirs): #partial remap
+        libroot = getlibrary(jobid=rootid)
+        for oldid in getkids(rootid):
+            del libdirs[oldid] 
+    else: #full remap
+        libroot = datadir
+        libdirs = {}
     for (dirpath,dirs,files) in os.walk(libroot,followlinks=False):
         path = dirpath.split(os.path.sep)
         if('meta.txt' not in files): Metadata.create(dirpath, imported=True)
@@ -200,7 +213,7 @@ def getlibrary(jobid='', uid='', checkowner=False): #search analyses library
     if jobid: #return a directory path
         if(uid and checkowner and uid!=librarypath(jobid,True)): raise IOError(404,'Access denied to analysis ID '+jobid)
         if(jobid not in libdirs): maplibrary() #remap and try again
-        if(jobid not in libdirs): raise IOError(404, "Invalid library ID: "+jobid)
+        if(jobid not in libdirs): raise IOError(404, "Getlib: Invalid library ID: "+jobid)
         return librarypath(jobid)
     else: return librarypaths(uid or os.path.basename(datadir)) #return all library paths
 
@@ -223,8 +236,30 @@ def getmeta(dirpath, rootlevel, shareroot=None): #get processed metadata
     except MetadataError as why:
         logging.error('Metadata parsing error: %s' % why)
     return md
+    
+    
+def sendmail(subj='Email from Wasabi', msg='', to=''):
+    if not gmail: return 'Failed: no gmail user'
+    guser, gpass = gmail.split(':')
+    if '@' not in guser: guser += '@gmail.com'
+    msg += '\r\n\r\n===============================================================\r\n'
+    msg += 'Wasabi is a web application for phylogenetic sequence analysis.\r\n'
+    msg += 'You can learn more about Wasabi from http://wasabiapp.org\r\n\r\n'
+    if guser and gpass and '@' in to:
+        try:
+            gserver = smtplib.SMTP('smtp.gmail.com:587')
+            gserver.ehlo()
+            gserver.starttls()
+            gserver.login(guser,gpass)
+            mailstr = '\r\n'.join(['From: '+guser, 'To: '+to, 'Subject: '+subj, '', msg])
+            gserver.sendmail(guser, [to], mailstr)
+            gserver.quit()
+            return 'Sent'
+        except: raise
+    else: return 'Failed'
 
-def create_job_dir(d='', uid='', newlibrary=False, newfolder=False):
+
+def create_job_dir(d='', uid='', newlibrary=False, newfolder=False, metadata={}):
     if(not d):
         d = datadir
         if(useraccounts):
@@ -232,7 +267,7 @@ def create_job_dir(d='', uid='', newlibrary=False, newfolder=False):
             else: d = librarypath(uid)   
             
     newdir = tempfile.mkdtemp(prefix='', dir=d)
-    while(os.path.basename(newdir) in libdirs): #check for uniqueness
+    while(os.path.basename(newdir) in libdirs): #check for ID uniqueness
         os.rmdir(newdir)
         newdir = tempfile.mkdtemp(prefix='', dir=d)
     os.chmod(newdir, 0775)
@@ -242,33 +277,44 @@ def create_job_dir(d='', uid='', newlibrary=False, newfolder=False):
         md.update({"shared":["example"]})
         maplibrary()
         
-        if userexpire and useraccounts:  #cleanup old user libraries (default: >30 days)
+        today = time.strftime("%d%m%y")
+        global datestamp
+        if userexpire and useraccounts and datestamp is not today:  #delete obsolete (see settings.cfg) user libraries
             try:
                 for dname in os.listdir(datadir):
                     dpath = os.path.join(datadir,dname)
-                    if(not os.path.isdir(dpath) or dname=='example'): continue
-                    lasttime = os.path.getmtime(dpath) #faulty in Windows?
+                    fpath = os.path.join(dpath,'meta.txt')
+                    if(not os.path.isdir(dpath) or not os.path.isfile(fpath) or dname=='example' or Metadata(dpath)['keepAccount']): continue
+                    lasttime = os.path.getmtime(fpath)
                     dirage = (time.time()-lasttime)/86400
-                    if(dirage > userexpire):
+                    if(dirage == userexpire-10 and gmail): #send warning email. expects to be run daily
+                    	msg = 'Your Wasabi account and anlysis library expires is 10 days.\r\n'
+                    	msg += 'Reactivate it by clicking on your account URL: http://'+self.headers.get('Host')+'/'+dname
+                    	msg += '\r\nAlternatively, you can ingore this message to have the account data deleted on expiry date.'
+                    	to = Metadata(dpath)['email']
+                    	if to: sendmail('Wasabi account about to expire',msg,to)
+                    elif(dirage > userexpire):
                     	jdirs = len([d for d in os.walk(dpath).next()[1] if not d.startswith('.')])
                         shutil.rmtree(apath(dpath,datadir,uid='skip'))
-                        logging.debug('Cleanup: removed account '+dname+' ('+jdirs+' analyses, last visit '+str(int(dirage))+' days ago)')
+                        logging.debug('Cleanup: removed account '+dname+' ('+str(jdirs)+' analyses, last visit '+str(int(dirage))+' days ago)')
+                datestamp = today
             except (OSError, IOError) as why: logging.error('Library cleanup failed: '+str(why))
     else: #create files for keeping metadata
-        if newfolder: Metadata.create(newdir, name="new folder", imported=True)
+        if newfolder: md = Metadata.create(newdir, name="new folder", imported=True)
         else:
-            Metadata.create(newdir)
+            md = Metadata.create(newdir)
             Metadata.create(newdir, filename="importmeta.txt")
         maplibrary(uid)
+    if(md and metadata): md.update(metadata)
     return newdir
 
 def change_ids(d='', uid=''): #replace IDs of library item(s)
     if(not d or d==datadir): raise OSError(501,"No path given for ID change")
     names = tempfile._RandomNameSequence()  #random ID generator
     newids = []
-    for (dirpath,dirs,files) in os.walk(d,followlinks=False):
+    for (dirpath,dirs,files) in os.walk(d,followlinks=False,topdown=False):
         newid = names.next()
-        while(newid in libdirs): newid = names.next()
+        while(newid in libdirs): newid = names.next() #check for ID uniqueness
         try:
             newpath = os.path.join(os.path.dirname(dirpath),newid)
             os.rename(dirpath, newpath)
@@ -392,14 +438,11 @@ class WasabiServer(BaseHTTPRequestHandler):
             self.sendError(e.errno, 'File Not Found: %s (%s)' % (url, e.strerror), 'GET')
 
     #send server status
-    def post_checkserver(self, form, userid):
+    def post_checkserver(self, form, userid=''):
         status = {"status":"OK"}
         if(useraccounts):
-            if(not userid or userid not in libdirs): #create new user folder
-                userid = os.path.basename(create_job_dir(newlibrary=True))
-                status["newuser"] = "yes"
-            os.utime(joinp(datadir, userid, uid='skip'),None) #timestamp last login
-            status["userid"] = userid
+            status["useraccounts"] = userexpire or "yes"
+            if(userid and userid in libdirs): status["userid"] = userid
         if(autoupdate): status["autoupdate"] = "yes"
         if(local):
             status["local"] = "yes"
@@ -411,12 +454,21 @@ class WasabiServer(BaseHTTPRequestHandler):
         if(eposcript): status["epoimport"] = "yes"
         if(gmail): status["email"] = "yes"
         if(cpulimit): status["cpulimit"] = cpulimit
-        if(datalimit):
-            status["datalimit"] = datalimit
-            status["datause"] = getsize(joinp(datadir, userid, uid='skip'))
-        if(userexpire): status["userexpire"] = userexpire
-        self.sendOK()
-        self.wfile.write(json.dumps(status))
+        if(datalimit): status["datalimit"] = datalimit
+        self.sendOK(json.dumps(status))
+    
+    #send user account metadata
+    def post_checkuser(self, form, userid):
+    	if(not userid or userid not in libdirs): raise IOError(404,'UserID '+userid+' does not exist.')
+        md = Metadata(librarypath(userid)) #also datestamps datafile for last visit
+        if(datalimit): md["datause"] = getsize(joinp(datadir, userid, uid='skip'))
+        self.sendOK(md)
+        
+    #create new user
+    def post_createuser(self, form, userid=''):
+    	newmeta = {'username':form.getvalue('username','anonymous'), 'email':form.getvalue('email','')}
+        userid = os.path.basename(create_job_dir(newlibrary=True,metadata=newmeta)) #create new user
+        self.sendOK('{"userid":"'+userid+'"}')
     
     #send summary of entire analysis library
     def post_getlibrary(self, form, userid):
@@ -484,7 +536,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             else: userid = os.path.basename(create_job_dir(newlibrary=True))
             response["userid"] = userid
             
-        parentdir = getlibrary(jobid=parentid, uid=userid, checkowner=True) if parentid and writemode in ['sibling','overwrite'] else ''
+        parentdir = getlibrary(jobid=parentid, uid=userid, checkowner=True) if parentid and writemode!='overwrite' else ''
         
         newu = "(new)" if "userid" in response else ""
         logging.debug("%s: userid=%s %s parentid=%s currentid=%s writemode=%s" % (action, userid, newu, parentid, currentid, writemode))
@@ -538,37 +590,6 @@ class WasabiServer(BaseHTTPRequestHandler):
 
         self.sendOK()
         self.wfile.write(json.dumps(response))
-    
-    #fetch EPO alignment to library
-    def post_startepo(self, form, userid):
-        if(not eposcript or not os.path.isfile(eposcript)): raise IOError(404,'EPO dump script not found: '+str(eposcript))
-        
-        odir = create_job_dir(uid=userid)
-        epofilename = os.path.join(odir,form.getvalue('output_file','epo_slice.xml'))
-        params = [eposcript, '--output_format', 'xml', '--output_file', epofilename, '--restrict']
-        for param in ['alignment','set','species','seq_region','seq_region_start','seq_region_end','db','masked_seq']:
-            params.append('--'+param)
-            params.append(form.getvalue(param,''))
-
-        jobid = os.path.basename(odir)
-        logfilename = 'output.log'
-        metadata = Metadata(jobid, uid=userid)
-        metadata["name"] = 'EPO alignment'
-        metadata["source"] = 'Ensembl'
-        metadata["starttime"] = str(time.time())
-        metadata["savetime"] = metadata["starttime"]
-        metadata["outfile"] = ''
-        metadata["logfile"] = logfilename
-        metadata.flush()
-        logfile = open(os.path.join(odir,logfilename), 'wb')
-        
-        detach_flag = 0x00000008 if os.name is 'nt' else 0 #for windows
-        popen = subprocess.Popen(params, stdout=logfile, stderr=logfile, creationflags=detach_flag, close_fds=True)
-        status = popen.poll()
-        status = str(status) if status else 'running' #0=finished, -2=failed, None=running
-        
-        self.sendOK()
-        self.wfile.write('{"id":"'+jobid+'","status":"'+status+'"}')
 
     #add data to job metadata file
     def post_writemeta(self, form, userid):
@@ -707,31 +728,18 @@ class WasabiServer(BaseHTTPRequestHandler):
         
     #send a welcome email
     def post_sendmail(self, form, userid=''):
-        guser, gpass = gmail.split(':')
-        if '@' not in guser: guser += '@gmail.com'
         to = form.getvalue('email','')
         url = form.getvalue('url','')
+        msg = form.getvalue('msg','')
         webaddr = 'http://'+self.headers.get('Host')
-        msg = 'Wasabi is a web application for phylogenetic sequence analysis.\r\n'
-        msg += 'You can learn more about Wasabi from http://wasabiapp.org\r\n\r\n'
         if url:
             subj = 'Shared data from Wasabi'
-            msg += 'To view the dataset that was shared with you, go to '+webaddr+'?'+url.split('?')[-1]
-        else:
+            msg += '\n\rTo view the dataset that was shared with you, go to '+webaddr+'?'+url.split('?')[-1]
+        elif not msg:
             subj = 'Welcome to Wasabi'
-            msg += 'You can access your analysis library in Wasabi server at '+webaddr+'/'+userid
-        st = 'Failed'
-        if guser and gpass and '@' in to:
-            try:
-                gserver = smtplib.SMTP('smtp.gmail.com:587')
-                gserver.ehlo()
-                gserver.starttls()
-                gserver.login(guser,gpass)
-                mailstr = '\r\n'.join(['From: '+guser, 'To: '+to, 'Subject: '+subj, '', msg])
-                gserver.sendmail(guser, [to], mailstr)
-                gserver.quit()
-                st = 'Sent'
-            except: raise
+            msg = 'You can access your analysis library in Wasabi server at '+webaddr+'/'+userid
+            if(userexpire): msg += '\r\nNote: Neglected user accounts will be deleted after '+str(userexpire)+' days of last visit.'
+        st = sendmail(subj,msg,to)
         self.sendOK(st)
     
     #automated Wasabi update
@@ -742,7 +750,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             else:
                 osname = 'osx' if sys.platform.startswith('darwin') else 'windows' if sys.platform.startswith('win') else 'linux'
                 updname = 'wasabi_'+osname+'.zip'
-            urlfile = urllib2.urlopen('http://wasabi2.biocenter.helsinki.fi/download/'+updname)
+            urlfile = urllib2.urlopen('http://wasabiapp.org/download/wasabi/'+updname)
             totalsize = int(urlfile.info().getheaders("Content-Length")[0]) or 18000000
             chunksize = 100*1024
             chunkcount = int(totalsize/chunksize)
@@ -818,7 +826,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             userid = form.getvalue('userid','') if useraccounts else ''
             
             if(action!='getlibrary'): logging.debug("Post: %s, userid=%s" % (action, userid))
-            if(useraccounts and action not in ['checkserver','errorlog','terminate','save']): #userid check
+            if(useraccounts and action not in ['checkserver','errorlog','terminate','save','createuser','geturl']): #userid check
                 if(not userid or userid not in libdirs or libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'):
                     raise IOError(404,'Request '+action+' => Invalid user ID:'+(userid if userid else '[Userid required but missing]'))
                     
