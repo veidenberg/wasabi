@@ -82,7 +82,7 @@ function mCustomScrollbar(){
 			$scrollRightBtn.off('click').click(function(e){ e.stopPropagation(); ScrollX(visibleWidth,'rightbtn'); });
 			//arrow keys => scroll half page
 			$(document).off('keydown').on('keydown',function(e){
-				if(e.target.tagName!='INPUT'){
+				if(e.target.tagName!='INPUT' && e.target.tagName!='TEXTAREA'){
     				if (e.keyCode==37){ e.preventDefault(); ScrollX(0-(visibleWidth/2),'leftbtn'); }
         			else if (e.keyCode==39){ e.preventDefault(); ScrollX(visibleWidth/2,'rightbtn'); }
         		}
@@ -162,8 +162,10 @@ function mCustomScrollbar(){
 			$scrollUpBtn.off('click').click(function(e){ e.stopPropagation(); ScrollY(0-visibleHeight,'upbtn'); });
 			//arrow keys => scroll half page
 			$('body').off('keydown').on('keydown',function(e){
-    			if (e.keyCode==38){ e.preventDefault(); ScrollY(0-(visibleHeight/2),'upbtn'); }
-        		else if (e.keyCode==40){ e.preventDefault(); ScrollY(visibleHeight/2,'downbtn'); }
+				if(e.target.tagName!='TEXTAREA'){
+    				if (e.keyCode==38){ e.preventDefault(); ScrollY(0-(visibleHeight/2),'upbtn'); }
+					else if (e.keyCode==40){ e.preventDefault(); ScrollY(visibleHeight/2,'downbtn'); }
+				}
     		});
 
 			var scrollYAmount = (totalContentHeight-visibleHeight)/draggerYMax;

@@ -31,7 +31,7 @@
     
 	<div id="top" class="away">
 	  <div id="toptitle" class="title" data-bind="visible:!offline()&&(seqsource()||treesource())">
-	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename,valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off" title="Analysis name. Click for more options"><span class="note" data-bind="html:unsaved()?'(unsaved)':librarymodel.shareicon(librarymodel.openitem())"></span>
+	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename, valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off" title="Analysis name. Click for more options"><span class="note" data-bind="html:unsaved()||librarymodel.shareicon(librarymodel.openitem())"></span>
 	  </div>
 	  
 	  <div id="topcollapse" title="Click to toggle menubar collapse" onclick="toggletop()"><span>&#x25B2;<br>&#x25B2;</span><br>...</div>
@@ -79,7 +79,7 @@
 		<div id="notree" data-bind="fadevisible:!treesource()">No tree data</div>
 		<div id="treewrap"><div id="tree"></div><div id="names"></div></div>
 		<div id="bottomfade"></div><div id="topfade"></div>
-		<div id="borderDrag" title="Drag to adjust sequence area width">&#x22EE;</div>
+		<div id="borderDrag" title="Drag to adjust sequence area width"><span>&#x22EE;</span></div>
 	</div>
 	<div id="namesborderDragline" class="draggerline dragmode" data-bind="css:{'visible':treesource()||seqsource()}">
 	  <div id="namesborderDrag" class="dragger" title="Drag to adjust tree width">&#x22EE;</div>
