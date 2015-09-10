@@ -150,7 +150,6 @@ def isint(s):
     except ValueError:
         return False
 
-
 def apath(path, d=wasabidir, uid=''): #check if filepath is in wasabi sandbox
     path = os.path.realpath(path)
     testdir = os.path.realpath(d)
@@ -324,7 +323,7 @@ def create_job_dir(d='', uid='', newlibrary=False, metadata={}):
                     dirage = (time.time()-lasttime)/86400 #times in (float) seconds => days
                     tmpuserage = int(int(usermd['tmpAccount'])/86400) if 'tmpAccount' in usermd.metadata else 0
                     if(dirage > userexpire or tmpuserage): #remove expired user account
-                        jdirs = len([d for d in os.walk(dpath).next()[1] if not d.startswith('.')])
+                        jdirs = len(sum([trio[1] for trio in os.walk(dpath)],[])) #len(flattened list of subdir lists)
                         shutil.rmtree(apath(dpath,datadir,uid='skip'))
                         info('Cleanup: removed account '+dname+' ('+str(jdirs)+' analyses, last visit '+str(int(dirage))+' days ago)')
                     elif(dirage == userexpire-10 and 'email' in usermd.metadata and gmail): #send warning email
@@ -442,6 +441,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         
         logfile = False
         try:
+            checkroot = wasabidir
             if 'getanalysis' in params and params['getanalysis']: #access datafiles from library directory (?id=>getfile()=>?getanalysis)
                 filename = params['file'] if 'file' in params else 'meta.txt'
                 md = Metadata(params['getanalysis'])  #throws error for invalid ID
@@ -455,18 +455,20 @@ class WasabiServer(BaseHTTPRequestHandler):
                         isowner = librarypath(params['getanalysis'], getroot=True) == userid
                         if not isowner and params['getanalysis'] not in idlist: md.update({'shared': idlist+[params['getanalysis']]})
                 url = os.path.join(librarypath(params['getanalysis']), filename)
-                root = datadir
+                checkroot = datadir
+            elif 'getexport' in params:
+                url = os.path.join(exportdir, params['getexport'])
+                filename = params['getexport']
+                checkroot = exportdir
+            elif 'plugin' in params:
+                filename = params['file'] if 'file' in params else 'plugin.json'
+                url = os.path.join(appdir, 'plugins', params['plugin'], filename)
             elif 'file' in params and local: #local wasabi installation permits unrestricted file reading
                 url = params['file']
                 filename = os.path.basename(url)
-                root = 'skip'
-            elif 'getexport' in params:
-                url = joinp(exportdir, params['getexport'], d=exportdir)
-                filename = params['getexport']
-                root = exportdir
-            else: root = wasabidir
+                checkroot = 'skip'
             
-            f = open(apath(url,root)) if 'text' in ctype else open(apath(url,root),'rb') #includes symlink check
+            f = open(apath(url, checkroot)) if 'text' in ctype else open(apath(url, checkroot),'rb') #includes symlink check
             filecontent = f.read()
             if(logfile): filecontent = filecontent.replace(librarypath(params['getanalysis']),'fakePath') #sanitize logfile
             f.close()
@@ -501,6 +503,8 @@ class WasabiServer(BaseHTTPRequestHandler):
         if(gmail): status["email"] = "yes"
         if(cpulimit): status["cpulimit"] = cpulimit
         if(datalimit): status["datalimit"] = datalimit
+        pdir = os.path.join(appdir,"plugins")  #send list of plugins
+        status["plugins"] = [d for d in os.walk(pdir).next()[1] if os.path.isfile(os.path.join(pdir,d,"plugin.json"))]
         self.sendOK(json.dumps(status))
 
     #send user account metadata
@@ -613,21 +617,17 @@ class WasabiServer(BaseHTTPRequestHandler):
 
         metadata = Metadata(jobid, uid=userid)
         if action == 'startalign': #start new alignment job
-            files = {'infile':[], 'outfile':form.getvalue('outfile',''), 'logfile':'output.log'}
-            program = form.getvalue('program','')
+            files = {'infile':[], 'outfile':form.getfirst('outfile',''), 'logfile':'output.log'}
+            program = form.getfirst('program','')
             formkeys = form.keys()
-            if program: #input from Wasabi plugin
-                prefix = form.getvalue('prefix','-')
-                for optname in formkeys:  #write input files to disk
-                    if optname.startswith(prefix):
-                        fname = form.getvalue(optname,'')
-                        if(fname.startswith('input_') and fname in formkeys):
-                            write_file(os.path.join(odir, fname), form.getvalue(fname,''), True)
-                            files['infile'].append(fname)
-                            form[optname].value = '$path$'+fname
-                for optname in formkeys:  #keep program parameters
-                    if not optname.startswith(prefix): form[optname].value = ''
-            else:
+            if program: #Wasabi plugin form
+                for optname in formkeys:
+                    for fname in form.getlist(optname):  #option => filename(s)
+                            if(fname.startswith('input_') and fname in formkeys):  #filename => filedata
+                                write_file(os.path.join(odir, fname), form.getvalue(fname,''), True)
+                                files['infile'].append(fname)
+                                form[optname].value = '$path$'+fname  #append path placeholder  
+            else:  #Prank form
                 infilename = write_file(os.path.join(odir, 'input.fas'), form.getvalue('fasta',''), True)
                 treefilename = write_file(os.path.join(odir, 'input.tree'), form.getvalue('newick',''), True)
                 queryfilename = write_file(os.path.join(odir, 'query.fas'), form.getvalue('queryfile',''), True)
@@ -1211,13 +1211,14 @@ class Job(object):
             self.postprocess = selectfile
         
         else:  #prepare params for plugin program
-            for opt in params:
-                val = params[opt].value
-                if not val: continue
-                if(val=='true'): self.params.append(opt)
-                else:
-                    if(val.startswith('$path$')): val = self.addpath(val)
-                    self.params.append(opt+'='+val)
+            for opt in [p for p in params.keys() if not p[0].isalnum()]:
+                for val in params.getlist(opt):
+                    if not val: continue
+                    if(val=='true'): self.params.append(opt)  #on/off flag
+                    else:
+                        if(val.startswith('$path$')): val = self.addpath(val)  #restore full path
+                        if(opt[-1:].isalnum()): self.params.append(opt+'='+val)  #flag+option
+                        else: self.params.append(val)  #positional option
             
             def selectfile(self):
                 outfile = self.fullpath(self.files['outfile'])

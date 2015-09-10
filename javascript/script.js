@@ -1634,10 +1634,10 @@ function getfile(opt){
     var download = function(fileopt){ //GET file > import/successfunc()
       if(!fileopt) fileopt = {};
       var filename = fileopt.file || opt.file || "";
-      var dirname = fileopt.dir || opt.dir || "";
-      if(!opt.id && !filename){ console.log('download error: id or filename missing.'); return; }
-      var urlparams = (opt.id?"&getanalysis="+opt.id:"")+(filename?"&file="+filename:"")+(dirname?"&dir="+dirname:"");
-	 $.ajax({
+      var urlparams = opt.id?"&getanalysis="+opt.id:"";
+      $.each(["file","dir","plugin"],function(i,p){ var pval = fileopt[p]||opt[p]; if(pval) urlparams += "&"+p+"="+pval; });
+      if(!urlparams){ console.log('Download error: no filename/id given'); return; }
+	  setTimeout(function(){ $.ajax({
 	  type: "GET",
 	  url: settingsmodel.userid()+"?type=text"+urlparams,
 	  dataType: "text",
@@ -1678,7 +1678,7 @@ function getfile(opt){
 		}
 		return xhr;
 	  }
-	 });
+	 }) }, opt.throttle?500:50);
 	}; //func download
     
     var showdir = function(refreshed){
@@ -1754,7 +1754,7 @@ function getfile(opt){
 	}
 	
 	if(opt.id && !opt.noimport){ getmeta(); } //import analysis (meta>(show library)>importmeta>import)
-	else{ download(); } //just download the requested file
+	else{ download(opt); } //just download the requested file
 }
 
 // Validation of files in import dialog
@@ -3124,7 +3124,7 @@ function topmenu(e,btn,menuid){
 		} else {
 			row.icon = rdata.icn;
 			row.t = rdata.inf;
-			row.click = function(){dialog(rdata.act)};
+			row.click = typeof(rdata.act)=='function'? rdata.act : function(){ dialog(rdata.act) };
 			row.css = rdata.css||'';
 			if(rdata.req){ //conditional menu items
 				$.each(rdata.req,function(r,req){
@@ -3221,7 +3221,7 @@ function treemenu(node){
 }
 
 //make tooltips & pop-up menus 
-//(event,'title',{target:elem,style:'white',css,arrow:'top'/'bottom',data:{menudata},clear,hoverhide/nohide/clickhide,ko:koModel)
+//args: (event,'title',{target:elem,style:'white',css,arrow:'top'/'bottom',data:{menudata},clear,hoverhide/nohide/clickhide,ko:koModel)
 function tooltip(evt,title,options){
 	if(!options) options = {};
 	var tipdiv = options.id? $('#'+options.id) : [];
@@ -3437,6 +3437,40 @@ function hidetooltip(include,exclude,nodeid){
 	});
 }
 
+//make arrow+title for collapsible section in dialog windows
+function expandtitle(options){
+	var arrow = $('<span class="rotateable">&#x25BA;</span>'), infospan = '';
+	var titlespan = $('<span class="action" title="'+(options.desc||'Click to toggle content')+'">'+(options.title||'View/hide')+'</span>');
+	if(options.info){
+		infospan = $('<span class="note" style="display:none;margin-left:20px">'+options.info+'</span>');
+		options.onshow = function(){infospan.fadeIn()};
+		options.onhide = function(){infospan.fadeOut()};
+	}
+	titlespan.click(function(){
+		var content = options.target||$(this).parent().next(".insidediv");
+		if(arrow.hasClass('rotateddown')){
+			arrow.removeClass('rotateddown');
+			if(options.minh) content.animate({height:options.minh});
+			else content.slideUp();
+			if(typeof(options.onhide)=='function') options.onhide();	
+		}
+		else{
+			arrow.addClass('rotateddown');
+			if(options.maxh){
+				if(isNaN(options.maxh)) options.maxh = content[0].scrollHeight;
+				content.animate({height:options.maxh});
+			}
+			else content.slideDown();
+			if(typeof(options.onshow)=='function') options.onshow();
+		}
+	});
+	var titlediv = $('<div>').append(arrow,titlespan);
+	if(options.info) titlediv.append(infospan);
+	if(options.inline) titlediv.css({'display':'inline-block','margin-left':'5px'});
+	if(typeof(options.css)=='object') titlediv.css(options.css);
+	return titlediv;
+}
+
 /* Generate pop-up windows */
 function makewindow(title,content,options){ //(string,array(,obj{flipside:'front'|'back',backfade,btn:string|jQObj|array,id:string},jQObj))
 	if(!options) options = {};
@@ -3487,7 +3521,11 @@ function makewindow(title,content,options){ //(string,array(,obj{flipside:'front
 	if(!options.nomaxw) contentdiv.css('max-width','500px');
 	var headerdiv = $('<div class="windowheader"></div>');
 	if(options.header){ $.each(options.header,function(i,val){ headerdiv.append(val) }); }
-	if(options.icn){ if(options.icn.indexOf('.')==-1) options.icn+='.png'; title = '<img class="windowicn" src="images/'+options.icn+'"> '+title; }
+	if(options.icn){
+		var imgdir = options.plugin? 'plugins/'+options.plugin : 'images';
+		if(options.icn.indexOf('.')==-1) options.icn+='.png';
+		title = '<img class="windowicn" src="'+imgdir+'/'+options.icn+'"> '+title;
+	}
 	titlediv.html(title);
 	$.each(content,function(i,item){ contentdiv.append(item); });
 	windowdiv.append(headerdiv,contentdiv,titlediv,closebtn);
@@ -3540,41 +3578,442 @@ function closewindow(elem, addfunc){
 	});
 }
 
-//make arrow+title for collapsible section in dialog windows
-function expandtitle(options){
-	var arrow = $('<span class="rotateable">&#x25BA;</span>'), infospan = '';
-	var titlespan = $('<span class="action" title="'+(options.desc||'Click to toggle content')+'">'+(options.title||'View/hide')+'</span>');
-	if(options.info){
-		infospan = $('<span class="note" style="display:none;margin-left:20px">'+options.info+'</span>');
-		options.onshow = function(){infospan.fadeIn()};
-		options.onhide = function(){infospan.fadeOut()};
-	}
-	titlespan.click(function(){
-		var content = options.target||$(this).parent().next(".insidediv");
-		if(arrow.hasClass('rotateddown')){
-			arrow.removeClass('rotateddown');
-			if(options.minh) content.animate({height:options.minh});
-			else content.slideUp();
-			if(typeof(options.onhide)=='function') options.onhide();	
-		}
-		else{
-			arrow.addClass('rotateddown');
-			if(options.maxh){
-				if(isNaN(options.maxh)) options.maxh = content[0].scrollHeight;
-				content.animate({height:options.maxh});
-			}
-			else content.slideDown();
-			if(typeof(options.onshow)=='function') options.onshow();
-		}
-	});
-	var titlediv = $('<div>').append(arrow,titlespan);
-	if(options.info) titlediv.append(infospan);
-	if(options.inline) titlediv.css({'display':'inline-block','margin-left':'5px'});
-	if(typeof(options.css)=='object') titlediv.css(options.css);
-	return titlediv;
-}
+//constructor for creating Wasabi plugin interfaces
+var plugins = {}; //plugins container
 
-var plugins = {}; //container for plugin interfaces
+pluginModel = function(pdata, pname){
+	//initial tracked values
+	this.sequence = model.seqtype;
+	this.tree = model.treesource;
+	//plugin state
+	this._errors = [];
+	this._submitted = ko.observable(false);
+	this._program = '';
+	this._folder = pname;
+	this._prefix = '-';
+	this._libraryname = ko.observable('my analysis');
+	this._makeids = false;
+	this._title = pname || 'Unknown plugin';
+	this._icon = {};
+	this._outfile = '';
+	this._json = pdata;
+	this.registerPlugin();
+};
+
+pluginModel.prototype = {
+	//API error feedback
+	apierr: function(errtxt, iswarning){
+		var errtxt = 'Wasabi plugin API '+(iswarning?'Warning':'Error')+': '+errtxt+'!';
+		if(!iswarning) this._errors.push(errtxt);
+		console.log(errtxt);
+		return ' ';
+	},
+	
+	//find option-bound observables
+	getOption: function(option){
+		if(option in this) return this[option];
+		for(var n in this){ if(this[n].optionname && this[n].optionname == option) return this[n]; }
+		return false;
+	},
+	
+	//translate API words to Javascript (observables/logic/quoted text)
+	processValue: function(expr){
+		var obsname = function(name){ //detect and format observable name
+			return typeof(this[name])=='function'? (~name.indexOf(' ')||~name.indexOf('-')? "$data['"+name+"']()" : name+"()") : false;
+		}.bind(this);
+		var quote  = function(exp){ try{ JSON.parse(exp) }catch(e){ return "'"+exp+"'" }; return exp; } //quote strings
+		var api = {'is':'==', 'is equal to':'==', 'equals':'==', 'contains':'.indexOf(', 'is not':'!=', 'is less than':'<', 
+			'is more than':'>', 'not ':'!', 'no ':'!', 'invert ':'!', 'no':'false', 'off':'false', 'disable':'false', 
+			'yes':'true', 'on':'true', 'ticked':'true', 'checked':'true', 'selected':'true', 'and':'&&', 'or':'||', 'imported':''};
+
+		if(typeof(expr)=='string'){
+			expr = expr.trim();
+			if(obsname(expr)){ expr = obsname(expr); }
+			else{  //translate the logic API words and detect observables
+			  expr = expr.replace(/'.+'|is equal to|is not|is less than|is more than|no |not |invert |[\w\-]+/g, function(match, index){
+			  	if(match.indexOf("'")==0){
+			  		var unq = match.replace(/'/g,"");
+			  		return obsname(unq) || match;
+			  	}
+			  	else if(match=="invert" && index>(expr.length-7) && this._tname){
+			  		return "!"+obsname(this._tname);  //_tname = name of currently processed option
+			  	}
+			  	else{ return obsname(match) || api[match] || quote(match); }
+			  });
+			}
+			expr = expr.replace(/' '/g, " ");
+			return expr;
+		} else { return typeof(expr)=='undefined'? "" : JSON.stringify(expr); } //stringify numbers etc.
+	},
+
+	//Translate API conditional rules to Javascript ('yes/no/is not/{...}','result of rule',['upperLevelObsName'])
+	processRule: function(rule, result, rootvar){
+		if(typeof(result)=='undefined') result = "true";
+		var str = "";
+		
+		if($.isArray(rule)){ //[rule1,rule2,...] => apply sequentially
+			for(var i=0, tmp=''; i<rule.length; i++){
+				tmp = this.processRule(rule[i], result, rootvar);
+				if(i<rule.length-1) tmp = tmp.split(":")[0]+":";
+				str += tmp;
+			}
+		}
+		else if(typeof(rule)=='object'){ //unpack rule objects
+			if(Object.keys(rule).length>1){ //{rule1:res1,rule2:res2} => [{rule1:res1},{rule2:res2}]
+				var rulearr = [];
+				$.each(rule,function(subrule,subresult){ var ruleobj={}; ruleobj[subrule] = subresult; rulearr.push(ruleobj); });
+				str = this.processRule(rulearr, result, rootvar);
+			} else {  //{'rule':result}
+				varname = Object.keys(rule)[0];
+				varresult = rule[varname];  //if {"varname":{varval:result}} else {"varname":result}
+				if(typeof(varresult)=='object') str = this.processRule(varresult, result, varname);
+				else str = this.processRule(varname, varresult, rootvar);
+			}
+		}
+		else{  //translate preprocessed rule
+			if(typeof(rule)!='string') return JSON.stringify(rule);
+			rule = this.processValue(rule);
+			result = this.processValue(result);
+			rootvar = this.processValue(rootvar);
+							
+			var compare = function(rule){ //add '==' if needed (rule is rootvarValue)
+				return ~["!","=","<",">","~","."].indexOf(rule.charAt(0))? rule: "=="+rule;
+			}
+			str = rootvar? rootvar+compare(rule) : rule;
+			if(rootvar && ~str.indexOf(".indexOf")) str = "~"+str+")";
+			var negresult = (!result||result=="true")?"false":result=="false"?"true":"\'\'";
+			if(result!=="true" || rootvar) str += "?"+result+":"+negresult;
+		}
+		return str;
+	},
+
+	//Create a plugin interface (input) element
+	processOption: function(data, prefix){
+		if(typeof(data)=='string'){ //html
+			data = data.replace(urlregex, makeurl);
+			var box = $('<span>'+data+'</span>');
+			$("a", box).each(function(i,el){ if(this.hasAttribute("href")) this.setAttribute("target","_blank"); });
+			return box;
+		} else if (typeof(data)!='object') return '';
+		if(!prefix) prefix = data.prefix||this._prefix;
+		var types = {"text":"", "string":"text", "number":"text", "int":"text", "float":"text", "bool":"checkbox", 
+			"tickbox":"checkbox", "switch":"checkbox", "checkbox":"", "hidden":"", "output":"hidden", "select":"", "file":""};
+		var t = data.type && (data.type in types)? data.type : "text", classname = "";
+		for(var k in data){ if(k in types){ t = k; if(data[k] && !data.title) data.title = data[k]; }}
+		if(!data.name) data.name = data.option||"trackName"+Object.keys(this).length;
+		var trackname = this._tname = data.name; //start tracking
+		var firstrun = !(trackname in this);
+		//this.apierr('Overwriting non-unique trackable name: '+trackname,'w');
+		if(~["number","float","int"].indexOf(t)){
+			if(firstrun) this[trackname] = ko.observable('').extend({format: t});
+			classname = "num";
+		}
+		else if(firstrun) this[trackname] = ko.observable('');
+		var kovar = "$data['"+trackname+"']";
+		
+		if(t=="output" && firstrun) data.default = "'$path$"+(data.default||data.output||"")+"'";
+		if(types[t]) t = types[t];
+		
+		var el = $("<"+(t=="select"?"select":"input")+">").attr("type", t); //create input element
+		if(classname) el.addClass(classname);
+		if("option" in data){
+			if(/^\W/.test(data.option)) prefix = ""; 
+			el.attr("name", prefix+data.option); //program command-line flag
+			if(firstrun) this[trackname].optionname = data.option;
+		}
+		kobind = (t=="checkbox"?"checked":"value")+":"+kovar+", name:'"+trackname+"'"; //"name" is used by "default" binding
+		if(data.fixed) kobind += ", disable:"+this.processRule(data.fixed);
+		var elems = [];
+		
+		if(t=="select"){ //build selectable list of options/values
+			if(!$.isArray(data.options)){ this.apierr('"select" element needs "options" array'); data.options = []; }
+			var optarr = trackname+"_selectionOpt";
+			var defopt = false;
+			if(firstrun) this[optarr] = [];
+			for(var o in data.options||[]){ //selection items
+				var opt = data.options[o];
+				if(firstrun && typeof(opt)=='string') this[optarr].push({t:opt,v:opt});
+				else if(typeof(opt)=='object'){
+					var optval = opt.value || opt.title || opt.option; //value for selection option
+					if(typeof(opt.option)=='string'){ //toggle other options
+						if(!opt.title) opt.title = opt.option;
+						var checkopt = (function(thisval){ return function(){ return this[trackname]()==thisval; }})(optval);
+						if(firstrun) this[opt.option] = ko.pureComputed(checkopt, this);
+						elems.push('<input type="hidden" name="'+prefix+opt.option+'" data-bind="value:$data[\''+opt.option+'\']">');
+					}
+					if(!opt.title) return this.apierr('an object in "select" element needs "title" attribute');
+					
+					if(optval=="no value"){ optval = ""; defopt = true; }
+					if(firstrun) this[optarr].push({t:opt.title, v:optval});
+					if(opt.default){ defopt = true; if(firstrun) this[trackname](optval); }
+					if(typeof(opt.desc)=='string'){ //track description of selected opt
+						if(firstrun) this[optarr][this[optarr].length-1].d = opt.desc;
+						if(!this[trackname].desc){
+							if(firstrun){
+							  this[trackname].desc = ko.pureComputed(function(){
+								var val = this[trackname]();
+								return val?(ko.utils.arrayFirst(this[optarr], function(o){ return o.v == val; }).d||''):'';
+							  }, this);
+							}
+							//elems.push('<pre data-bind="text: ko.toJSON('+kovar+'.desc, null, 2)"></pre>') //debug
+							elems.push('<div class="inputdesc" data-bind="text:'+kovar+'.desc">');
+						}
+					}
+					
+				}
+			}
+			if(firstrun){
+			  this[trackname].sindex = ko.pureComputed(function(){ //track index of selected opt
+				return indexOfObj(this[optarr], 'v', this[trackname]());
+			  }, this);
+			}
+			
+			var dstr = "option";
+			if(data.extendable){ //editable select list
+			  if(firstrun){
+				this[trackname].edit = ko.observable(false);
+				this[trackname].editSave = function(){
+					var editindex = this[trackname].edit();
+					if(editindex===false){ //enable edit mode
+						this[trackname].edit(this[trackname].sindex());
+					} else { //save edits
+						if(editindex==-1){ //add new
+							var newv = this[trackname]();
+							this[optarr].push({t:newv, v:newv});
+						} else { this[optarr][editindex].v = newv; }
+						this[trackname].edit(false);
+					}
+				};
+				this[trackname].rem = function(){
+					var editindex = this[trackname].edit();
+					if(editindex==-1){ this[trackname](this[optarr][sindex].t); }
+					else{ this[optarr].splice(editindex, 1); }
+					this[optarr].edit(false);
+				};
+			  }	
+				if(data.extendable=="configurations"){ dstr = 'preset'; data.title = "Saved options:"; }
+				
+				elems.unshift('<input data-bind="fadevisible:!isNaN('+kovar+'.edit()),value:'+kovar+'" style="width:180px" placeholder="Type new '+dstr+'"></input>'+
+				'<a class="button small square" data-bind="click:'+kovar+'.editSave,text:isNaN('+
+					kovar+'.edit())?\'Edit\':\'Save\',attr:{title:isNaN('+kovar+'.edit())?\'Edit this '+dstr+'\':\'Save changes\'"></a> '+
+				'<a class="button small square" data-bind="visible:'+kovar+'.edit()>0,click:function(){'+kovar+'(\'\');'+kovar+'.edit(-1)}" title="Add new '+dstr+'">New</a>'+
+				'<a class="button small square red" data-bind="visible:!isNaN('+kovar+'.edit()),click:'+kovar+'.rem"  title="Remove this '+dstr+'">Remove</a>');	
+			}
+			if(firstrun && !defopt) this[optarr].unshift({t:"Choose "+dstr, v:""});
+			kobind += ", options:"+optarr+", optionsValue:'v', optionsText:'t'";
+		} //if select
+		else if(t=="hidden" && !data.default) data.default = data.hidden||true;
+		
+		if("default" in data){ kobind += ", default:"+this.processRule(data.default); } //'default' is a custom binding
+		el.attr("data-bind", kobind);
+		
+		if(t=="file"){
+		  var format = data.fileformat||"fasta";
+		  el.attr({"type":"hidden", "fileformat":format, "trackname":trackname});
+		  var source = data.file || data.source || "current sequence";
+		  
+		  if(source.substr(0,7) != "current"){ //data source: external data
+		   if(firstrun){
+			this[trackname].fileformat = format;
+			this[trackname].container = ko.observableArray([]);
+			this[trackname].filename = ko.observable('');
+			this[trackname].container.subscribe(function(newarr){
+			if(newarr.length && ('imported' in newarr[0]) && ('type' in newarr[0].imported)){
+				this[trackname](newarr[0].imported.type);
+				this[trackname].filename(newarr[0].name||'imported data');
+			} else this[trackname]('');
+			}, this);
+			this[trackname].container.get = function(name){ return ko.utils.arrayFirst(container(), function(item){ return item.name==name; }); };
+		   }
+		    var container = this[trackname].container;
+		  
+			if(~source.indexOf("filedrop")){ //filedrop area
+				var filedrag = $('<div class="filedrag">'+(data.title||'Drop file here')+'</div>');
+				filedrag.bind('dragover',function(evt){ //file drag area
+					filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+					evt.originalEvent.dataTransfer.dropEffect = 'copy';
+				}).bind('dragleave',function(evt){
+					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+				}).bind('drop',function(evt){
+					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+					var origtxt = filedrag.text(), filehandle = evt.originalEvent.dataTransfer.files;
+					filedrag.text('Importing...');
+					setTimeout(function(){
+						checkfiles(filehandle, {onefile:true, silent:true, nocheck:format=="original", container:container});
+						setTimeout(function(){ filedrag.text(origtxt); }, 1000);
+					},100);
+				});
+			} else var filedrag = ''; 
+			if(~source.indexOf("import")){ //import button
+				var or = filedrag? $('<span style="display:inline-block;font-size:18px;"> or </span>') : '';
+				var importbtn = $('<a class="button" style="vertical-align:0">Import</a>');
+				importbtn.click(function(e){ return dialog('import', {onefile:true, silent:true, nocheck:format=="original", container:container}); });
+			} else { var or = '', importbtn = ''; }
+			var importdiv = $('<div data-bind="visible:!'+kovar+'()">').append(filedrag, or, importbtn);
+				
+			var filelist = $('<div data-bind="if:'+kovar+'">'+(data.desc||'Use file')+': <img class="icn" src="images/file.png"> <span data-bind="text:'+kovar+'.filename"></span></div>');
+			var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;" data-bind="click:function(){'+kovar+'.container([])}">'+svgicon('close')+'</span>');
+			var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{exportdata:'+kovar+'.container()[0]})}">View</a>');
+			filelist.append(filedel, fileview);
+			elems.push(importdiv,filelist);
+		  } else { //data source: loaded data
+			el.attr("source", source);
+			if(firstrun){
+			  this[trackname] = ko.pureComputed(function(){ //foption()=> 'seqtype'||'tree'||'seqtype tree'
+				var dtype = source.split(' ')[1]||'data', seq = this.sequence(), tree = this.tree()?'tree':'';
+				return dtype=='sequence'? seq : dtype=='tree'? tree : (seq||tree)?seq+' '+tree : '';
+			  }, this);
+			  this[trackname].fileformat = format;
+			}
+		  }
+		}
+		
+		if(data.required){ //input validation
+			if(firstrun && typeof(data.required)=="string") this[trackname].errmsg = ko.pureComputed(function(){ return !this[trackname]()?data.required:""; }, this);
+			else{
+				retstr = this.processRule(data.required).replace("$data","this");
+				if(firstrun) this[trackname].errmsg = ko.pureComputed(eval("function(){ return "+retstr+"; }"), this);
+			}
+			elems.push('<!-- ko if:$data._submitted()&&'+kovar+'.errmsg() --><p class="errmsg" data-bind="text:'+kovar+'.errmsg"></p><!-- /ko -->');
+			kobind += ', style:{borderColor:'+kovar+'.errmsg()?\'red\':\'\'}';
+		}
+			
+		if(el.attr("type")!="hidden"){ //text next to input
+			var title = data.title? $('<span>'+data.title+'</span>') : ''; //add text
+			if(data.desc){ if(title) title.addClass('label'); (title||el).attr('title',data.desc); }
+			if(title){ el = t=='checkbox'? el.add(title) : title.add(el); }
+		}
+		
+		var box = $("<div>"); //wrap up
+		box.append(el);
+		$.each(elems,function(i,elem){ box.append(elem) }); //add any extra html
+		var existrule = data.enable||data.disable;
+		if(existrule) box.attr("data-bind","if"+(data.disable?"not":"")+":"+this.processRule(existrule));
+		if("line" in data) box.css("display","inline-block");
+		return box;
+	},
+	
+	//iterate through options data, convert to HTML
+	buildOptions: function(data, prefix){
+		var UI = $('<div>');
+		if(!data) return this.apierr('empty option','w');
+		if($.isArray(data.options) && !("select" in data)){ //group of options
+			if(data.prefix) prefix = data.prefix;
+			for(var o in data.options){ UI.append(this.buildOptions(data.options[o], prefix)); }
+			if("group" in data){
+				UI.addClass("insidediv numinput").css({"display":"none","margin-bottom":0});
+				UI = $('<div>').append(expandtitle({title:data.group||'Options', desc:'Click to toggle options', info:data.desc||'', inline:true, css:{'margin-top':'5px'}}), UI);
+			}
+			else if("section" in data){
+				UI.prepend('<div class="sectiontitle small">'+(data.section?'<span>'+data.section+'</span>':'')+'</div>');
+			}
+			else if("line" in data){
+				if(data.line) UI.prepend('<span>'+data.line+'<span>'); $('div',UI).css('display','inline-block');
+			}
+			var existrule = data.enable||data.disable;
+			if(existrule) UI.attr("data-bind","if"+(data.disable?"not":"")+":"+this.processRule(existrule));
+		} else { UI = this.processOption(data, prefix); } //single option
+		return UI;
+	},
+	
+	//build the window and menu entry
+	buildUI: function(data){
+		if(!data) data = this._json;
+		var desc = data.desc? this.processOption(data.desc):''; delete data.desc;
+		var nameinput = $('<input type="text" class="hidden" data-bind="value:_libraryname" title="Click to edit">');
+		var namespan = $('<span class="note">Name the results: </span>').append(nameinput);
+		var writetarget = '<br><!-- ko if:exportmodel.savetargets().length>1 --><span class="label" title="Choose a library slot '+
+		'for the new analysis, relative the to the input (currently open) dataset">Save as</span> '+
+		'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select><!-- /ko -->'+
+		'<!-- ko if:exportmodel.savetargets().length==1 -->The result will be stored as new root<!-- /ko -->'+
+		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
+		exportmodel.savetarget(exportmodel.savetargets()[0]);
+		var inclhidden = '<!-- ko if:model.hiddenlen --><br><input name="includehidden" type="checkbox" data-bind="checked: exportmodel.includehidden">'+
+		'<span class="label" data-bind="attr:{title:\'Include \'+model.hiddenlen()+\' collapsed alignment columns in analysis\'}">'+
+		'include hidden alignment columns</span><!-- /ko -->';
+		var header = $('<div class="insidediv incontent">').append(namespan, writetarget, inclhidden);
+		
+		var optform = $('<form id="'+this._title+'form" onsubmit="return false"></form>').append(this.buildOptions(data));
+		var submitbtn = $('<a class="button orange" title="Launch '+this._program+'" data-bind="text:'+(data.submit?this.processRule(data.submit):'\'Send job\'')+'"></a>');
+		submitbtn.click($.proxy(function(){
+			this._submitted(true);
+			var errors = $("p.errmsg",optform);
+			if(errors.length){ //got form errors
+				var origtxt = submitbtn.text();
+				submitbtn.text("Check form errors!");
+				setTimeout(function(){ errors.filter(':hidden').parents('.insidediv').slideDown(); },1000);
+				setTimeout(function(){ submitbtn.text(origtxt); }, 2000);
+				return;
+			}
+			sendjob({form:optform[0], btn:submitbtn, name:nameinput.val(), plugin:this._title}); //send job
+		}, this));
+		
+		return {header: desc, content:[header,optform], btn:submitbtn}; //DOM elements
+	},
+	
+	//prepare plugin
+	checkPlugin: function(){
+		//parse input
+		data = this._json;
+		if(!data) return this.apierr('empty JSON');
+		if(typeof(data)=='string'){ //JSON or native JS
+			try{ data = JSON.parse(data); }
+			catch(e){
+				console.log(e);
+				try{ data = eval(data); }
+				catch(e){ return this.apierr('JSON in wrong format'); }
+			}
+		}
+		else if($.isArray(data)) data = {options:data};
+		else if(typeof(data)!='object') return this.apierr('input in wrong format: '+typeof(data));
+		this._json = data;
+		
+		if(!data.program) return this.apierr('program name missing');
+		this._program = data.program;
+		if(data.prefix) this._prefix = data.prefix;
+		if(data.translate_names) this._makeids = true;
+		if(data.libraryname) this._libraryname(data.libraryname);
+		this._title = data.name || data.program;
+		this._outfile = data.outfile || '';
+		if(typeof(data.outfile)=='object'){ //dynamic output file naming
+			var retstr = this.processRule(data.outfile).replace("$data","this");
+			this._outfile = ko.pureComputed(eval("function(){ return "+retstr+"; }"), this);
+		}
+		//make icon file
+		var svgicon = "gear", icon = "gear.png", imgarr = [];
+		if(typeof(data.icon)=='string') imgarr = [data.icon];
+		else if($.isArray(data.icon)) imgarr = data.icon;
+		$.each(imgarr,function(i,imgstr){
+			if(typeof(imgstr)!='string') return true;
+			if(imgstr.substr(0,10)=='data:image'||~['.png','.jpg','.gif'].indexOf(imgstr.substr(-4))) icon = imgstr;
+			else svgicon = imgstr;
+		});
+		if(svgicon.length>10){ svgpaths[this._title] = svgicon; svgicon = this._title; } //add new svgicon
+		else if(!svgpaths[svgicon]) svgicon = "gear";
+		this._icon = {img:icon, svg:svgicon};
+		
+		if(!data.options) return this.apierr('no options found');
+	},
+	
+	//wire up
+	registerPlugin: function(){
+		this.checkPlugin();
+		if(this._errors.length){  //add error dialog to tools menu
+			console.log("Plugin datamodel dump:"); console.log(this);
+			this._icon.svg = 'error';
+			var errmsg = "<b>Plugin interface building failed for "+this._title+":</b><br><ul><li>"+this._errors.join("</li><li>")+"</li></ul>";
+			var menuclick = dialog.bind(this, "error", errmsg);
+			var menudesc = "This plugin failed to load. Click to see the errors.";
+		} else {  //add plugin to tools menu
+			var menuclick = this._title;
+			var menudesc = data.menudesc||"Launch plugin for "+this._program;
+			plugins[this._title] = this;
+			this.buildUI();
+		}
+		model.toolsmenu.unshift({txt:this._title, act:menuclick, icn:this._icon.svg, inf:menudesc, req:['online']});
+	}
+};
+
 //Generate content for pop-up windows
 function dialog(type,options){
 	//if(typeof(type.act)!='undefined') type = type.act;
@@ -3770,9 +4209,9 @@ function dialog(type,options){
 		'<li data-bind="visible:treesource">Number of tree nodes: <span data-bind="text:nodecount"></span></li>'+
 		'<li data-bind="visible:treesource">Number of tree leafs: <span data-bind="text:leafcount"></span></li>'+
 		'<li data-bind="visible:seqsource()">Sequence type: <select data-bind="options:[\'DNA\',\'RNA\',\'codons\',\'protein\'],value:seqtype"></select></li>'+
-		'<li>Number of sequences: <span data-bind="text:seqcount"></span>, in total of <span data-bind="text:totalseqlength"></span></li>'+
-		'<li>Sequence length: from <span data-bind="text:minseqlength"></span> to <span data-bind="text:maxseqlength"></span></li>'+
-		'<li>Sequence matrix length: <span data-bind="text:alignlength"></span> columns '+
+		'<li>Number of sequences: <span data-bind="text:seqcount"></span>, in total of <span data-bind="html:totalseqlength"></span></li>'+
+		'<li>Sequence length: from <span data-bind="html:minseqlength"></span> to <span data-bind="html:maxseqlength"></span></li>'+
+		'<li>Sequence matrix length: <span data-bind="html:alignlength"></span> columns '+
 		'<span data-bind="visible:hiddenlen,text:\'(\'+hiddenlen()+\' columns hidden)\'"></span></li>'+
 		'<li>Sequence matrix height: <span data-bind="text:alignheight"></span> rows</li>'+
 		'<li data-bind="visible:sourcetype">Data source: <span data-bind="text:sourcetype"></span> '+sharelink+'</li>'+
@@ -4297,559 +4736,11 @@ function dialog(type,options){
 		var pmodel = plugins[type];
 		pmodel._submitted(false);
 		var html = pmodel.buildUI();
-		var pwindow = makewindow(pmodel._title, html.content, {id:type, btn:html.btn, icn:pmodel._icon.img, header:html.header});
+		var pwindow = makewindow(pmodel._title, html.content, {id:type, btn:html.btn, icn:pmodel._icon.img, header:html.header, plugin:pmodel._folder});
 		ko.applyBindings(pmodel, pwindow[0]);
 	}
 	return false;
 }
-
-//constructor for creating and storing a dynamic interface for third party tools (plugins)
-pluginModel = function(data){
-	//initial tracked values
-	this.sequence = model.seqtype;
-	this.tree = model.treesource;
-	//plugin state
-	this._errors = [];
-	this._submitted = ko.observable(false);
-	this._program = '';
-	this._prefix = '-';
-	this._libraryname = ko.observable('my analysis');
-	this._makeids = false;
-	this._title = '';
-	this._icon = '';
-	this._outfile = '';
-	this._json = data;
-	this.registerPlugin();
-};
-
-pluginModel.prototype = {
-	//API error feedback
-	apierr: function(errtxt, iswarning){
-		var errtxt = 'Wasabi plugin API '+(iswarning?'Warning':'Error')+': '+errtxt+'!';
-		if(!iswarning) this._errors.push(errtxt);
-		console.log(errtxt);
-		return ' ';
-	},
-	
-	//find option-bound observables
-	getOption: function(option){
-		if(option in this) return this[option];
-		for(var n in this){ if(this[n].optionname && this[n].optionname == option) return this[n]; }
-		return false;
-	}, 
-	
-	//translate API words to Javascript (observables/logic/quoted text)
-	processValue: function(expr){
-		var obsname = function(name){ //detect and format observable name
-			return typeof(this[name])=='function'? (~name.indexOf(' ')||~name.indexOf('-')? "$data['"+name+"']()" : name+"()") : false;
-		}.bind(this);
-		var quote  = function(exp){ try{ JSON.parse(exp) }catch(e){ return "'"+exp+"'" }; return exp; } //quote strings
-		var api = {'is':'==', 'is equal to':'==', 'equals':'==', 'contains':'.indexOf(', 'is not':'!=', 'is less than':'<', 
-			'is more than':'>', 'not ':'!', 'no ':'!', 'invert ':'!', 'no':'false', 'off':'false', 'disable':'false', 
-			'yes':'true', 'on':'true', 'ticked':'true', 'checked':'true', 'selected':'true', 'and':'&&', 'or':'||', 'imported':''};
-
-		if(typeof(expr)=='string'){
-			expr = expr.trim();
-			if(obsname(expr)){ expr = obsname(expr); }
-			else{  //translate the logic API words and detect observables
-			  expr = expr.replace(/'.+'|is equal to|is not|is less than|is more than|no |not |invert |[\w\-]+/g, function(match, index){
-			  	if(match.indexOf("'")==0){
-			  		var unq = match.replace(/'/g,"");
-			  		return obsname(unq) || match;
-			  	}
-			  	else if(match=="invert" && index>(expr.length-7) && this._tname){
-			  		return "!"+obsname(this._tname);  //_tname = name of currently processed option
-			  	}
-			  	else{ return obsname(match) || api[match] || quote(match); }
-			  });
-			}
-			expr = expr.replace(/' '/g, " ");
-			return expr;
-		} else { return typeof(expr)=='undefined'? "" : JSON.stringify(expr); } //stringify numbers etc.
-	},
-
-	//Translate API conditional rules to Javascript ('yes/no/is not/{...}','result of rule',['upperLevelObsName'])
-	processRule: function(rule, result, rootvar){
-		if(typeof(result)=='undefined') result = "true";
-		var str = "";
-		
-		if($.isArray(rule)){ //[rule1,rule2,...] => apply sequentially
-			for(var i=0, tmp=''; i<rule.length; i++){
-				tmp = this.processRule(rule[i], result, rootvar);
-				if(i<rule.length-1) tmp = tmp.split(":")[0]+":";
-				str += tmp;
-			}
-		}
-		else if(typeof(rule)=='object'){ //unpack rule objects
-			if(Object.keys(rule).length>1){ //{rule1:res1,rule2:res2} => [{rule1:res1},{rule2:res2}]
-				var rulearr = [];
-				$.each(rule,function(subrule,subresult){ var ruleobj={}; ruleobj[subrule] = subresult; rulearr.push(ruleobj); });
-				str = this.processRule(rulearr, result, rootvar);
-			} else {  //{'rule':result}
-				varname = Object.keys(rule)[0];
-				varresult = rule[varname];  //if {"varname":{varval:result}} else {"varname":result}
-				if(typeof(varresult)=='object') str = this.processRule(varresult, result, varname);
-				else str = this.processRule(varname, varresult, rootvar);
-			}
-		}
-		else{  //translate preprocessed rule
-			if(typeof(rule)!='string') return JSON.stringify(rule);
-			rule = this.processValue(rule);
-			result = this.processValue(result);
-			rootvar = this.processValue(rootvar);
-							
-			var compare = function(rule){ //add '==' if needed (rule is rootvarValue)
-				return ~["!","=","<",">","~","."].indexOf(rule.charAt(0))? rule: "=="+rule;
-			}
-			str = rootvar? rootvar+compare(rule) : rule;
-			if(rootvar && ~str.indexOf(".indexOf")) str = "~"+str+")";
-			var negresult = (!result||result=="true")?"false":result=="false"?"true":"\'\'";
-			if(result!=="true" || rootvar) str += "?"+result+":"+negresult;
-		}
-		return str;
-	},
-
-	//Create a plugin interface (input) element
-	processOption: function(data, prefix){
-		if(typeof(data)=='string'){ //html
-			data = data.replace(urlregex, makeurl);
-			var box = $('<span>'+data+'</span>');
-			$("a", box).each(function(i,el){ if(this.hasAttribute("href")) this.setAttribute("target","_blank"); });
-			return box;
-		} else if (typeof(data)!='object') return '';
-		if(!prefix) prefix = data.prefix||this._prefix;
-		var types = {"text":"", "string":"text", "number":"text", "int":"text", "float":"text", "bool":"checkbox", 
-			"tickbox":"checkbox", "switch":"checkbox", "checkbox":"", "hidden":"", "output":"hidden", "select":"", "file":""};
-		var t = data.type && (data.type in types)? data.type : "text", classname = "";
-		for(var k in data){ if(k in types){ t = k; if(data[k] && !data.title) data.title = data[k]; }}
-		if(!data.name) data.name = data.option||"trackName"+Object.keys(this).length;
-		var trackname = this._tname = data.name; //start tracking
-		var firstrun = !(trackname in this);
-		//this.apierr('Overwriting non-unique trackable name: '+trackname,'w');
-		if(~["number","float","int"].indexOf(t)){
-			if(firstrun) this[trackname] = ko.observable('').extend({format: t});
-			classname = "num";
-		}
-		else if(firstrun) this[trackname] = ko.observable('');
-		var kovar = "$data['"+trackname+"']";
-		
-		if(t=="output" && firstrun) data.default = "'$path$"+(data.default||data.output||"")+"'";
-		if(types[t]) t = types[t];
-		
-		var el = $("<"+(t=="select"?"select":"input")+">").attr("type", t); //create input element
-		if(classname) el.addClass(classname);
-		if(data.option){
-			el.attr("name", prefix+data.option); //program command-line flag
-			if(firstrun) this[trackname].optionname = data.option;
-		}
-		kobind = (t=="checkbox"?"checked":"value")+":"+kovar+", name:'"+trackname+"'"; //"name" is used by "default" binding
-		if(data.fixed) kobind += ", disable:"+this.processRule(data.fixed);
-		var elems = [];
-		
-		if(t=="select"){ //build selectable list of options/values
-			if(!$.isArray(data.options)){ this.apierr('"select" element needs "options" array'); data.options = []; }
-			var optarr = trackname+"_selectionOpt";
-			var defopt = false;
-			if(firstrun) this[optarr] = [];
-			for(var o in data.options||[]){ //selection items
-				var opt = data.options[o];
-				if(firstrun && typeof(opt)=='string') this[optarr].push({t:opt,v:opt});
-				else if(typeof(opt)=='object'){
-					var optval = opt.value || opt.title || opt.option; //value for selection option
-					if(typeof(opt.option)=='string'){ //toggle other options
-						if(!opt.title) opt.title = opt.option;
-						var checkopt = (function(thisval){ return function(){ return this[trackname]()==thisval; }})(optval);
-						if(firstrun) this[opt.option] = ko.pureComputed(checkopt, this);
-						elems.push('<input type="hidden" name="'+prefix+opt.option+'" data-bind="value:$data[\''+opt.option+'\']">');
-					}
-					if(!opt.title) return this.apierr('an object in "select" element needs "title" attribute');
-					
-					if(optval=="no value"){ optval = ""; defopt = true; }
-					if(firstrun) this[optarr].push({t:opt.title, v:optval});
-					if(opt.default){ defopt = true; if(firstrun) this[trackname](optval); }
-					if(typeof(opt.desc)=='string'){ //track description of selected opt
-						if(firstrun) this[optarr][this[optarr].length-1].d = opt.desc;
-						if(!this[trackname].desc){
-							if(firstrun){
-							  this[trackname].desc = ko.pureComputed(function(){
-								var val = this[trackname]();
-								return val?(ko.utils.arrayFirst(this[optarr], function(o){ return o.v == val; }).d||''):'';
-							  }, this);
-							}
-							//elems.push('<pre data-bind="text: ko.toJSON('+kovar+'.desc, null, 2)"></pre>') //debug
-							elems.push('<div class="inputdesc" data-bind="text:'+kovar+'.desc">');
-						}
-					}
-					
-				}
-			}
-			if(firstrun){
-			  this[trackname].sindex = ko.pureComputed(function(){ //track index of selected opt
-				return indexOfObj(this[optarr], 'v', this[trackname]());
-			  }, this);
-			}
-			
-			var dstr = "option";
-			if(data.extendable){ //editable select list
-			  if(firstrun){
-				this[trackname].edit = ko.observable(false);
-				this[trackname].editSave = function(){
-					var editindex = this[trackname].edit();
-					if(editindex===false){ //enable edit mode
-						this[trackname].edit(this[trackname].sindex());
-					} else { //save edits
-						if(editindex==-1){ //add new
-							var newv = this[trackname]();
-							this[optarr].push({t:newv, v:newv});
-						} else { this[optarr][editindex].v = newv; }
-						this[trackname].edit(false);
-					}
-				};
-				this[trackname].rem = function(){
-					var editindex = this[trackname].edit();
-					if(editindex==-1){ this[trackname](this[optarr][sindex].t); }
-					else{ this[optarr].splice(editindex, 1); }
-					this[optarr].edit(false);
-				};
-			  }	
-				if(data.extendable=="configurations"){ dstr = 'preset'; data.title = "Saved options:"; }
-				
-				elems.unshift('<input data-bind="fadevisible:!isNaN('+kovar+'.edit()),value:'+kovar+'" style="width:180px" placeholder="Type new '+dstr+'"></input>'+
-				'<a class="button small square" data-bind="click:'+kovar+'.editSave,text:isNaN('+
-					kovar+'.edit())?\'Edit\':\'Save\',attr:{title:isNaN('+kovar+'.edit())?\'Edit this '+dstr+'\':\'Save changes\'"></a> '+
-				'<a class="button small square" data-bind="visible:'+kovar+'.edit()>0,click:function(){'+kovar+'(\'\');'+kovar+'.edit(-1)}" title="Add new '+dstr+'">New</a>'+
-				'<a class="button small square red" data-bind="visible:!isNaN('+kovar+'.edit()),click:'+kovar+'.rem"  title="Remove this '+dstr+'">Remove</a>');	
-			}
-			if(firstrun && !defopt) this[optarr].unshift({t:"Choose "+dstr, v:""});
-			kobind += ", options:"+optarr+", optionsValue:'v', optionsText:'t'";
-		} //if select
-		else if(t=="hidden" && !data.default) data.default = data.hidden||true;
-		
-		if("default" in data){ kobind += ", default:"+this.processRule(data.default); } //'default' is a custom binding
-		el.attr("data-bind", kobind);
-		
-		if(t=="file"){
-		  var format = data.fileformat||"fasta";
-		  el.attr({"type":"hidden", "fileformat":format, "trackname":trackname});
-		  var source = data.file || data.source || "current sequence";
-		  
-		  if(source.substr(0,7) != "current"){ //data source: external data
-		   if(firstrun){
-			this[trackname].fileformat = format;
-			this[trackname].container = ko.observableArray([]);
-			this[trackname].filename = ko.observable('');
-			this[trackname].container.subscribe(function(newarr){
-			if(newarr.length && ('imported' in newarr[0]) && ('type' in newarr[0].imported)){
-				this[trackname](newarr[0].imported.type);
-				this[trackname].filename(newarr[0].name||'imported data');
-			} else this[trackname]('');
-			}, this);
-			this[trackname].container.get = function(name){ return ko.utils.arrayFirst(container(), function(item){ return item.name==name; }); };
-		   }
-		    var container = this[trackname].container;
-		  
-			if(~source.indexOf("filedrop")){ //filedrop area
-				var filedrag = $('<div class="filedrag">'+(data.title||'Drop file here')+'</div>');
-				filedrag.bind('dragover',function(evt){ //file drag area
-					filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-					evt.originalEvent.dataTransfer.dropEffect = 'copy';
-				}).bind('dragleave',function(evt){
-					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-				}).bind('drop',function(evt){
-					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-					var origtxt = filedrag.text(), filehandle = evt.originalEvent.dataTransfer.files;
-					filedrag.text('Importing...');
-					setTimeout(function(){
-						checkfiles(filehandle, {onefile:true, silent:true, nocheck:format=="original", container:container});
-						setTimeout(function(){ filedrag.text(origtxt); }, 1000);
-					},100);
-				});
-			} else var filedrag = ''; 
-			if(~source.indexOf("import")){ //import button
-				var or = filedrag? $('<span style="display:inline-block;font-size:18px;"> or </span>') : '';
-				var importbtn = $('<a class="button" style="vertical-align:0">Import</a>');
-				importbtn.click(function(e){ return dialog('import', {onefile:true, silent:true, nocheck:format=="original", container:container}); });
-			} else { var or = '', importbtn = ''; }
-			var importdiv = $('<div data-bind="visible:!'+kovar+'()">').append(filedrag, or, importbtn);
-				
-			var filelist = $('<div data-bind="if:'+kovar+'">'+(data.desc||'Use file')+': <img class="icn" src="images/file.png"> <span data-bind="text:'+kovar+'.filename"></span></div>');
-			var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;" data-bind="click:function(){'+kovar+'.container([])}">'+svgicon('close')+'</span>');
-			var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{exportdata:'+kovar+'.container()[0]})}">View</a>');
-			filelist.append(filedel, fileview);
-			elems.push(importdiv,filelist);
-		  } else { //data source: loaded data
-			el.attr("source", source);
-			if(firstrun){
-			  this[trackname] = ko.pureComputed(function(){ //foption()=> 'seqtype'||'tree'||'seqtype tree'
-				var dtype = source.split(' ')[1]||'data', seq = this.sequence(), tree = this.tree()?'tree':'';
-				return dtype=='sequence'? seq : dtype=='tree'? tree : (seq||tree)?seq+' '+tree : '';
-			  }, this);
-			  this[trackname].fileformat = format;
-			}
-		  }
-		}
-		
-		if(data.required){ //input validation
-			if(firstrun && typeof(data.required)=="string") this[trackname].errmsg = ko.pureComputed(function(){ return !this[trackname]()?data.required:""; }, this);
-			else{
-				retstr = this.processRule(data.required).replace("$data","this");
-				if(firstrun) this[trackname].errmsg = ko.pureComputed(eval("function(){ return "+retstr+"; }"), this);
-			}
-			elems.push('<!-- ko if:$data._submitted()&&'+kovar+'.errmsg() --><p class="errmsg" data-bind="text:'+kovar+'.errmsg"></p><!-- /ko -->');
-			kobind += ', style:{borderColor:'+kovar+'.errmsg()?\'red\':\'\'}';
-		}
-			
-		if(el.attr("type")!="hidden"){ //text next to input
-			var title = data.title? $('<span>'+data.title+'</span>') : ''; //add text
-			if(data.desc){ if(title) title.addClass('label'); (title||el).attr('title',data.desc); }
-			if(title){ el = t=='checkbox'? el.add(title) : title.add(el); }
-		}
-		
-		var box = $("<div>"); //wrap up
-		box.append(el);
-		$.each(elems,function(i,elem){ box.append(elem) }); //add any extra html
-		var existrule = data.enable||data.disable;
-		if(existrule) box.attr("data-bind","if"+(data.disable?"not":"")+":"+this.processRule(existrule));
-		if("line" in data) box.css("display","inline-block");
-		return box;
-	},
-	
-	//iterate through options data, convert to HTML
-	buildOptions: function(data, prefix){
-		var UI = $('<div>');
-		if(!data) return this.apierr('empty option','w');
-		if($.isArray(data.options) && !("select" in data)){ //group of options
-			if(data.prefix) prefix = data.prefix;
-			for(var o in data.options){ UI.append(this.buildOptions(data.options[o], prefix)); }
-			if("group" in data){
-				UI.addClass("insidediv numinput").css({"display":"none","margin-bottom":0});
-				UI = $('<div>').append(expandtitle({title:data.group||'Options', desc:'Click to toggle options', info:data.desc||'', inline:true, css:{'margin-top':'5px'}}), UI);
-			}
-			else if("section" in data){
-				UI.prepend('<div class="sectiontitle small">'+(data.section?'<span>'+data.section+'</span>':'')+'</div>');
-			}
-			else if("line" in data){
-				if(data.line) UI.prepend('<span>'+data.line+'<span>'); $('div',UI).css('display','inline-block');
-			}
-			var existrule = data.enable||data.disable;
-			if(existrule) UI.attr("data-bind","if"+(data.disable?"not":"")+":"+this.processRule(existrule));
-		} else { UI = this.processOption(data, prefix); } //single option
-		return UI;
-	},
-	
-	//build the window and menu entry
-	buildUI: function(data){
-		if(!data) data = this._json;
-		var desc = data.desc? this.processOption(data.desc):''; delete data.desc;
-		var nameinput = $('<input type="text" class="hidden" data-bind="value:_libraryname" title="Click to edit">');
-		var namespan = $('<span class="note">Name the results: </span>').append(nameinput);
-		var writetarget = '<br><!-- ko if:exportmodel.savetargets().length>1 --><span class="label" title="Choose a library slot '+
-		'for the new analysis, relative the to the input (currently open) dataset">Save as</span> '+
-		'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select><!-- /ko -->'+
-		'<!-- ko if:exportmodel.savetargets().length==1 -->The result will be stored as new root<!-- /ko -->'+
-		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
-		exportmodel.savetarget(exportmodel.savetargets()[0]);
-		var inclhidden = '<!-- ko if:model.hiddenlen --><br><input name="includehidden" type="checkbox" data-bind="checked: exportmodel.includehidden">'+
-		'<span class="label" data-bind="attr:{title:\'Include \'+model.hiddenlen()+\' collapsed alignment columns in analysis\'}">'+
-		'include hidden alignment columns</span><!-- /ko -->';
-		var header = $('<div class="insidediv incontent">').append(namespan, writetarget, inclhidden);
-		
-		var optform = $('<form id="'+this._title+'form" onsubmit="return false"></form>').append(this.buildOptions(data));
-		var submitbtn = $('<a class="button orange" title="Launch '+this._program+'" data-bind="text:'+(data.submit?this.processRule(data.submit):'Send job')+'"></a>');
-		submitbtn.click($.proxy(function(){
-			this._submitted(true);
-			var errors = $("p.errmsg",optform);
-			if(errors.length){ //got form errors
-				var origtxt = submitbtn.text();
-				submitbtn.text("Check form errors!");
-				setTimeout(function(){ errors.filter(':hidden').parents('.insidediv').slideDown(); },1000);
-				setTimeout(function(){ submitbtn.text(origtxt); }, 2000);
-				return;
-			}
-			sendjob({form:optform[0], btn:submitbtn, name:nameinput.val(), plugin:this._title}); //send job
-		}, this));
-		
-		return {header: desc, content:[header,optform], btn:submitbtn}; //DOM elements
-	},
-	
-	//prepare plugin
-	checkPlugin: function(){
-		//parse input
-		data = this._json;
-		if(!data) return this.apierr('empty JSON');
-		if(typeof(data)=='string'){ //JSON or native JS
-			try{ data = JSON.parse(data); }
-			catch(e){
-				try{ data = eval(data); }
-				catch(e){ return this.apierr('JSON in wrong format'); }
-			}
-		}
-		else if($.isArray(data)) data = {options:data};
-		else if(typeof(data)!='object') return this.apierr('input in wrong format: '+typeof(data));
-		this._json = data;
-		
-		if(!data.program) return this.apierr('program name missing');
-		this._program = data.program;
-		if(data.prefix) this._prefix = data.prefix;
-		if(data.translate_names) this._makeids = true;
-		if(data.libraryname) this._libraryname(data.libraryname);
-		this._title = data.name || data.program;
-		this._outfile = data.outfile || '';
-		if(typeof(data.outfile)=='object'){ //dynamic output file naming
-			var retstr = this.processRule(data.outfile).replace("$data","this");
-			this._outfile = ko.pureComputed(eval("function(){ return "+retstr+"; }"), this);
-		}
-		//make icon file
-		var svgicon = "gear", icon = "gear.png", imgarr = [];
-		if(typeof(data.icon)=='string') imgarr = [data.icon];
-		else if($.isArray(data.icon)) imgarr = data.icon;
-		$.each(imgarr,function(i,imgstr){
-			if(typeof(imgstr)!='string') return true;
-			if(imgstr.substr(0,10)=='data:image'||~['.png','.jpg','.gif'].indexOf(imgstr.substr(-4))) icon = imgstr;
-			else svgicon = imgstr;
-		});
-		if(svgicon.length>10){ svgpaths[this._title] = svgicon; svgicon = this._title; } //add new svgicon
-		else if(!svgpaths[svgicon]) svgicon = "gear";
-		this._icon = {img:icon, svg:svgicon};
-		
-		if(!data.options) return this.apierr('no options found');
-	},
-	
-	//wire up
-	registerPlugin: function(){
-		this.checkPlugin();
-		if(!this._errors.length){  //add plugin to tools menu
-			model.toolsmenu.unshift({txt:this._title, act:this._title, icn:this._icon.svg, inf:data.menudesc||'Launch '+this._title, req:['online']});
-			plugins[this._title] = this;
-			this.buildUI();
-		} else {  //display errors
-			dialog("error", "Wasabi plugin API failed to build plugin interface:<br><br>"+this._errors.join("<br>"));
-			console.log("Plugin datamodel dump:"); console.log(this);
-		}
-	}
-};
-
-//make Pagan plugin interface
-setTimeout(function(){ 
- new pluginModel({
-  "program": "pagan",
-  "name": "PAGAN aligner",
-  "icon": ["pagan", "icon_pagan.png"],
-  "desc": "Currently open sequence data will be aligned with <a href=\'http://wasabiapp.org/software/pagan\' target=\'_blank\'>Pagan</a>.",
-  "menudesc": "Realign or place sequences using Pagan graph aligner",
-  "outfile": "out.xml",
-  "libraryname": "Pagan realignment",
-  "translate_names": true,
-  "submit": [{"queryfile": "Start placement"}, "Start alignment"],
-  "prefix": "--",
-  "options": [
-	{"output": "out", "option": "outfile"},
-	{"hidden": "", "option": "xml-nhx"}, {"hidden": "", "option": "events"}, {"hidden": "", "option": "output-ancestors"},
-	{"section": "Alignment extension", "options": [
-		{"file": "filedrop import", "option": "queryfile", "title": "Drop query file here", "desc": "Extend with"}
-    ]},
-    {"group": "Edit options", "desc": "Hover option labels for description", "options": [
-    {"section": "Alignment options", "enable": "no queryfile", "options": [
-      {"file": "current sequence", "option": "seqfile", "required": "Open a sequence data to be aligned"},
-	  {"bool": "Compute guidetree", "desc": "Create a new phylogenetic tree to guide the sequence alignment process (uncheck to use the current tree)", "name": "compute_tree", "default": {"no tree": "checked"}, "fixed": "no tree"},
-	  {"file": "current tree", "enable": "tree and no compute_tree", "fileformat": "extended newick", "option": "treefile"},
-      {"select": "Align as", "enable": "sequence is DNA", "desc": "Translate and align cDNA with protein or codon model", "options": [
-	    {"title": "untranslated", "default":true}, {"title": "codons", "option": "codons"}, {"title": "protein", "option": "translate"}
-	  ]},
-	  {"section": "Alignment model parameters", "options": [
-		{"line": "Extension probability of ", "options": [
-			{"float": "gaps", "option": "gap-extension", "desc": "gap extension probability", 
-				"default": [{"sequence is DNA and no translate": 0.8}, 0.5]}, "and ",
-			{"float": "terminal gaps", "option": "end-gap-extension", "desc": "terminal gap extension probability",
-				"default": [{"sequence is DNA and no translate": 0.95}, 0.75]}
-		]},
-		{"line": "", "options": [
-			{"float": "Indel rate", "option": "indel-rate", "desc": "insertion-deletion rate",
-				"default": [{"sequence is DNA and no translate": 0.01}, 0.05]},
-			{"enable": "sequence is DNA and no translate", "options": [
-				{"float": "K", "option": "dna-kappa", "desc": "Transition/transversion ratio (kappa)", "default": 2},
-				{"float": "P", "option": "dna-rho", "desc": "Purine/pyrimidine ration (rho)", "default": 1}
-			]}
-		]},
-		{"bool": "No terminal gaps", "option": "no-terminal-edges", "desc": "Terminal gaps are missing data"}
-	  ]},
-	  {"section": "", "options": [
-		{"bool": "No site skipping", "option": "keep-all-edges", "desc": "No site skipping - keep everything forever"},
-		{"enable": "not keep-all-edges", "options": [
-			{"line": "", "options": [
-				{"float": "Distance-weighted", "option": "branch-skip-weight-per-distance", "desc": "Weighted (by branch length unit) probability for site(s) being skipped over and later matched", "default": 0.9},
-				{"float": "or fixed", "desc": "Fixed probability for site(s) being skipped over and later matched", "option": "branch-skip-penalty-per-branch"},
-				" prob. of site skip and reuse"
-			]},
-			{"line": "", "options": [
-				{"int": "Confirm insertion after", "option": "any-skips-confirm-insertion", "desc": "Number of skips to confirm as insertion", "default": 10}, "skips, ",
-				{"int": "after", "option": "match-skips-confirm-insertion", "desc": "Number of skips from match sites to confirm as insertion", "default": 5}, "perfect skips,"
-			]},
-			{"line": "", "options": [
-				{"float": "or after skipped branch length", "option": "branch-length-confirm-insertion", "desc": "Total branch length skipped to confirm as insertion"}
-			]}
-		]}
-	  ]}
-	]},
-	{"section": "Alignment extension options", "enable": "queryfile", "desc": "Extend current alignment with sequences from a query file", "options": [
-      {"file": "current sequence", "option": "ref-seqfile", "required": "Open a reference dataset for placement"},
-      {"file": "current tree", "enable": "tree", "fileformat": "extended newick", "option": "ref-treefile"},
-      {"enable": "sequence is DNA", "bool": "Translate to protein", "desc": "Translate reference sequence to protein", "option": "translate"},
-      {"line": "", "options":[ 
-	    {"select": "Use", "options": [
-		  {"title": "fast", "option": "fast-placement", "default": true},
-		  {"title": "very fast", "option": "very-fast-placement"}
-		]}, "placement"
-	  ]},
-      {"line": "", "options":[
-	    {"select": "Consider", "name":"test", "options": [
-			{"title": "terminal", "option": "terminal-nodes", "default": true},
-			{"title": "internal", "option": "internal-nodes"},
-			{"title": "all", "option": "all-nodes"}
-		]},
-        "tree nodes for placement"
-      ]},
-      {"bool": "Place once", "option": "one-placement-only", "desc": "Place only once despite equally good hits", "default": true},
-      {"enable": "queryfile is DNA", "options": [
-	    {"bool": "Both strands", "option": "both-strands", "desc": "Consider both strands, keep better (align DNA)"},
-        {"bool": "Find ORFs", "option": "find-orfs", "desc": "Find best ORFs, keep good (align protein)"},
-        {"line":"Consider ORFs with ", "enable": "find-orfs", "options": [
-          {"int": " min. length", "option": "min-orf-length", "desc": "Minimum ORF length", "default": 100},
-          {"float": "min. coverage", "option": "min-orf-coverage", "desc": "Minimum ORF coverage"}
-        ]}
-      ]},
-      {"enable": "sequence is DNA", "options": [
-        {"bool": "Score ORFs as DNA", "option": "score-as-dna", "desc": "Score ORFs as DNA", "default": true}
-      ]},
-      {"bool": "Pileup alignment", "option": "pileup-alignment", "desc": "Do pileup alignment"},
-      {"line":"", "options": [
-		{"float": "Query distance", "option": "query-distance", "desc": "Expected query distance from reference", "default": 0.1},
-		{"float": "min. overlap", "option": "min-query-overlap", "desc": "Minimum query overlap with reference", "default": 0.5},
-		{"title": "min. identity", "option": "min-query-identity", "desc": "Minimum query identity with reference", "type": "float", "default": 0.5},
-	  ]},
-	  {"line":"", "options": [
-		{"bool": "Trim alignment", "option": "trim-extended-alignment", "desc": "Trim extended alignment"},
-		{"line":"", "enable": "trim-extended-alignment", "options": [
-			{"int": "and keep", "option": "trim-keep-sites", "desc": "Keep flanking sites", "default": 15},
-			" flanking sites"
-		]}
-	  ]},
-      {"bool": "Prune alignment", "option": "prune-extended-alignment", "desc": "Prune extended alignment"},
-      {"line": "", "enable": "prune-extended-alignment", "options": [
-        {"hidden": "", "option": "prune-keep-closest", "default": true},
-        {"int": "and keep", "option": "prune-keep-number", "desc": "Keep # of closest reference sequences", "default": 0},
-        "reference sequences"
-      ]}
-    ]},
-    {"section": "", "options": [
-		{"select": "Correct for", "options": [
-			{"title": "no", "default": true}, {"option": "454"}, {"option": "homopolymer"}, {"option": "pacbio"}
-		], "line":true},
-    	"sequencing errors"
-	]}
-  ]}
-]});
-}, 2000);
 
 //== functions for sequence manipulation ==//
 //make or resize a sequence selection box
@@ -5448,6 +5339,11 @@ function startup(response){
 	else if(launchact=='demo data'){ getfile({id:'example', file:'out.xml'}); } //or load demo data (default)
 	else if(settingsmodel.userid() && settingsmodel.keepid() && localStorage.openid && localStorage.openfile){ //or load last data
 		getfile({id:localStorage.openid, file:localStorage.openfile});
+	}
+	if(data.plugins){  //donwload & process plugins
+		$.each(data.plugins, function(i,pluginname){
+			getfile({plugin:pluginname, throttle:true, success:function(pjson){ new pluginModel(pjson, pluginname); }});
+		})
 	}
 
 	if(settingsmodel.checkupdates()) checkversion(); //check for updates
