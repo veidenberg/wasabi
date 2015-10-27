@@ -1,7 +1,8 @@
 /// Knockout Mapping plugin v2.4.1
 /// (c) 2013 Steven Sanderson, Roy Jacobs - http://knockoutjs.com/
 /// License: MIT (http://www.opensource.org/licenses/mit-license.php)
-///Has a modified a line (442) to allow nested mapping (Andres Veidenberg 2012)
+
+///Modified by Andres Veidenberg, 2012 (http://wasabiapp.org): supports nested mapping (line 442)
 (function (factory) {
 	// Module systems magic dance.
 

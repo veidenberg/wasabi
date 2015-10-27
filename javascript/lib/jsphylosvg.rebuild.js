@@ -1,8 +1,8 @@
 /*
-Renders interactive phylogenetic trees on SVG canvas.
-Built upon jsPhyloSVG (jsphylosvg.com) and JStree (lh3lh3.users.sourceforge.net/jstree.shtml) javascript libraries
-Written for Wasabi webapp by Andres Veidenberg //andres.veidenberg{at}helsinki.fi//, University of Helsinki [2011]
-Requires a modified Raphael library (to support %-based units)
+Phylogenetic tree rendering library for Wasabi webapp (http://wasabiapp.org)
+Based on jsPhyloSVG (Samuel Smits| GPL | http://jsphylosvg.com) and JStree (Heng Li | MIT | http://lh3lh3.users.sourceforge.net/jstree.shtml)
+Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2015)
+Distributed under GPL license (http://www.gnu.org/licenses/gpl)
 */
 
 Smits = {

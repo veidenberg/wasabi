@@ -1,6 +1,7 @@
 /*
-Main script for Wasabi web app. More info: http://wasabiapp.org 
-Written by Andres Veidenberg //andres.veidenberg{at}helsinki.fi//, University of Helsinki [2011]
+Main javascript file for Wasabi webapp (http://wasabiapp.org)
+Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2015)
+Distributed under GPL license (http://www.gnu.org/licenses/gpl)
 */
 
 //Use AnimationFrame in jQuery animations when supported
