@@ -1,8 +1,10 @@
 /*
-Scrollbar library to make sequence & tree areas scrollable
-Based on malihu custom scrollbar plugin - http://manos.malihu.gr
-Rebuilt for Wasabi web application by Andres Veidenberg //andres.veidenberg{at}helsinki.fi//, University of Helsinki [2012]
+Scrollbar library Wasabi webapp (http://wasabiapp.org)
+Based on malihu scrollbar plugin (http://manos.malihu.gr | MIT)
+Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2015)
+Distributed under GPL license (http://www.gnu.org/licenses/gpl)
 */
+
 function mCustomScrollbar(){
 	var $verticalDragger_container = $("#verticalDragger");
 	var $verticalDragger = $("#verticalDragger .dragger");

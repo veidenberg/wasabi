@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 #coding: utf-8
 
-# Back-end server to support Wasabi web application
-# Written by Andres Veidenberg [andres.veidenberg{at}helsinki.fi] and Alan Medlar, University of Helsinki [2012]
+# Back-end server for Wasabi web application (http://wasabiapp.org)
+# Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi) and Alan Medlar, University of Helsinki (2015)
+# Distributed under GPL license (http://www.gnu.org/licenses/gpl)
 
 import argparse
 import cgi
@@ -583,7 +584,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         parentid = form.getvalue('parentid','')
         currentid = form.getvalue('id','')
         writemode = form.getvalue('writemode','') #writemode=>target path in library
-        name = form.getvalue('name','')
+        jobname = form.getvalue('name','')
         response = {}
 
         if(useraccounts and (not userid or userid not in libdirs)): #create a new user if needed
@@ -637,7 +638,7 @@ class WasabiServer(BaseHTTPRequestHandler):
                 for p in ['action','userid','id','parentid','name','writemode','idnames','ensinfo','nodeinfo','visiblecols', 'out','fasta','newick','newtree','queryfile','pagan']: #leave only aligner parameteres
                     if p in form: form[p].value = ''
                 
-            job = Job(jobid, name, files, program, form)
+            job = Job(jobid, jobname, files, program, form)
             job_queue.enqueue(jobid, job)
 
         elif action == 'save': #write files to library path
@@ -1129,7 +1130,7 @@ class WorkQueue(object):
 class Job(object):
     INIT,QUEUED,RUNNING,SUCCESS,FAIL,TERMINATED = [1, 1, 2, 0, -1, -15]
 
-    def __init__(self, jobid, name, files, program, params):
+    def __init__(self, jobid, jobname, files, program, params):
         
         self.errormsg = {
             -1  : "See log file",
@@ -1147,14 +1148,13 @@ class Job(object):
         self.job_status = Job.INIT
         self.lock = threading.Lock()
         self.popen = None
-        pname = 'pagan' if program=='pagan_old' else program
-        self.bin = os.path.join(appdir,'binaries',pname,pname)
+        self.bin = os.path.join(appdir, 'plugins', params.getfirst('folder',program), program)
         self.params = []
         self.postprocess = None
         
         self.items = {
             "id"         : jobid,
-            "name"       : name,
+            "name"       : jobname,
             "status"     : Job.INIT,
             "program"    : program.upper(),
             "parameters" : "",
@@ -1170,12 +1170,13 @@ class Job(object):
         }
         
         if program=='prank': #prepare params for Prank aligner
+            self.bin = os.path.join(appdir,'binaries',program,program)
             self.params = ['-d='+self.qpath('infile'), '-o='+self.qpath('out'), '-prunetree', '-showxml', '-dots', '-showevents']
             
             if self.files['treefile']:
                 self.params.append('-t='+self.qpath('treefile'))
             
-            flags = ['F','e','keep','update','nomissing','uselogs']
+            flags = ['F','e','keep','update','nomissing','uselogs','raxmlrebl']
             numvals = ['gaprate','gapext','kappa','rho']
             optset = set()
             

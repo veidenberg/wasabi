@@ -29,7 +29,7 @@ if(!cancelAnimationFrame) var cancelAnimationFrame = document.webkitCancelAnimat
 if(!String.prototype.trim){ String.prototype.trim = function(){ return this.replace(/^\s+|\s+$/g, '');}; }
 
 //== Globals ==//
-var currentversion = 150904; //local version (timestamp) of Wasabi
+var currentversion = 151028; //local version (timestamp) of Wasabi
 var sequences = {}; //seq. data {name : [s,e,q]}
 var treesvg = {}; //phylogenetic nodetree
 var leafnodes = {}; //all leafnodes+visible ancestral leafnodes
@@ -979,33 +979,36 @@ var model = new koModel();
 var koExport = function(){
 	var self = this;
 	self.categories = ko.computed(function(){
-		var catarr = [];
-		if(model.seqsource()) catarr.push({name:'Sequence', formats:[{name:'fasta', variants:[{name:'fasta', ext:['.fa']} ]}, {name:'phylip', variants:[{name:'phylip', ext:['.phy'], interlace:true}]} ]}); 
-		if(model.treesource()) catarr.push({name:'Tree', formats:[ 
+		var catarr = [], hastree = model.treesource(), hasseq = model.seqsource();
+		
+		if(hasseq) catarr.push({name:'Sequence', formats:[{name:'fasta', variants:[{name:'fasta', ext:['.fa']} ]}, {name:'phylip', variants:[{name:'phylip', ext:['.phy'], interlace:true}]} ]}); 
+		
+		if(hastree) catarr.push({name:'Tree', formats:[ 
 			{name:'newick', variants:[
 				{name:'newick', ext:['.nwk','.tre','.tree']},
 				{name:'extended newick', ext:['.nhx'], desc:'Newick format with additional metadata (hidden nodes etc.)'}
 			]} 
 		]});
-		if(catarr.length==2){
+		
+		if(hasseq && hastree){
 			catarr.push({name:'Sequence+tree', formats:[{name:'HSAML', variants:[{name:'HSAML', ext:['.xml'], 
 			desc:'XML format which supports additional data from PRANK alingments. Click for more info.', url:'http://prank-msa.googlecode.com'} ]} ]});
 		}
-		else if(!catarr.length){ catarr = [{name:'',formats:[{name:'',variants:[{name:'',ext:['']}]}]}]; }
+		
+		$.each(catarr, function(i,cat){ cat.formats.push({name:'NEXUS', variants:[{name:'NEXUS', ext:['.nex']}]}); });
+		
 		return catarr;
 		//{name:'Phylip',fileext:'.phy',desc:'',interlace:true}, {name:'PAML',fileext:'.phy',desc:'Phylip format optimized for PAML',hastree:false,interlace:false}, 
 		//{name:'RAxML',fileext:'.phy',desc:'Phylip format optimized for RAxML',hastree:false,interlace:false};
 	});
 	self.category = ko.observable({});
 	self.format = ko.observable({});
-	self.format.subscribe(function(f){ if(f.name=='HSAML') self.includetree(true); });
 	self.variant = ko.observable({});
 	self.infolink = ko.computed(function(){ return self.variant().url?'window.open(\''+self.variant().url+'\')':false });
 	self.filename = ko.observable('Untitled').extend({format:"alphanum"});
 	self.fileexts = {'fasta':'.fa', 'phylip':'phy', 'newick':'.nwk', 'extended newick':'.nhx', 'HSAML':'.xml', 'phyloxml':'.xml', 'nexus':'.nex', 'text':'.txt'};
 	self.fileext = ko.observable('.fa');
 	self.fileurl = ko.observable('');
-	self.includetree = ko.observable(false);
 	self.includeanc = ko.observable(false);
 	self.includehidden = ko.observable(false);
 	self.interlaced = ko.observable(false);
@@ -1445,7 +1448,7 @@ function communicate(action,senddata,options){
 function savefile(btn){
 	if(!$.isEmptyObject(sequences) || !$.isEmptyObject(treesvg)){
 		var savetarget = btn? exportmodel.savetarget().type : exportmodel.savetargets()[1].type; //manual or session autosave[overwrite/sibing]
-		var filedata = parseexport('HSAML',{includetree:true,includeanc:true,tags:true,includehidden:true,usedna:false});
+		var filedata = parseexport('HSAML',{includeanc:true,tags:true,includehidden:true,usedna:false});
 		var nodeinfo = {};
 		var savedata = {writemode:savetarget, file:filedata, source:model.sourcetype(), parentid:librarymodel.openparent(), id:librarymodel.openid()};
 		$.each(leafnodes,function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
@@ -1543,6 +1546,7 @@ function sendjob(options){
 		options.form = optform[0];
 		optdata.plugin = options.plugin;
 		senddata.program = plugins[options.plugin]._program;
+		senddata.folder = plugins[options.plugin]._folder;
 		senddata.outfile = unwrap(plugins[options.plugin]._outfile);
 		senddata.prefix = plugins[options.plugin]._prefix;
 		senddata.name = unwrap(plugins[options.plugin]._libraryname);
@@ -1556,7 +1560,10 @@ function sendjob(options){
 		senddata.dots = true;
 		if(options.keepalign) senddata.keep = true;
 		if(options.usecodons) senddata.codon = true;
-		if(!options.form) senddata.name = 'Updated '+senddata.name;
+		if(!options.form){ //
+			senddata.name = 'Updated '+senddata.name;
+			options.raxmlrebl = true;
+		}
 		senddata.idnames = idnames;
 	}
 	
@@ -1985,7 +1992,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				seqtxt = seqtxt.replace(/ {1}\d+$/mg,'');
 				seqtxt = seqtxt.replace(/^[ \:\.\*]+$/mg,'');
 			}
-			else if(format=='nexus'){ seqtxt = seqtxt.replace(/\[.+\]/g,''); } //remove "[]"
+			else if(format=='nexus'){ seqtxt = seqtxt.replace(/\[.+\]/g,''); } //remove nexus comments
 			else if(format=='phylip' && nspecies){ //detect & reformat strict phylip
 				var strictphy = false;
 				var capture = seqstart.exec(seqtxt);
@@ -2122,28 +2129,40 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 			parseseq(file,filename,'clustal');
 		}
 		else if(marr = file.match(/^\s*(\d+) {1}(\d+) *[\n\r]/)){ //phylip alignment
+			//todo: check for ntax&nchar match
 			file = file.substring(file.search(/[\n\r]/)); //remove first line
 			parseseq(file,filename,'phylip',marr[1],marr[2]);
 		}
-		else if(~file.indexOf("#NEXUS")){ //NEXUS
-			var blockexp = /begin (\w+);/igm;
+		else if(~file.indexOf("#NEXUS")){ //NEXUS //todo: check for nchar&ntax&datatype match; matchchar
+			var blockexp = /^begin (\w+)/igm;
 			while(result = blockexp.exec(file)){ //parse data blocks
 				var blockname = result[1].toLowerCase();
-				if(blockname=='trees'||blockname=='data'||blockname=='characters'){
-					if(blockname=='trees'){
-						var blockstart = file.indexOf('(',blockexp.lastIndex);
-						var blockend = file.indexOf(';',blockstart);
-						var blocktxt = file.substring(blockstart,blockend);
-						parsetree(blocktxt,filename);
+				if(blockname=='data'||blockname=='characters'){
+					if(marr = file.match(/ntax=(\d+)/i)) var ntax = marr[1]; else var ntax = '';
+					if(marr = file.match(/nchar=(\d+)/i)) var nchar = marr[1]; else var nchar = '';
+					var blockstart = file.indexOf(file.match(/matrix/i)[0], blockexp.lastIndex);
+					var blockend = file.indexOf(';',blockstart);
+					var blocktxt = file.substring(blockstart+6,blockend);
+					parseseq(blocktxt,filename,'nexus',ntax,nchar);
+				}
+				else if(blockname=='trees'){
+					var liststart = file.indexOf(file.match(/translate/i)[0], blockexp.lastIndex);
+					var translations = [];
+					if(~liststart){ //found translate command
+						var listend = file.indexOf(';',liststart);
+						translations = file.substring(liststart+9,listend).replace(/\s+/g,' ').split(',');
+						blockexp.lastIndex = listend;
 					}
-					else if(blockname=='data'||blockname=='characters'){
-						if(marr = file.match(/ntax=(\d+)/i)) var ntax = marr[1]; else var ntax = '';
-						if(marr = file.match(/nchar=(\d+)/i)) var nchar = marr[1]; else var nchar = '';
-						var blockstart = file.indexOf(file.match(/matrix/i)[0],blockexp.lastIndex);
-						var blockend = file.indexOf(';',blockstart);
-						var blocktxt = file.substring(blockstart+6,blockend);
-						parseseq(blocktxt,filename,'nexus',ntax,nchar);
-					}
+					var nwkstart = file.indexOf('(', blockexp.lastIndex);
+					var nwkend = file.indexOf(';', nwkstart);
+					var nwktxt = file.substring(nwkstart, nwkend);
+					var colon = ~nwktxt.indexOf(':')? ':' : '';
+					$.each(translations, function(i,pair){
+						pair = pair.split(' ');
+						if(pair.length==2) nwktxt = nwktxt.replace(pair[0]+colon, pair[1]+colon);
+						else console.log('Faulty NEXUS translation: '+pair.join(' '));
+					});
+					parsetree(nwktxt, filename);
 				}
 			}
 		}
@@ -2165,9 +2184,6 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	var treeobj = Ttreedata ? new Smits.PhyloCanvas(treeopt) : {data:''};
 	Ttreedata = '';
 	
-	$.each(Tsequences,function(name,seq){ //make spaces in seq. names
-		if(~name.indexOf('_')){ Tsequences[name.replace(/_/g,' ')] = seq; delete Tsequences[name]; } 
-	});
 	var seqnames = Object.keys(Tsequences);
 	
 	//process & count sequences
@@ -2438,7 +2454,7 @@ function parseexport(filetype, options){
 		filetype = exportmodel.format().name;
 		options = {};
 		options.tags = exportmodel.variant().name && (exportmodel.variant().name=='extended newick');
-		$.each(['masksymbol','includetree','includeanc','includehidden','truncsymbol','trunclen'], function(i,opt){
+		$.each(['masksymbol','includeanc','includehidden','truncsymbol','trunclen'], function(i,opt){
 			options[opt] = exportmodel[opt]();
 		});
 	} else if(!options) var options = {};
@@ -2446,13 +2462,14 @@ function parseexport(filetype, options){
 	if(filetype=='extended newick'){ filetype = 'newick'; options.tags = true; }
 	var nameids = options.nameids||{};
 	var seqsource = options.usedna&&translateseq('protein','check')? model.dnasource() : sequences;
-	var treesource = treesvg.data;  
+	var treesource = treesvg.data;
 	var output = '', ids = [], regexstr = '', dict = {}, seqtype = model.seqtype();
+	var datatype = exportmodel.category().name.toLowerCase();
 	
 	var leafnames = [], visiblecols = model.visiblecols();
 	$.each(leafnodes,function(leafname,obj){ if(obj.type!='ancestral') leafnames.push(leafname) });
 	var names = options.includeanc? Object.keys(sequences) : leafnames;
-	var specount = names.length, ntcount = model.alignlen();
+	var specount = names.length, ntcount = options.includehidden? model.alignlen() : model.visiblecols().length;
 	
 	if(typeof(options.container)=='object'){ //IO=>plugin file container
 		seqsource = options.container.sequences;
@@ -2481,10 +2498,12 @@ function parseexport(filetype, options){
 		if(seqtype=='codons') symbol = i;
 		if(symbols[symbol].masked) dict[symbols[symbol].masked] = options.masksymbol;
 	});}
-	if(options.gapsymbol) dict['-'] = options.gapsymbol;
+	if(filetype!='HSAML' && model.hasdot()) dict['.'] = '-';
+	if(options.gapsymbol) dict['-'] = dict['.'] = options.gapsymbol;
 	$.each(dict,function(symbol){ regexstr += symbol; });
 	var regex = regexstr ? new RegExp('['+regexstr+']','g') : '';
 	var translate = regexstr ? function(s){ return dict[s] || s; } : '';
+	
 	//sequence parsing
 	var parseseq = function(seqname){ //seqarr=>seqstr=>conversion
 		var seqarr = seqsource[seqname], seqstr = '';
@@ -2493,7 +2512,7 @@ function parseexport(filetype, options){
 		return regex? seqstr.replace(regex,translate) : seqstr;
 	};
 	
-	if(filetype!='newick'){ //processing sequence data. Map seq names
+	if(filetype!='newick'){ //seq data => Map seq names
 		var seqi=0, parenti=0, tempid='';
 		if(options.startid) seqi = parseInt(options.startid.replace(/\D+/,''));
 		$.each(names,function(j,name){
@@ -2505,9 +2524,8 @@ function parseexport(filetype, options){
 		});
 	}
 	
-	if((filetype=='newick'||options.includetree) && treesource){
-		var treefile = treesource.root.write(options.tags, !Boolean(options.includeanc), nameids); 
-	} else var treefile = '';
+	//output newick
+	var parsetree = function(){ return treesource.root.write(options.tags, !Boolean(options.includeanc), nameids); };
 	
 	
 	var seqline = '';
@@ -2520,7 +2538,7 @@ function parseexport(filetype, options){
 	}
 	else if (filetype=='HSAML'){
 		output = "<ms_alignment>\n";
-		if(treefile) output += "<newick>\n"+treefile+"</newick>\n";
+		output += "<newick>\n"+parsetree()+"</newick>\n";
 		
 		output += "<nodes>\n"; var isleaf;
 		$.each(names,function(j,name){
@@ -2540,7 +2558,26 @@ function parseexport(filetype, options){
 			output += (nameids[name]||name)+"\n"+seqline+"\n";	
 		});
 	}
-	else if(filetype=='newick'){ output = treefile; }
+	else if(filetype=='NEXUS'){
+		output = "#NEXUS\n";
+		if(~datatype.indexOf('sequence')){
+			output += "BEGIN DATA;\n";
+			output += "Dimensions NTax="+specount+" NChar="+ntcount+";\n";
+			if(seqtype=='codons') seqtype = 'nucleotide';
+			output += "Format DataType="+seqtype+" Gap=- Missing=?;\nMatrix\n";
+			$.each(names,function(j,name){
+				seqline = parseseq(name);
+				output += (nameids[name]||name)+" "+seqline+"\n";	
+				});
+				output += ";\nEND;\n";
+		}
+		if(~datatype.indexOf('tree')){
+			output += "BEGIN TREES;\n";
+			output += "Tree tree1 = "+parsetree();
+			output += "END;\n";
+		}
+	}
+	else if(filetype=='newick'){ output = parsetree(); }
 	
 	if(usemodel||options.exportdata){ //export data to exportwindow & make download url
 		if(options.exportdata){
@@ -5352,7 +5389,7 @@ function startup(response){
 
 //Initiation on page load
 $(function(){
-	setTimeout(function(){window.scrollTo(0,1)},15); //hides scrollbar in iOS
+	if(/iPad|iPhone|iPod/.test(navigator.userAgent)) setTimeout(function(){window.scrollTo(0,1)},15); //scroll 1px (hides scrollbar in iOS)
 	
 	if(!document.createElement('canvas').getContext){ //old browser => stop loading
 		dialog('warning','Your web browser does not support running Wasabi.<br>Please upgrade to a <a onclick="dialog(\'about\')">modern browser</a>.');
