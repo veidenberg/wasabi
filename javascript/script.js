@@ -2102,7 +2102,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	});
 
 	$.each(filenames,function(i,filename){  //detect fileformat
-		var file = container.get(filename).data, marr = [], result = [];
+		var file = container.get(filename).data, marr = false;
 		
 		if(typeof(file)=='object' && file.hasOwnProperty('data')){ //Ensembl JSON object
 			if(!file.data[0].homologies) return;
@@ -2135,22 +2135,27 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		}
 		else if(~file.indexOf("#NEXUS")){ //NEXUS //todo: check for nchar&ntax&datatype match; matchchar
 			var blockexp = /^begin (\w+)/igm;
-			while(result = blockexp.exec(file)){ //parse data blocks
-				var blockname = result[1].toLowerCase();
+			var nameline = false;
+			while(nameline = blockexp.exec(file)){ //parse data blocks
+				var blockname = nameline[1].toLowerCase();
+				//console.log(blockexp.lastIndex+': '+blockname); //double parsing?
 				if(blockname=='data'||blockname=='characters'){
 					if(marr = file.match(/ntax=(\d+)/i)) var ntax = marr[1]; else var ntax = '';
 					if(marr = file.match(/nchar=(\d+)/i)) var nchar = marr[1]; else var nchar = '';
-					var blockstart = file.indexOf(file.match(/matrix/i)[0], blockexp.lastIndex);
-					var blockend = file.indexOf(';',blockstart);
-					var blocktxt = file.substring(blockstart+6,blockend);
-					parseseq(blocktxt,filename,'nexus',ntax,nchar);
+					var seqstart = file.search(/matrix\s/i);
+					if(~seqstart){
+						var seqend = file.indexOf(';', seqstart);
+						var seqtxt = file.substring(seqstart+7, seqend);
+						parseseq(seqtxt,filename,'nexus',ntax,nchar);
+						blockexp.lastIndex = seqend;
+					}
 				}
 				else if(blockname=='trees'){
-					var liststart = file.indexOf(file.match(/translate/i)[0], blockexp.lastIndex);
+					var liststart = file.search(/translate\s/i);
 					var translations = [];
 					if(~liststart){ //found translate command
 						var listend = file.indexOf(';',liststart);
-						translations = file.substring(liststart+9,listend).replace(/\s+/g,' ').split(',');
+						translations = file.substring(liststart+10,listend).replace(/\s+/g,' ').split(',');
 						blockexp.lastIndex = listend;
 					}
 					var nwkstart = file.indexOf('(', blockexp.lastIndex);
@@ -2163,6 +2168,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 						else console.log('Faulty NEXUS translation: '+pair.join(' '));
 					});
 					parsetree(nwktxt, filename);
+					blockexp.lastIndex = nwkend;
 				}
 			}
 		}
