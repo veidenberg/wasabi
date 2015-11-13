@@ -34,7 +34,7 @@ from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 
 #define some globals
-version = 150904
+version = 151110
 wasabiexec = os.path.realpath(__file__)
 appdir = os.path.dirname(wasabiexec) #get wasabi homedir
 wasabidir = os.path.realpath(os.path.join(appdir,os.pardir))
@@ -322,7 +322,12 @@ def create_job_dir(d='', uid='', newlibrary=False, metadata={}):
                     if('keepAccount' in usermd.metadata): continue
                     lasttime = os.path.getmtime(fpath)
                     dirage = (time.time()-lasttime)/86400 #times in (float) seconds => days
-                    tmpuserage = int(int(usermd['tmpAccount'])/86400) if 'tmpAccount' in usermd.metadata else 0
+                    tmpuserage = int((time.time()-int(usermd['tmpAccount']))/86400) if 'tmpAccount' in usermd.metadata else 0
+                    if tmpuserage:
+                        print 'tmp'
+                        print int(usermd['tmpAccount'])
+                        print int(usermd['tmpAccount'])/86400
+                        print tmpuserage
                     if(dirage > userexpire or tmpuserage): #remove expired user account
                         jdirs = len(sum([trio[1] for trio in os.walk(dpath)],[])) #len(flattened list of subdir lists)
                         shutil.rmtree(apath(dpath,datadir,uid='skip'))
