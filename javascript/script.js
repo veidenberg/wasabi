@@ -2106,6 +2106,9 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		
 		if(format=='newick'){ //remove whitespace
 			treetxt = treetxt.replace(/\n+/g,'');
+			var lpar = (treetxt.match(/\(/g) || []).length;
+			var rpar = (treetxt.match(/\)/g) || []).length;
+			if(lpar!=rpar){ errors.push("Seems like Newick but parentheses don't match"); return true; }
 			if(!$.isEmptyObject(Tidnames)) idnames = Tidnames; //map treename=>seqname (from HSAML)
 		}
 		Ttreedata = treetxt;
@@ -2189,8 +2192,8 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				}
 			}
 		}
-		else if(/^\s?\(+\s?(\w+|['"][^'"]+['"])(:\d+\.?\d*)?,\s?[('"\w]+/.test(file)){ //newick tree
-			parsetree(file,filename);
+		else if(/^\s*\(+['"]?[\w]+.*\;\s*$/.test(file)){ //newick tree
+			parsetree(file, filename);
 		}
 		else{
 			errors.push("Unrecognized data format in "+filename);
