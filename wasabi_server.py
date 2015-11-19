@@ -308,7 +308,7 @@ def create_job_dir(d='', uid='', newlibrary=False, metadata={}):
     uid = os.path.basename(newdir)
     
     if(newlibrary): #create library folder for a new user
-        md = Metadata.create(newdir, name="Library root folder", imported=True)
+        md = Metadata.create(newdir, name="Wasabi user account", imported=True)
         
         today = time.strftime("%d%m%y")
         global datestamp #do cleanup max once a day

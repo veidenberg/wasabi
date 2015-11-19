@@ -66,7 +66,7 @@ var libraryopt = {
 };
 //keep state of server data
 var serverdata = {import: {}, library: ko.mapping.fromJS([],libraryopt), params: ko.mapping.fromJS({},{copy:['params']})};
-serverdata.library.subscribe(function(newdata){ $.each(newdata, function(i,itm){ if(!itm){ console.log('duplicate item!'); delete serverdata.library()[i]; }} )});
+serverdata.library.subscribe(function(newdata){ $.each(newdata, function(i,itm){ if(!itm){ console.log('Duplicate library item!'); delete serverdata.library()[i]; }} )});
 
 //KO library helper functions
 function unwrap(v){ if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; } //read from (non)observable
@@ -368,7 +368,7 @@ var koLibrary = function(){
 		var item = ''; if(!key) return '';
 		if(!val){ val = key; key = 'id'; }
 		$.each(serverdata.library(),function(i,obj){
-			//if(typeof(obj)=='undefined'){ delete serverdata.library()[i]; return true; }
+			if(typeof(obj)=='undefined'){ delete serverdata.library()[i]; return true; }
 			if(obj[key] && unwrap(obj[key])==val){ item = obj; return false; }
 		});
 		return item;
@@ -1200,7 +1200,8 @@ function communicate(action,senddata,options){
 	if(!options) options = {};
 	else if(typeof(options)=='string') options = {saveto:options,retry:true}; //retry in case of error
 	if(!senddata) senddata = {};
-	if(settingsmodel.userid() && !senddata.userid){ senddata.userid = settingsmodel.userid(); }
+	if(!senddata.userid) senddata.userid = settingsmodel.userid();
+	var missinguser = !senddata.userid && settingsmodel.useraccounts();
 	
 	var formdata = options.form? new FormData(options.form) : new FormData();
 	formdata.append('action', action);
@@ -1265,7 +1266,7 @@ function communicate(action,senddata,options){
 	}
 	else if(action=='getlibrary'){
 		if(!options.saveto) options.saveto = 'library';
-		if(!senddata.userid){ if(options.success) options.success(); if(options.after) options.after(); return; }
+		if(missinguser){ if(options.success) options.success(); if(options.after) options.after(); return; }
 	}
 	else if(action=='checkserver'){
 		errorfunc = function(msg){
@@ -1298,7 +1299,7 @@ function communicate(action,senddata,options){
     var nonuseraction = userfree.indexOf(action)+1;
     var noabort = ['terminate','rmdir','newdir','movedir'];
     var nonabortaction = noabort.indexOf(action)+1;
-    if(!senddata.userid && !nonuseraction){ 
+    if(missinguser && !nonuseraction){
 	  console.log('Cancelled "'+action+'" request: userID missing.'); return false;
 	}
     if(libaction){ //action changes library content
@@ -4307,7 +4308,7 @@ function dialog(type,options){
 		var writetarget = (exportmodel.savetargets().length>1? '<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input '+
 		'(currently open) analysis">Save as</span> <select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':
 		'The result will be saved as new root')+' analysis in the <a onclick="dialog(\'library\')">library</a>.<br>';
-		exportmodel.savetarget(exportmodel.savetargets()[exportmodel.savetargets().length-1]); //default: sibling||child||new
+		exportmodel.savetarget(exportmodel.savetargets()[0]); //default: child||silbing||root
 		
 		
 		var optform = $('<form id="alignoptform" onsubmit="return false">'+writetarget+'<br>'+
@@ -5400,6 +5401,8 @@ function startup(response){
 		if(zlevel<1 || zlevel>=model.zlevels.length) zlevel = 1; //zlevel==0 > bug
 		model.zoomlevel(zlevel);
 	}
+	
+	communicate('getlibrary');
 	
 	if(urlvars.id||urlvars.share){ //import from library
 		getfile({id:urlvars.id||urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', aftersync:true});
