@@ -431,9 +431,9 @@ Smits.PhyloCanvas.Node.prototype = {
 			}
 			if(node.len >= 0 && node.nwlevel > 0) str += ":" + node.len;
 			if(tags){ //write metadata
-				node.meta = (node.confidence?':B='+node.confidence:'')+(node.hidden?':Co=Y':'')+(node.type=='stem'&&node.children[1].type=='ancestral'&&!node.children[1].hidden?':Vis=Y':'')+(node.altered?':XN=realign':'')+(node.species?':S='+node.species:'')+
-				(node.events?':Ev='+(node.events.duplications||'0')+'>'+(node.events.speciations||'0'):'')+(node.cladename?':ND='+node.cladename:'')+
-				(node.ec?':E='+node.ec:'')+(node.accession?':AC='+node.accession:'')+(node.gene?':GN='+node.gene:'')+(node.taxaid?':T='+node.taxaid:'');
+				node.meta = (node.bootstrap?':B='+node.bootstrap:'')+(node.hidden?':Co=Y':'')+(node.type=='stem'&&node.children[1].type=='ancestral'&&!node.children[1].hidden?':Vis=Y':'')+(node.altered?':XN=realign':'')+(node.species?':S='+node.species:'')+
+				(node.duplications||node.speciations?':Ev='+(node.duplications||'0')+'>'+(node.speciations||'0'):'')+(node.nodeid?':ND='+node.nodeid:'')+
+				(node.EC?':E='+node.EC:'')+(node.accession?':AC='+node.accession:'')+(node.gene?':GN='+node.gene:'')+(node.taxa_id?':T='+node.taxa_id:'');
 				if(node.meta) str += '[&&NHX'+node.meta.replace(/[\s\(\)\[\]&;,]/g,'_')+']';
 			}
 			curlevel = node.nwlevel;
@@ -522,18 +522,25 @@ Smits.PhyloCanvas.NewickParse = function(data){
 					if(~node.color.indexOf(',')) node.color = 'rgb('+node.color+')';
 				}
 				if(~meta.indexOf(':Vis=Y')) node.showanc = true; //ancestral leaf added later in Render.Phylogram
-				if(~meta.indexOf(':XN=realign')){ node.altered = true; treealtered = true; }
-				if(~meta.indexOf(':B=')) node.confidence = meta.match(/:B=(\w+)/)[1];
+				if(~meta.indexOf(':XN=realign')){ node.altered = true; treealtered = true; } //custom node info
+				if(~meta.indexOf(':B=')) node.bootstrap = meta.match(/:B=(\w+)/)[1];
 				if(~meta.indexOf(':Ev=')){
 					var evol = meta.match(/:Ev=(\d+)>(\d+)/);
-					node.events = {duplications:parseInt(evol[1]), speciations:parseInt(evol[2])};
+					node.duplications = parseInt(evol[1]);
+					mode.speciations = parseInt(evol[2]);
+				} else if(~meta.indexOf(':D=')){
+					var etype = meta.match(/:D=(\w)/)[1];
+					node[(['Y','T','N','F'].indexOf(etype)<2?'duplications':'speciations')] = 1;
 				}
 				if(~meta.indexOf(':S=')) node.species = meta.match(/:S=(\w+)/)[1].replace(/_/g,' ');
-				if(~meta.indexOf(':T=')) node.taxaid = meta.match(/:T=(\w+)/)[1];
-				if(~meta.indexOf(':E=')) node.ec = meta.match(/:E=(\w+)/)[1];
+				if(~meta.indexOf(':T=')) node.taxa_id = meta.match(/:T=(\w+)/)[1];
+				if(~meta.indexOf(':E=')){ //enzyme EC number
+					node.EC = parseFloat(meta.match(/:E=([\d\.]+)/)[1]);
+					node.EC_class = ['Oxidoreductase','Transferase','Hydrolase','Lyase','Isomerase','Ligase'][parseInt(node.EC)-1];
+				} 
 				if(~meta.indexOf(':GN=')) node.gene = meta.match(/:GN=(\w+)/)[1]; //ens. gene name
-				if(~meta.indexOf(':ND=')) node.cladename = meta.match(/:ND=(\w+)/)[1]; //ens. gene id
-				if(~meta.indexOf(':AC=')) node.accession = meta.match(/:AC=(\w+)/)[1]; //ens. protein id
+				if(~meta.indexOf(':ND=')) node.nodeid = node.gene_id = meta.match(/:ND=(\w+)/)[1]; //node id || ens. gene id
+				if(~meta.indexOf(':AC=')) node.accession = meta.match(/:AC=(\w+)/)[1]; //seeq. accession || ens. protein id
 			} else if (ch===':'){ //read branchlength
 				next();
 				node.len = Smits.Common.roundFloat(string(), 4);
@@ -611,37 +618,49 @@ Smits.PhyloCanvas.PhyloxmlParse = function(data){
 		
 		clade.children('clade').each(function(){ node.children.push(recursiveParse($(this), node)); });
 		
+		//node: clade->taxonomy(->id;sci_name)
+		//leaf: clade->name(=geneid);taxonomy(->id;sci_name);sequence(->accession(=proteinid);name(=genename);location;mol_seq)
+		
 		var nodelen = clade.attr('branch_length')||clade.children('branch_length').text()||0;
 		node.len = Smits.Common.roundFloat(nodelen, 4);
 		if(node.len == 0) node.len = 0.0001;
 		
-		node.cladename = clade.children('name').text(); //name. ensembl=>gene ID
-		node.confidence = clade.children('confidence').text(); //bootstrap value
-		node.color = clade.attr('color')||clade.children('color').text()||'';
-		var taxonomy = clade.children('taxonomy'); //species name+id
+		node.name = clade.children('name').text(); //ensembl gene ID
+		clade.children('confidence').each(function(){ //confidence scores
+			node[$(this).attr('type')] = parseFloat($(this).text()); //bootstrap || duplication_confidence_score
+		});
+		if(clade.attr('color')) node.color = clade.attr('color');
+		else if(clade.children('color').length){
+			var rgb = clade.children('color');
+			node.color = 'rgb('+rgb.children('red').text()+','+rgb.children('green').text()+','+rgb.children('blue').text()+')';
+		}
+		var taxonomy = clade.children('taxonomy'); //species name & id
 		if(taxonomy.length){
 			node.species = taxonomy.children('scientific_name').text() || taxonomy.children('common_name').text() || '';
 			node.species = node.species.replace(/_/g,' ');
-			node.taxaid = taxonomy.children('id').text();
+			node.taxa_id = taxonomy.children('id').text();
+			if(node.taxa_id) node.taxa_id_provider = taxonomy.children('id').attr('provider')||'';
 		}
-		node.name = node.cladename || node.species || (node.children.length? 'Node '+node.id : 'Sequence '+node.id);
-		node.name = node.name.trim(node.name);
 		
 		var cladeseq = clade.children('sequence');
-		if(cladeseq.length){
-			node.gene = cladeseq.children('name').text(); //ensembl=>gene name
+		if(cladeseq.length){ //leaf
+			node.gene = cladeseq.children('name').text(); //gene name
 			if(cladeseq.children('mol_seq').length && node.name){
 				data.sequences[node.name] = cladeseq.children('mol_seq').text().split('');
 			}
-			node.accession = cladeseq.children('accession').text();
+			node.accession = cladeseq.children('accession').text(); //protein id
+			node.accession_source = cladeseq.children('accession').attr('source')||'';
+			if(node.accession_source = 'Ensembl') node.gene_id = clade.children('name').text();
 		}
+		
+		if(!node.name) node.name = node.species || (node.children.length? 'Node '+node.id : 'Sequence '+node.id);
+		node.name = node.name.trim(node.name);
 		
 		var eventinfo = clade.children('events');
 		if(eventinfo.length){ //ensembl info for duplication/speciation node
-			node.events = {};
-			node.events.type = eventinfo.children('type').text().replace(/_/g,' ');
-			node.events.duplications = eventinfo.children('duplications').text();
-			node.events.speciations = eventinfo.children('speciations').text();
+			//node.events.type = eventinfo.children('type').text().replace(/_/g,' ');
+			node.duplications = eventinfo.children('duplications').text();
+			node.speciations = eventinfo.children('speciations').text();
 		}
 		
 		if(node.children.length) node.type = 'stem';
@@ -759,23 +778,23 @@ Smits.PhyloCanvas.Render = {
 			var node = params.node;
 			node.active = true;
 			var menudata = {};
-			if(!$.isEmptyObject(model.ensinfo())){ //submenu for leaf (ensembl) metadata
-				var ensmenu = {};
-				if(node.genetype) ensmenu[node.genetype] = '';
-				if(node.taxaname) ensmenu['<span class="note">Taxa</span> '+node.taxaname] = '';
-    			if(node.species && node.cladename) ensmenu['<span class="note">Gene</span> '+
+			var infomenu = {' ':''};
+			var infotitle = 'Metadata';
+			infomenu['<span class="note">Branch length</span> '+(Math.round(node.len*1000)/1000)] = '';
+			if(!$.isEmptyObject(model.ensinfo())){ //submenu for leaf metadata
+				infotitle = 'Ensembl';
+				if(node.species) infomenu['<span class="note">Species</span> '+node.species] = '';
+    			if(node.species && node.gene_id) infomenu['<span class="note">Gene</span> '+
     				'<a href="http://www.ensembl.org/'+node.species.replace(' ','_')+'/Gene/Summary?g='+
-    				node.cladename+'" target="_blank" title="View in Ensembl">'+(node.gene||node.cladename)+'</a>'] = '';
-    			if(node.species && node.accession) ensmenu['<span class="note">Protein</span> '+
+    				node.gene_id+'" target="_blank" title="View in Ensembl">'+(node.gene||node.gene_id)+'</a>'] = '';
+    			if(node.species && node.accession) infomenu['<span class="note">Protein</span> '+
     				'<a href="http://www.ensembl.org/'+node.species.replace(' ','_')+'/Transcript/ProteinSummary?p='+
     				node.accession+'" target="_blank" title="View in Ensembl">'+node.accession+'</a>'] = '';
-    			if(!$.isEmptyObject(ensmenu)) menudata['<span class="svgicon" title="Data from Ensembl database">'+svgicon('info')+'</span>Ensembl'] = {submenu:ensmenu};
-    		} else if(node.species||node.gene){
-    			var infomenu = {};
-    			if(node.species) infomenu['<span class="note">Species</span> '+node.species] = '';
-    			if(node.gene) infomenu['<span class="note">Gene</span> '+node.gene] = '';
-    			if(!$.isEmptyObject(infomenu)) menudata['<span class="svgicon" title="View metadata">'+svgicon('info')+'</span>Metadata'] = {submenu:infomenu};
-    		}
+    		} else {
+				var metatags = ['species','taxa_id','gene','gene_id','bootstrap','duplications','speciations','accession','EC','EC_class'];
+				$.each(metatags,function(i,tag){ if(node[tag]) infomenu['<span class="note">'+tag.capitalize().replace('_',' ')+'</span> '+node[tag]] = ''; });
+			}
+    		menudata['<span class="svgicon" title="View metadata">'+svgicon('info')+'</span>'+infotitle] = {submenu:infomenu};
 			menudata['<span class="svgicon" title="Hide node and its sequence">'+svgicon('hide')+'</span>Hide leaf'] = function(){ node.hideToggle(); refresh(); };
 			menudata['<span class="svgicon" title="Graft this node to another branch in the tree">'+svgicon('move')+'</span>Move leaf'] = function(){ setTimeout(function(){ node.highlight(true) },50); movenode('',node,'tspan'); };
     		menudata['<span class="svgicon" title="Place this node as the tree outgroup">'+svgicon('root')+'</span>Place root here'] = function(){ node.reRoot(); refresh(); };
@@ -933,7 +952,7 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data){
 				spotattr.fill = 'red';
 				tipnote = 'Needs realignment';
 			}
-			if(node.events&&node.events.duplications){
+			if(node.duplications){
 				spotattr.fill = 'lightblue'; spotattr.stroke = 'blue';
 				if(!tipnote) tipnote = 'Duplication node';
 			}

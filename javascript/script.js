@@ -25,8 +25,9 @@ if(!cancelAnimationFrame) var cancelAnimationFrame = document.webkitCancelAnimat
 	}
 }(jQuery));
 
-//trim() polyfill
+//string class polyfills
 if(!String.prototype.trim){ String.prototype.trim = function(){ return this.replace(/^\s+|\s+$/g, '');}; }
+if(!String.prototype.capitalize){ String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); }; }
 
 //== Globals ==//
 var currentversion = 151112; //local version (timestamp) of Wasabi
@@ -3373,16 +3374,20 @@ function tooltip(evt,title,options){
 		if(hiddencount && title.length>10) titleadd.css({position:'relative',right:'0'});
 		var infoicon = $('<span class="svgicon">'+svgicon('info')+'</span>').css({cursor:'pointer'}); //info icon
 		infoicon.mouseenter(function(e){ //hover infoicon=>show info
-			var nodeinf = ['Branch length: '+(Math.round(node.len*1000)/1000),'Length from root: '+(Math.round(node.lenFromRoot*1000)/1000),'Levels from root: '+node.level];
-			if(hiddencount) nodeinf.unshift('Hidden leaves: '+hiddencount);
-			if(node.children.length) nodeinf.unshift('Visible leaves: '+node.visibleLeafCount);
-			if(node.confidence) nodeinf.push('Branch support: '+node.confidence);
+			var nodeinf = [];
+			nodeinf.push('<span class="note">Branch length</span> '+(Math.round(node.len*1000)/1000));
+			/*'Length from root: '+(Math.round(node.lenFromRoot*1000)/1000),'<span class="note">Levels from root: '+node.level];
+			if(hiddencount) nodeinf.unshift('<span class="note">Hidden leaves: '+hiddencount);
+			if(node.children.length) nodeinf.unshift('Visible leaves: '+node.visibleLeafCount);*/
+			var metatags = ['species','taxa_id','gene','gene_id','bootstrap','duplications','speciations','accession','EC','EC_class'];
+			$.each(metatags,function(i,tag){ if(node[tag]) nodeinf.push('<span class="note">'+tag.capitalize().replace('_',' ')+'</span> '+node[tag]); });
+			/*if(node.bootstrap) nodeinf.push('Branch support: '+node.bootstrap);
 			if(node.events){ //gene evol. events (ensembl)
 				if(node.events.duplications) nodeinf.push('Duplications: '+node.events.duplications);
 				if(node.events.speciations) nodeinf.push('Speciations: '+node.events.speciations);
 			}
 			if(node.taxaid) nodeinf.push('Taxonomy ID: '+node.taxaid);
-			if(node.ec) nodeinf.push('EC number: '+node.ec);
+			if(node.ec) nodeinf.push('EC number: '+node.ec);*/
 			tooltip(e,'',{target:infoicon[0],data:nodeinf,arrow:'left',style:'bulletmenu',hoverhide:true});
 		});
 		titleadd.append(infoicon);
