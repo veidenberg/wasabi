@@ -2,7 +2,7 @@
 Phylogenetic tree rendering library for Wasabi webapp (http://wasabiapp.org)
 Based on jsPhyloSVG (Samuel Smits| GPL | http://jsphylosvg.com) and JStree (Heng Li | MIT | http://lh3lh3.users.sourceforge.net/jstree.shtml)
 Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2015)
-Distributed under GPL license (http://www.gnu.org/licenses/gpl)
+Distributed under AGPL license (http://www.gnu.org/licenses/agpl)
 */
 
 Smits = {
@@ -527,7 +527,7 @@ Smits.PhyloCanvas.NewickParse = function(data){
 				if(~meta.indexOf(':Ev=')){
 					var evol = meta.match(/:Ev=(\d+)>(\d+)/);
 					node.duplications = parseInt(evol[1]);
-					mode.speciations = parseInt(evol[2]);
+					node.speciations = parseInt(evol[2]);
 				} else if(~meta.indexOf(':D=')){
 					var etype = meta.match(/:D=(\w)/)[1];
 					node[(['Y','T','N','F'].indexOf(etype)<2?'duplications':'speciations')] = 1;

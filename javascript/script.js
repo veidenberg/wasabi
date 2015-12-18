@@ -1,7 +1,7 @@
 /*
 Main javascript file for Wasabi webapp (http://wasabiapp.org)
 Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2015)
-Distributed under GPL license (http://www.gnu.org/licenses/gpl)
+Distributed under AGPL license (http://www.gnu.org/licenses/agpl)
 */
 
 //Use AnimationFrame in jQuery animations when supported
@@ -741,20 +741,28 @@ var librarymodel = new koLibrary();
 //ensembl import settings
 var koEnsembl = function(){
 	var self = this;
-	self.idformats = [{name:'Gene homology',url:'homology/id/',example:'ENSG00000198125'},{name:'Gene tree',url:'genetree/id/',example:'ENSGT00390000003602'},{name:'EPO alignment',url:'alignment/region/',example:'13:32906000-32910000'}];
+	self.idformats = [{name:'Gene homology',url:'homology/id/',example:'ENSG00000198125'},{name:'Gene tree',url:'genetree/id/',example:'ENSGT00390000003602'},{name:'Alignment block',url:'alignment/region/',example:'13:32906000-32910000'}];
 	self.idformat = ko.observable(self.idformats[1]);
+	self.isblock = ko.pureComputed(function(){ return self.idformat().name=='Alignment block'});
+	self.ishomol = ko.pureComputed(function(){ return self.idformat().name=='Gene homology'});
 	self.ensid = ko.observable('').extend({format:'trim'});
+	self.comparas = ['vertebrates','plants','fungi','pan_homology','bacteria','protists','metazoa'];
+	self.compara = ko.observable(self.comparas[0]);
+	self.genomes = ko.pureComputed(function(){ return self.compara()=='vertebrates'?'':'genomes'; });
 	self.seqtype = ko.observable('cdna');
+	self.isblock.subscribe(function(isblock){ if(isblock){ self.compara(self.comparas[0]); self.seqtype='cdna'; }}); //alignblocks restrictions
 	self.homtype = ko.observable('all');
 	self.aligned = ko.observable(true);
 	self.target = ko.observable('');
 	self.idspecies = ko.observable('');
 	self.idname = ko.observable('');
-	self.epolist = [{type:'EPO',set:[{name:'primates',ref:'homo_sapiens'},{name:'mammals',ref:'homo_sapiens'},{name:'sauropsids',ref:'gallus_gallus'},{name:'fish',ref:'danio_rerio'}]}, {type:'EPO (low coverage)',set:[{name:'mammals',ref:'homo_sapiens'},{name:'sauropsids',ref:'gallus_gallus'},{name:'fish',ref:'danio_rerio'}]}];
-	self.epotype = ko.observable(self.epolist[0]);
-	self.eposet = ko.observable(self.epotype().set[0]);
-	self.maskopt = ['unmasked','soft-masked','hard-masked'];
-	self.mask = self.maskopt[1];
+	//species sets for alignment blocks: rest.ensembl.org/info/compara/species_sets/EPO?content-type=application/json
+	self.alignblocks = [{type: "EPO", set: [{name: "Primates", species: ["homo_sapiens","macaca_mulatta","pongo_abelii","callithrix_jacchus","gorilla_gorilla","pan_troglodytes","papio_anubis","chlorocebus_sabaeus"]}, 
+	{name: "Mammals", species: ["homo_sapiens","macaca_mulatta","pongo_abelii","equus_caballus","oryctolagus_cuniculus","callithrix_jacchus","bos_taurus","gorilla_gorilla","pan_troglodytes","sus_scrofa","mus_musculus","canis_familiaris","felis_catus","ovis_aries","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}, {name: "Fish", species: ["danio_rerio","gasterosteus_aculeatus","oryzias_latipes","tetraodon_nigroviridis","lepisosteus_oculatus"]}, {name: "Sauropsids", species: ["gallus_gallus","taeniopygia_guttata","anolis_carolinensis","meleagris_gallopavo"]}]}, {type: "EPO (low coverage)", set: [{name: "Mammals", species: ["homo_sapiens","macaca_mulatta","echinops_telfairi","tupaia_belangeri","erinaceus_europaeus","sorex_araneus","microcebus_murinus","pongo_abelii","equus_caballus","ochotona_princeps","cavia_porcellus","choloepus_hoffmanni","procavia_capensis","tursiops_truncatus","tarsius_syrichta","dipodomys_ordii","vicugna_pacos","pteropus_vampyrus","loxodonta_africana","oryctolagus_cuniculus","ailuropoda_melanoleuca","nomascus_leucogenys","callithrix_jacchus","myotis_lucifugus","bos_taurus","gorilla_gorilla","otolemur_garnettii","pan_troglodytes","ictidomys_tridecemlineatus","sus_scrofa","mus_musculus","canis_familiaris","mustela_putorius_furo","felis_catus","ovis_aries","dasypus_novemcinctus","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}, {name: "Fish", species: ["danio_rerio","takifugu_rubripes","gasterosteus_aculeatus","oryzias_latipes","tetraodon_nigroviridis","gadus_morhua","oreochromis_niloticus","xiphophorus_maculatus","astyanax_mexicanus","lepisosteus_oculatus","poecilia_formosa"]}, {name: "Sauropsids", species: ["gallus_gallus","taeniopygia_guttata","anolis_carolinensis","meleagris_gallopavo","pelodiscus_sinensis","anas_platyrhynchos","ficedula_albicollis"]}]}, {type:"PECAN", set: [{name: "Vertebrates", species:["homo_sapiens","macaca_mulatta","ornithorhynchus_anatinus","monodelphis_domestica","pongo_abelii","equus_caballus","taeniopygia_guttata","oryctolagus_cuniculus","anolis_carolinensis","meleagris_gallopavo","callithrix_jacchus","bos_taurus","gorilla_gorilla","pan_troglodytes","sus_scrofa","mus_musculus","canis_familiaris","felis_catus","gallus_gallus","ovis_aries","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}]}];
+	self.blocktype = ko.observable(self.alignblocks[0]);
+	self.blockset = ko.observable(self.blocktype().set[0]);
+	self.blockref = ko.observable(self.blockset().species[0]);
+	self.mask = ko.observable('');
 }
 var ensemblmodel = new koEnsembl();
 
@@ -2399,7 +2407,7 @@ function ensemblid(ensdata){
 	var ensbtn = document.getElementById('ensidbtn');
 	if(!ensdata){ //send request
 		if(!ensemblmodel.idspecies()||!ensemblmodel.idname()) return;
-		var urlstring = ('http://rest.ensembl.org/xrefs/symbol/'+ensemblmodel.idspecies()+'/'+ensemblmodel.idname()+'?content-type=application/json;object=gene').replace(/ /g,'+');
+		var urlstring = ('http://rest.ensembl'+ensemblmodel.genomes()+'.org/xrefs/symbol/'+ensemblmodel.idspecies()+'/'+ensemblmodel.idname()+'?content-type=application/json;object=gene').replace(/ /g,'+');
 		communicate('geturl',{fileurl:urlstring},{success:function(data){ensemblid(data)},btn:ensbtn,retry:true,restore:true});
 		return false;
 	}
@@ -2437,26 +2445,30 @@ function ensemblimport(){
 	}
 	var urlopt = ~idformat.indexOf('homology')? '?content-type=application/json' : '?content-type=text/x-phyloxml%2Bxml';
 		
-	if(~idformat.indexOf('alignment')){
+	if(ensemblmodel.isblock()){
 		ensid = ensid.replace(/-/,'..')
 		var marr = ensid.match(/(\w+):(\d+)\.\.(\d+)/);
 		if(!marr) return showerror('Sequence region in wrong format.');
 		var start = parseInt(marr[2]), end = parseInt(marr[3]);
 		if(end<start || end-start>10000000) return showerror('Max. region length is 10Mb.');
-		ensid = ensemblmodel.eposet().ref+'/'+ensid;
+		ensid = ensemblmodel.blockref()+'/'+ensid;
+		urlopt += ';method='+ensemblmodel.blocktype().type+';species_set_group='+ensemblmodel.blockset().name.toLowerCase();
+		if(ensemblmodel.mask()) urlopt += ';mask='+ensemblmodel.mask();
 	} else {
 		if(~idformat.indexOf('homology')){
 			urlopt += ';type='+ensemblmodel.homtype();
 			if(ensemblmodel.target()) urlopt += ';target_species='+ensemblmodel.target();
 		}
 		else{
-			if(ensemblmodel.aligned()) urlopt += ';aligned=True';
-			if(!~ensid.indexOf('ENSGT')) idformat = 'genetree/member/id/';
+			if(!~ensid.indexOf('GT')) idformat = 'genetree/member/id/';
 		}
+		urlopt += ';sequence='+ensemblmodel.seqtype();
 	}
-		
-	urlopt += ';sequence='+ensemblmodel.seqtype();
-	var urlstring = ('http://rest.ensembl.org/'+idformat+ensid+urlopt).replace(/ /g,'+');
+	
+	if(ensemblmodel.aligned()) urlopt += ';aligned=1';
+	if(ensemblmodel.genomes()) urlopt += ';compara='+ensemblmodel.compara();
+	
+	var urlstring = ('http://rest.ensembl'+ensemblmodel.genomes()+'.org/'+idformat+ensid+urlopt).replace(/ /g,'+');
 	var processdata = function(ensdata){
 		try{ ensdata = JSON.parse(ensdata); } catch(e){ if(~ensdata.indexOf('BaseHTTP')) return showerror('Server communication error.'); }
 		if(typeof(ensdata)=='object'){ //JSON => gene homology data
@@ -2554,7 +2566,7 @@ function parseexport(filetype, options){
 	}
 	
 	//output newick
-	var parsetree = function(){ return treesource.root.write(options.tags, !Boolean(options.includeanc), nameids); };
+	var parsetree = function(){ return treesource? treesource.root.write(options.tags, !Boolean(options.includeanc), nameids) : ''; };
 	
 	
 	var seqline = '';
@@ -2567,7 +2579,7 @@ function parseexport(filetype, options){
 	}
 	else if (filetype=='HSAML'){
 		output = "<ms_alignment>\n";
-		output += "<newick>\n"+parsetree()+"</newick>\n";
+		if(~datatype.indexOf('tree')) output += "<newick>\n"+parsetree()+"</newick>\n";
 		
 		output += "<nodes>\n"; var isleaf;
 		$.each(names,function(j,name){
@@ -2868,6 +2880,7 @@ function redraw(options){
 	var oldheight = parseInt(dom.seq.css('height'))||1;
 	var visibleHeight = $("#left").height();
 	if(makezoom) top = Math.round(((newheight/oldheight)*(top-(visibleHeight/2)))+(visibleHeight/2));
+	if(options.leftscale) left = parseInt(left*options.leftscale);
 	//check boundaries
 	if(top<0 && newheight>visibleHeight && Math.abs(top)>newheight-visibleHeight) top = visibleHeight-newheight; //new bottom limit
 	if(top>0||newheight<visibleHeight) top = 0; //stick to top
@@ -4177,29 +4190,30 @@ function dialog(type,options){
 		});
 		
 		var ensheader = '<br><br><div class="sectiontitle"><img src="images/ensembl.png"><span>Import from <a href="http://www.ensembl.org" target="_blank">Ensembl</a></span>'+
-		'<span class="svg" title="Retrieve a set of homologous sequences corresponding to Ensembl Gene ID, GeneTree ID or a region from an EPO alignment block. Click for more info.">'+
+		'<span class="svg" title="Retrieve a set of homologous sequences corresponding to Ensembl Gene ID, GeneTree ID or a region from an alignment block. Click for more info.">'+
 		'<a href="http://www.ensembl.org/info/website/tutorials/compara.html" target="_blank">'+svgicon('info')+'</a></span></div><br>';
 		
 		var enscontent = '<div style="padding:0 10px"><select data-bind="options:idformats, optionsText:\'name\', value:idformat"></select>'+
 		' <input style="width:210px" type="text" data-bind="attr:{placeholder:idformat().example},value:ensid"><br>'+
+		'Use <select data-bind="options:comparas, value:compara, disable:isblock"></select> genomes database<br>'+
 		
-		'<div data-bind="slidevisible:idformat().name!=\'EPO alignment\'"><span style="color:#888">Search for Ensembl gene ID:</span><br>'+
+		'<div data-bind="slidevisible:!isblock()"><span style="color:#888">Search for Ensembl gene ID:</span><br>'+
 		'species <input type="text" data-bind="value:idspecies"/> gene name <input type="text" data-bind="value:idname" style="width:80px"/> '+
 		'<a id="ensidbtn" class="button square"  style="margin:0" onclick="ensemblid()">Get ID</a></div>'+
-		'<div data-bind="slidevisible:idformat().name==\'EPO alignment\'"><span class="cell">Pipeline type<hr><select data-bind="options:epolist,optionsText:\'type\',value:epotype"></select></span>'+
-		'<span class="cell" data-bind="with:epotype">Species set<hr><select data-bind="options:set,optionsText:\'name\',value:$parent.eposet"></select></span>'+
-		'<span class="cell" data-bind="with:eposet">Reference species<hr><span class="camelcase" data-bind="text:ref.replace(\'_\',\' \')"></span></span></div>'+
+		'<div data-bind="slidevisible:isblock()&&!genomes()"><span class="cell">Pipeline type<hr><select data-bind="options:alignblocks,optionsText:\'type\',value:blocktype"></select></span>'+
+		'<span class="cell" data-bind="with:blocktype">Species set<hr><select data-bind="options:set,optionsText:\'name\',value:$parent.blockset"></select></span>'+
+		'<span class="cell" data-bind="with:blockset">Reference species<hr><select data-bind="options:species,optionsText:function(itm){return itm.capitalize().replace(\'_\',\' \')},value:$parent.blockref"></select></div>'+
 		
 		'<span style="color:#888">Options:</span><br>'+
-		'<ul data-bind="slidevisible:idformat().name!=\'EPO alignment\'">'+
-		'<li>Import <span data-bind="visible:idformat().name==\'Gene\'">unaligned</span>'+
-			'<select data-bind="visible:idformat().name!=\'Gene\',value:aligned"><option value="true">aligned</option><option value="">unaligned</option></select>'+
-			' <select data-bind="value:seqtype"><option value="cdna">cDNA</option><option value="protein">protein</option></select> sequences</li>'+
-		'<li data-bind="slidevisible:idformat().name==\'Gene\'">Include <select data-bind="value:homtype" style="margin-top:5px"><option value="all">all homologous</option>'+
-			'<option value="orthologues">orthologous</option><option value="paralogues">paralogous</option></select> genes</li>'+
-		'<li data-bind="slidevisible:idformat().name==\'Gene\'">Restrict to a target species <input type="text" data-bind="value:target" style="width:100px"/></li></ul>'+
-		'<ul data-bind="slidevisible:idformat().name==\'EPO alignment\'">'+
-		'<li>Import <select data-bind="options:maskopt,value:mask"></select> sequences.</ul></div>'+
+		'<ul>'+
+		'<li>Import '+
+			'<select data-bind="value:aligned"><option value="true">aligned</option><option value="">unaligned</option></select>'+
+			' <select data-bind="disable:isblock, value:seqtype"><option value="cdna">cDNA</option><option value="protein">protein</option></select> sequences</li>'+
+		'<li data-bind="slidevisible:ishomol"><span class="label" title="Select type of homology. Projections are orthology calls defined between alternative assemblies and the genes shared between them">Include</span> <select data-bind="value:homtype" style="margin-top:5px"><option value="all">all homologous</option>'+
+			'<option value="orthologues">orthologous</option><option value="paralogues">paralogous</option><option value="projections">projected</option></select> genes</li>'+
+		'<li data-bind="slidevisible:ishomol">Restrict to a target species <input type="text" data-bind="value:target" style="width:100px"/></li>'+
+		'<li data-bind="slidevisible:isblock"><select data-bind="value:mask"><option value="">Unmask</option><option value="hard">Hard-mask</option><option value="soft">Soft-mask</option></select> repeat sequences</li>'+
+		'</ul></div>'+
 		'<a id="ensbtn" class="button" onclick="ensemblimport()">Import</a> <span id="enserror" class="note" style="color:red"></span>';
 		
 		var dialogwindow = makewindow("Import data",[localheader,filedrag,or,selectbtn,ensheader,enscontent,remoteheader,urladd,urlinput,expbtn,'<br>',dwnlbtn],{backfade:fade,flipside:'front',icn:'import.png',nowrap:true,id:winid});
@@ -4505,7 +4519,10 @@ function dialog(type,options){
 // shortcut for error dialogs
 	else if(type=='error'||type=='warning'||type=='notice'){
 		if(typeof(options)=='string') options = { msg: options };
-		if(options.id && $('#'+options.id).length) return;
+		if($('div.popupwindow').length>5 || (options.id && $('#'+options.id).length)){
+			console.log('Skipped notice window: '+options.msg); return;
+		}
+		if($('div.popupwindow').length>5) return;
 		makewindow(type.charAt(0).toUpperCase()+type.slice(1), options.msg ,{btn:'OK',icn:'warning',id:options.id});
 	}
 // batch filter/collapse for sequence area
@@ -5278,7 +5295,7 @@ function translateseq(totype,check,skipdraw){
 			model.alignlen(Math.round(model.alignlen()*wrate));
 			model.visiblecols(translatecolumns(fromtype,totype)); //translate column flags
 		}
-		if(!skipdraw) redraw({zoom:true,refresh:true});
+		if(!skipdraw) redraw({zoom:true,refresh:true,leftscale:wrate});
 	};
 	if(missinganc){
 		var applybtn = $('<a class="button">Translate</a>').click(function(){

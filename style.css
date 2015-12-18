@@ -1,6 +1,6 @@
 /* CSS styling for Wasabi webapp (http://wasabiapp.org). Test target: latest versions of Chrome/Firefox. */
 /* Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2015) */
-/* Distributed under GPL license (http://www.gnu.org/licenses/gpl) */
+/* Distributed under AGPL license (http://www.gnu.org/licenses/agpl) */
 
 .notransition, .notransition * { /* animations turn-off switch */
   -webkit-transition: none !important;
