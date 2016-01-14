@@ -2317,7 +2317,7 @@ div.paper{
 
 
 /* Plugin API interace styles*/
-.errmsg{
+.errmsg, .notemsg{
 	background: #d33;
 	border-radius: 3px;
 	color: white;

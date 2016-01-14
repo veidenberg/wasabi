@@ -13,7 +13,7 @@
 	{"output": "out", "option": "outfile"},
 	{"hidden": "", "option": "xml-nhx"}, {"hidden": "", "option": "events"}, {"hidden": "", "option": "output-ancestors"},
 	{"section": "Alignment extension", "options": [
-		{"file": "filedrop import", "option": "queryfile", "title": "Drop query file here", "desc": "Extend with"}
+		{"file": "filedrop fileselect", "option": "queryfile", "title": "Drop query file here", "desc": "Extend with", "check": {"queryfile and sequence and queryfile is not sequence": "Query sequence type is different from the reference"}}
     ]},
     {"group": "Edit options", "desc": "Hover option labels for description", "options": [
     {"section": "Alignment options", "enable": "no queryfile", "options": [

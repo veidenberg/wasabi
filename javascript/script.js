@@ -1540,7 +1540,7 @@ function sendjob(options){
 	
 	if(options.plugin){ //plugin input options cleanup
 		var optform = $(options.form).clone(), useopenseq = false;
-		optform.find('select, input:not([name]), input[type=checkbox]:not(:checked)').remove();
+		optform.find('select, input:not([name]), input[type=file], input[type=checkbox]:not(:checked)').remove();
 		optform.find('input[type=checkbox]').val('true');
 		optform.find('input').filter(function(){ return this.value=="false"||!this.value.trim().length; }).remove();
 		optform.find('input[fileformat]').each(function(){ //prepare file input options
@@ -1909,7 +1909,9 @@ function checkfiles(filearr, options){
 		$('li.file span.icon:eq('+filearr.indexOf(item.name)+')',infodiv).empty().append(iconimg);
 	  });
 	  container.valueHasMutated();
-	} else closewindow(infowindow);
+	} else { closewindow(infowindow); }
+	
+	if(options.container){ closewindow(infowindow); }
 	
 	//phase3: import (convert to tree + seq) //
 	var importfunc = function(){
@@ -2356,10 +2358,9 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				else setTimeout(function(){ communicate('writemeta', {id:options.id, key:'imported'}) }, 2000);
 			} else options.source = 'shared data';
 		}
-		
+		var filename = filenames.length? filenames[0].split('.')[0].replace(/_/g,' ') : '';
 		exportmodel.savename(options.name||filename||'Untitled analysis'); //initial name
 		librarymodel.openid(options.id||''); //libitem updates name
-		var filename = filenames.length? filenames[0].split('.')[0].replace(/_/g,' ') : '';
 		
 		if(options.source){ //data source > model
 			var src = options.source;
@@ -2504,7 +2505,7 @@ function parseexport(filetype, options){
 	var seqsource = options.usedna&&translateseq('protein','check')? model.dnasource() : sequences;
 	var treesource = treesvg.data;
 	var output = '', ids = [], regexstr = '', dict = {}, seqtype = model.seqtype();
-	var datatype = options.datatype || exportmodel.category().name || 'sequence';
+	var datatype = options.datatype || exportmodel.category().name || 'sequence tree';
 	datatype = datatype.toLowerCase();
 	
 	var leafnames = [], visiblecols = model.visiblecols();
@@ -2788,7 +2789,7 @@ function redraw(options){
 	$("#seq div[id*='selection'],#seq div[id*='cross']").remove();
 	$label = $("#namelabel"); $labelspan = $("#namelabel span");
 	
-	if(options.firstrun){ //new data imported: prepare tree area	
+	if(options.firstrun){ //new data imported: prepare tree area
 		if(treesvg.data){ //make tree SVG
 			var svg = $("#tree>svg,#names>svg");
 			svg.mousedown(function(e){ //handle nodedrag on tree
@@ -2810,15 +2811,13 @@ function redraw(options){
 							if(helper) helper.css({left:evt.pageX+15,top:evt.pageY});
 						}
 			}); } });
-		}
-		else { //no tree: make tree/leafname placeholders			
+		} else { //no tree: make tree/leafname placeholders	
 			$.each(model.visiblerows(),function(n,name){
 				var leafname = leafnodes[name].ensinfo? leafnodes[name].ensinfo.species : name;
-				var nspan = $('<span style="height:'+model.boxh()+'px;font-size:'+model.fontsize()+'px">'+leafname+'</span>');
+				var nspan = $('<span style="height:'+model.boxh()+'px;font-size:'+model.fontsize()+'px;cursor:pointer">'+leafname+'</span>');
 				
 				var hovertimer;
 				nspan.mouseenter(function(){ //show full leaf name on mouseover
-					if(leafnodes[name].ensinfo) nspan.css('cursor','pointer');
 					rowborder({y:n*model.boxh()},'keep'); //show row highlight
 					hovertimer = setTimeout(function(){ //show hidden part of name
 						var cssobj = {'font-size': model.fontsize()+'px', 'top': nspan.offset().top+'px', 'left': $("#right").position().left-16+'px'};
@@ -2831,21 +2830,25 @@ function redraw(options){
 					clearTimeout(hovertimer);
 					$label.fadeOut(100); 
 				});
-				if(leafnodes[name].ensinfo){ //leaf menu for ensembl info (treeless import)
-					var ens = leafnodes[name].ensinfo;
-					nspan.click(function(){
-						var ensmenu = {};
-						if(ens.taxaname) ensmenu['<span class="note">Taxa</span> '+ens.taxaname] = '';
-					if(ens.cladename&&ens.species) ensmenu['<span class="note">Gene</span> '+
+				//seq. name menu
+				nspan.click(function(){
+					var ens = leafnodes[name].ensinfo, mtitle = '';
+					var nmenu = {'Delete': {t:'Remove this sequence', icon:'trash', 
+						click:function(){ model.visiblerows.remove(name); delete leafnodes[name]; delete sequences[name]; nspan.remove(); redraw(); }}};
+					if(ens){ //show ensembl metadata in the menu
+						mtitle = ens.genetype;
+						if(ens.taxaname) nmenu['<span class="note">Taxa</span> '+ens.taxaname] = '';
+						if(ens.cladename&&ens.species) nmenu['<span class="note">Gene</span> '+
 						'<a href="http://www.ensembl.org/'+ens.species.replace(' ','_')+
 						'/Gene/Summary?g='+ens.cladename+'" target="_blank" title="View in Ensembl">'+ens.cladename+'</a>'] = '';
-					if(ens.accession&&ens.species) ensmenu['<span class="note">Protein</span> '+
+						if(ens.accession&&ens.species) nmenu['<span class="note">Protein</span> '+
 						'<a href="http://www.ensembl.org/'+ens.species.replace(' ','_')+'/Transcript/ProteinSummary?p='+
 						ens.accession+'" target="_blank" title="View in Ensembl">'+ens.accession+'</a>'] = '';
-					setTimeout(function(){ tooltip('',ens.genetype,{clear:true, arrow:'top', data:ensmenu, 
-							target:{ x:$("#names").offset().left, y:nspan.offset().top, width:$("#names").width(), height:model.boxh()}, style:'black' }) },100);
-					});
-				}
+					}
+					setTimeout(function(){ tooltip('', mtitle, {clear:true, arrow:'top', data:nmenu, 
+						target:{ x:$("#names").offset().left, y:nspan.offset().top, width:$("#names").width(), height:model.boxh()}, style:'black' }) },100);
+				});
+				
 				dom.names.append(nspan);
 			});
 		}
@@ -3770,6 +3773,13 @@ pluginModel.prototype = {
 		}
 		return str;
 	},
+	
+	//processRule string => function
+	ruleFunc: function(rule, appendstr){
+		var funcstr = this.processRule(rule).replace(/\$data/g,"this").replace(/\w+\(\)/g,"this.$&")+(appendstr||'');
+		try{ var rfunc = new Function("return "+funcstr); }catch(e){ return this.apierr("Faulty rule function ("+e+"): "+rule+" => "+funcstr); }
+		return rfunc.bind(this);		
+	},
 
 	//Create a plugin interface (input) element
 	processOption: function(data, prefix){
@@ -3928,11 +3938,20 @@ pluginModel.prototype = {
 					},100);
 				});
 			} else var filedrag = ''; 
-			if(~source.indexOf("import")){ //import button
-				var or = filedrag? $('<span style="display:inline-block;font-size:18px;"> or </span>') : '';
-				var importbtn = $('<a class="button" style="vertical-align:0">Import</a>');
-				importbtn.click(function(e){ return dialog('import', {onefile:true, silent:true, nocheck:format=="original", container:container}); });
+			if(~source.indexOf("import") || ~source.indexOf("fileselect")){ //import/select button
+				var impbtn = ~source.indexOf("import");
+				var or = $('<span style="display:inline-block;font-size:18px;">'+(filedrag?' or ':'')+'</span>');
+				var importbtn = $('<a class="button" style="vertical-align:0">'+(impbtn?'Import':'Select')+'</a>');
+				if(impbtn){
+					importbtn.click(function(e){ return dialog('import', {onefile:true, silent:true, nocheck:format=="original", container:container}); });
+				} else {
+					var fileinput = $('<input type="file" multiple style="display:none" name="upfile">');
+					fileinput.change(function(){ checkfiles(this.files, {onefile:true, silent:true, nocheck:format=="original", container:container}); });
+					or.append(fileinput);
+					importbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
+				}
 			} else { var or = '', importbtn = ''; }
+			
 			var importdiv = $('<div data-bind="visible:!'+kovar+'()">').append(filedrag, or, importbtn);
 				
 			var filelist = $('<div data-bind="if:'+kovar+'">'+(data.desc||'Use file')+': <img class="icn" src="images/file.png"> <span data-bind="text:'+kovar+'.filename"></span></div>');
@@ -3952,13 +3971,20 @@ pluginModel.prototype = {
 		  }
 		}
 		
-		if(data.required){ //input validation
-			if(firstrun && typeof(data.required)=="string") this[trackname].errmsg = ko.pureComputed(function(){ return !this[trackname]()?data.required:""; }, this);
-			else{
-				retstr = this.processRule(data.required).replace("$data","this");
-				if(firstrun) this[trackname].errmsg = ko.pureComputed(eval("function(){ return "+retstr+"; }"), this);
-			}
-			elems.push('<!-- ko if:$data._submitted()&&'+kovar+'.errmsg() --><p class="errmsg" data-bind="text:'+kovar+'.errmsg"></p><!-- /ko -->');
+		if(data.required || data.check){ //input validation
+			var rqch = data.required || data.check;
+			if(firstrun){
+			 if(typeof(rqch)=="string"){ //show message when input value missing
+				this[trackname].errmsg = ko.pureComputed(function(){ return !this[trackname]()?rqch:""; }, this);
+			 } else {
+				if(typeof(rqch)=='object'){ //rule obj: evaluate key as rule, display the value as string
+					var rqchrule = Object.keys(rqch)[0];
+					var retfunc = this.ruleFunc(rqchrule, "?'"+rqch[rqchrule]+"':''");
+				} else { var retfunc = this.ruleFunc(rqch); }
+				
+				this[trackname].errmsg = ko.pureComputed(retfunc);
+			}}
+			elems.push('<!-- ko if:'+(data.required?'$data._submitted()&&':'')+kovar+'.errmsg() --><p class="'+(data.required?'err':'note')+'msg" data-bind="text:'+kovar+'.errmsg"></p><!-- /ko -->');
 			kobind += ', style:{borderColor:'+kovar+'.errmsg()?\'red\':\'\'}';
 		}
 			
@@ -4060,8 +4086,7 @@ pluginModel.prototype = {
 		this._title = data.name || data.program;
 		this._outfile = data.outfile || '';
 		if(typeof(data.outfile)=='object'){ //dynamic output file naming
-			var retstr = this.processRule(data.outfile).replace("$data","this");
-			this._outfile = ko.pureComputed(eval("function(){ return "+retstr+"; }"), this);
+			this._outfile = ko.pureComputed(this.ruleFunc(data.outfile));
 		}
 		//make icon file
 		var svgicon = "gear", icon = "gear.png", imgarr = [];
@@ -4108,8 +4133,8 @@ function dialog(type,options){
 	if(type=='import'){
 		if(!options) options = {};
 		var alt = options.mode || options.noimport || options.container;
-		var winid = 'import'+(alt?'_alt':''), fade = !alt;
-		if(!alt) $('div.popupwindow').remove(); //close other windows
+		var winid = options.windowid = 'import'+(alt?'_alt':''); var fade = !alt;
+		if(fade) $('div.popupwindow').remove(); //close other windows
 		
 		var localhelp = 'Select file(s) that contain aligned or unaligned sequence (and tree) data. Supported filetypes: fasta(q), (extended)newick, HSAML, NEXUS, phylip, ClustalW, phyloXML etc.';
 		var localheader = '<div class="sectiontitle"><img src="images/hdd.png"><span>Import local files</span><span class="svg" title="'+localhelp+'">'+svgicon('info')+'</span></div><br>';
@@ -4118,19 +4143,19 @@ function dialog(type,options){
 		filedrag.bind('dragover',function(evt){ //file drag area
 			filedrag.addClass('dragover');
 			evt.stopPropagation();
-		evt.preventDefault();
-		evt.originalEvent.dataTransfer.dropEffect = 'copy';
-	}).bind('dragleave',function(evt){
+			evt.preventDefault();
+			evt.originalEvent.dataTransfer.dropEffect = 'copy';
+		}).bind('dragleave',function(evt){
 			filedrag.removeClass('dragover');
 			evt.stopPropagation();
-		evt.preventDefault();
-	}).bind('drop',function(evt){
-		evt.stopPropagation();
-		evt.preventDefault();
-		filedrag.removeClass('dragover');
-		//var d = new Date(); importstart = d.getTime();
-		checkfiles(evt.originalEvent.dataTransfer.files, options);
-	});
+			evt.preventDefault();
+		}).bind('drop',function(evt){
+			evt.stopPropagation();
+			evt.preventDefault();
+			filedrag.removeClass('dragover');
+			//var d = new Date(); importstart = d.getTime();
+			checkfiles(evt.originalEvent.dataTransfer.files, options);
+		});
 	
 		var fileinput = $('<input type="file" multiple style="opacity:0" name="upfile">');
 		var form = $('<form enctype="multipart/form-data" style="position:absolute">');
