@@ -3,7 +3,7 @@
 
 # Back-end server for Wasabi web application (http://wasabiapp.org)
 # Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi) and Alan Medlar, University of Helsinki (2015)
-# Distributed under GPL license (http://www.gnu.org/licenses/gpl)
+# Distributed under AGPL license (http://www.gnu.org/licenses/agpl)
 
 import argparse
 import cgi
@@ -34,7 +34,7 @@ from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 
 #define some globals
-version = 151110
+version = 160420
 wasabiexec = os.path.realpath(__file__)
 appdir = os.path.dirname(wasabiexec) #get wasabi homedir
 wasabidir = os.path.realpath(os.path.join(appdir,os.pardir))
@@ -440,6 +440,8 @@ class WasabiServer(BaseHTTPRequestHandler):
         
         if 'type' in params:
             ctype = 'text/plain' if('text' in params['type']) else 'application/octet-stream'
+        elif 'callback' in params:
+            ctype = 'application/json' #jsonp requested
         elif url.endswith(".html") or url.endswith(".css") or url.endswith(".js"): #send as text
             ctype = 'text/css' if url.endswith(".css") else 'text/javascript' if url.endswith(".js") else 'text/html'
         else: #send as binary
@@ -452,7 +454,7 @@ class WasabiServer(BaseHTTPRequestHandler):
                 filename = params['file'] if 'file' in params else 'meta.txt'
                 md = Metadata(params['getanalysis'])  #throws error for invalid ID
                 if('logfile' in md and md['logfile']==filename): logfile = True  #logfile requested
-                if ('dir' in params and params['dir']) or 'folder' in md.metadata: #library folder requested (from foreign library account)
+                if('dir' in params and params['dir']) or 'folder' in md.metadata: #library folder requested (from foreign library account)
                     if('dir' in params):  #check child ID
                         if params['getanalysis'] not in librarypath(params['dir']): raise IOError(404, "Child check: Invalid analysis ID: "+params['dir'])
                     if userid: #add shared folder ID to user library
@@ -476,13 +478,16 @@ class WasabiServer(BaseHTTPRequestHandler):
             
             f = open(apath(url, checkroot)) if 'text' in ctype else open(apath(url, checkroot),'rb') #includes symlink check
             filecontent = f.read()
-            if(logfile): filecontent = filecontent.replace(librarypath(params['getanalysis']),'fakePath') #sanitize logfile
             f.close()
+            if(logfile): filecontent = filecontent.replace(librarypath(params['getanalysis']),'fakePath') #sanitize logfile
+            if 'callback' in params:
+                filecontent = params['callback']+'('+filecontent+')' #jsonp
+                filename = ''
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", len(filecontent))
             if(ctype == 'image'): self.send_header("Cache-Control", "max-age=300000")
-            if(filename): self.send_header("Content-Disposition", "attachment; filename="+filename)
+            if(filename): self.send_header("Content-Disposition", "attachment; filename="+filename) #file download
             self.end_headers()
             self.wfile.write(filecontent)
         except IOError as e:
@@ -1399,4 +1404,4 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-
+    

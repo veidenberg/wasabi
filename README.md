@@ -12,7 +12,7 @@ Wasabi can run both as a web service or standalone application, depending on the
 
 ##Citation
 To cite Wasabi in publications, please use:   
-Veidenberg, A., Medlar, A., and Ari, L. (2015). Wasabi: an integrated platform for evolutionary sequence analysis and data visualisation. Mol. Biol. Evol.
+Veidenberg, A., Medlar, A. and Löytynoja, A. (2015) Wasabi: an integrated platform for evolutionary sequence analysis and data visualisation. Mol. Biol. Evol.
 
 ##Licence
 Wasabi is open-source and licenced under the AGPL licence: [GNU homepage](http://www.gnu.org/licenses/agpl).

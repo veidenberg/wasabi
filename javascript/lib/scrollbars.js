@@ -40,8 +40,8 @@ function mCustomScrollbar(){
 		if(totalContentWidth>visibleWidth){ //enable scrollbar if content is long
 			$horizontalDragger.css("display","block");
 			if(reloadType!="resize" && totalContentWidth!=dom.seqwindow.data("contentWidth")){
-				$horizontalDragger.css("left", 0);
-				dom.wrap.css("left", 0);
+				//$horizontalDragger.css("left", 0);
+				//dom.wrap.css("left", 0);
 				dom.seqwindow.data("contentWidth", totalContentWidth);
 			}
 			$horizontalDragger_container.css("display","block");
@@ -120,8 +120,8 @@ function mCustomScrollbar(){
 		if(totalContentHeight>visibleHeight){ //enable scrollbar if content is long
 			$verticalDragger.css("display","block");
 			if(reloadType!="resize" && totalContentHeight!=dom.seqwindow.data("contentHeight")){
-				$verticalDragger.css("top",0);
-				dom.seq.css("margin-top",0);
+				//$verticalDragger.css("top",0);
+				//dom.seq.css("margin-top",0);
 				dom.seqwindow.data("contentHeight",totalContentHeight);
 			}
 			$verticalDragger_container.css("display","block");

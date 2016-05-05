@@ -958,6 +958,10 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data){
 			}
 			svg.draw(new Smits.PhyloCanvas.Render.Circle((x2 || positionX), y, cradius, { attr: spotattr }));
 			
+			//var labelx = svg.percX(x2 || positionX), labely = y+(scaleY*0.3), labelattr = {"fill":"red", "svg":"svg1"};
+			//svg.draw(new Smits.PhyloCanvas.Render.Text(labelx, labely, node.name, {attr: labelattr})); //name next to node circle
+
+			
 			//draw injuction spot hover circle
 			var circle = svg.draw(new Smits.PhyloCanvas.Render.Circle((x2 || positionX), y, 5, { attr: circleattr }));
 			node.edgeCircleHighlight = node.svgEl = circle;

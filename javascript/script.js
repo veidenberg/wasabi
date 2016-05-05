@@ -30,7 +30,7 @@ if(!String.prototype.trim){ String.prototype.trim = function(){ return this.repl
 if(!String.prototype.capitalize){ String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); }; }
 
 //== Globals ==//
-var currentversion = 151112; //local version (timestamp) of Wasabi
+var currentversion = 160110; //local version (timestamp) of Wasabi
 var sequences = {}; //seq. data {name : [s,e,q]}
 var treesvg = {}; //phylogenetic nodetree
 var leafnodes = {}; //all leafnodes+visible ancestral leafnodes
@@ -330,7 +330,7 @@ var koSettings = function(){
 		var arr = ['colorscheme','dark','light','white']; arr.splice(arr.indexOf(self.maskcolor()),1);
 		return arr;
 	});
-	self.anccolor = ko.observable('colorscheme');
+	self.anccolor = ko.observable('light');
 	self.ancletter = ko.observable('uppercase');
 	self.boxborder = ko.observable('border');
 	self.fontopt = ['Arial','Century Gothic','Courier New','Georgia','Tahoma','Times New Roman','Verdana'];
@@ -1257,10 +1257,10 @@ function communicate(action,senddata,options){
 	if(typeof(options.restorefunc)=='function') retryfunc = options.restorefunc;
 	var restorefunc = function(){ //restore original button function
 		if(options.btn){
-		if(!~options.btntxt.indexOf('spinner')) options.btn.innerHTML = options.btntxt||'Retry';
-		options.btn.title = options.btntitle||'Click to retry';
-		$(options.btn).off('click').click(retryfunc);
-	}
+			if(!~options.btntxt.indexOf('spinner')) options.btn.innerHTML = options.btntxt||'Retry';
+			options.btn.title = options.btntitle||'Click to retry';
+			$(options.btn).off('click').click(retryfunc);
+		}
     };
     
     var successfunc = errorfunc = '';
@@ -2331,7 +2331,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		dom.wrap.css('left',0); dom.seq.css('margin-top',0); dom.treewrap.css('top',0); //reset scroll
 		dom.tree.empty(); dom.names.empty();
 		
-		
+		var redrawopt = {firstrun:true};
 		$.each(importsettings,function(sn,s){ //restore library-item-specfic state settings
 			if(sn=="model.seqtype" && s=="codons" && model.isdna()){ //translate dna=>codons
 				Tsequences = {};
@@ -2346,8 +2346,8 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				sequences = Tsequences; Tsequences = '';
 				model.seqtype("codons");
 			}
-			if(~sn.indexOf(".") && eval(sn)) eval(sn+"("+JSON.stringify(s)+")");  //new model value
-			else if(sn=="position") Ttreedata? Ttreedata.position=s : Ttreedata={position:s};  //scroll position
+			if(sn=="position") redrawopt.position = s;  //scroll position
+			else if(~sn.indexOf(".") && eval(sn)) eval(sn+"("+JSON.stringify(s)+")");  //new model value
 		});
 		
 		if(options.id){ //(shared) library dataset
@@ -2369,8 +2369,8 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		}
 		librarymodel.importurl = options.importurl||'';
 		
-		if(treesvg.data) treesvg.refresh({firstrun:true}); //render tree (& seq.); fill leafnodes[], visiblerows[], model.leafcount()
-		else redraw({firstrun:true});
+		if(treesvg.data) treesvg.refresh(redrawopt); //render tree (& seq.); fill leafnodes[], visiblerows[], model.leafcount()
+		else redraw(redrawopt);
 		
 		if(treesvg.data && seqnames.length){ //check tree<=>seq data match
 			if(treesvg.data.root.children.length<3) model.noanc(true);
@@ -2489,6 +2489,7 @@ function ensemblimport(){
 //Output file parsing
 function parseexport(filetype, options){
 	var usemodel = false;
+	if(typeof(filetype)=='object'){ if(!options) options = filetype; filetype = ''; }
 	if(!filetype && !options){ //use input from export window
 		usemodel = true;
 		exportmodel.fileurl('');
@@ -3514,7 +3515,7 @@ function hidetooltip(include,exclude,nodeid){
 		try{ treesvg.data.root.getById(activenode).highlight(false); }catch(e){}
 		activenode = '';
 	}
-	if(!include) model.activeid('');
+	if(!include) model.activeid(''); //model.activeid = seq. selection id
 	var tooltips = $(include||"div.tooltip").not(exclude);
 	tooltips.each(function(){
 		var tip = $(this);
@@ -4259,7 +4260,7 @@ function dialog(type,options){
 			$('#'+type).click();
 			$('#'+type+' a.backbtn').css('display','inline-block');
 			flipexport();
-			if(options) parseexport('',options);
+			if(options) parseexport(options);
 			return;
 		}
 		
@@ -4293,7 +4294,7 @@ function dialog(type,options){
 		var backwindow = makewindow("Export data",[backcontent,backbtn,downloadbtn],{icn:'export.png', flipside:'back', id:type});
 		
 		ko.applyBindings(exportmodel,$('#'+type)[0]);
-		if(options) parseexport('',options);
+		if(options) parseexport(options);
 	}
 // save data to library	
 	else if(type=='save'){
@@ -4672,10 +4673,10 @@ function dialog(type,options){
 		uiwrap.append(uirows, '<div class="row bottombtn"><span class="label" title="Click on bottom-left edge of menubar to toggle the display mode">Auto-hide menubar in minimized mode</span>'+
 			'<a class="button toggle" data-bind="css:{on:hidebar},click:toggle.bind($data,hidebar)"><span class="light"></span><span class="text" data-bind="text:btntxt(hidebar)"></span></a><br>'+
 			'<span style="display:inline-block;margin-top:10px">Compact viewmode of analysis library</span>'+
-			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:minlib},click:toggle.bind($data,minlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(minlib)">'+
+			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:minlib},click:toggle.bind($data,minlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(minlib)"></span></a><br>'+
 			'<span style="display:inline-block;margin-top:10px">Show analysis path in library</span>'+
-			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:ladderlib},click:toggle.bind($data,ladderlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(ladderlib)">'+
-			'</span></a></div>'+
+			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:ladderlib},click:toggle.bind($data,ladderlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(ladderlib)"></span></a>'+
+			'</div>'+
 		'<div class="row"><span class="label" title="The analysis sharing links are only useful when Wasabi server is accessible to other computers">Library data sharing links</span>'+
 			'<a class="button toggle" data-bind="css:{on:sharelinks},click:toggle.bind($data,sharelinks)"><span class="light"></span><span class="text" data-bind="text:btntxt(sharelinks)"></span></a></div>');
 		
@@ -4694,9 +4695,9 @@ function dialog(type,options){
 //translate sequnces
 	else if(type=='translate'){
 		var header = '<div style="width:420px;margin-bottom:20px">Display the sequences as <span class="buttongroup">'+
-		'<a class="button left disabled" onclick="translateseq(\'DNA\')" data-bind="css:{pressed:isdna,disabled:!dnasource()}">nucleotides</a>'+
+		'<a class="button left" onclick="translateseq(\'DNA\')" data-bind="css:{pressed:isdna,disabled:!dnasource()}">nucleotides</a>'+
 		'<a class="button middle" onclick="translateseq(\'codons\')" data-bind="css:{pressed:seqtype()==\'codons\',disabled:!dnasource()}">codons</a>'+
-		'<a class="button right pressed" onclick="translateseq(\'protein\')" data-bind="css:{pressed:seqtype()==\'protein\'}">protein</a></span><div>';
+		'<a class="button right" onclick="translateseq(\'protein\')" data-bind="css:{pressed:seqtype()==\'protein\'}">protein</a></span><div>';
 		_paq.push(['trackEvent','tools','translate']); //record event
 		
 		var dnaimport = $('<div data-bind="visible:!dnasource()">To backtranslate a protein sequence, Wasabi needs the cdna sequences used for the protein alignment.<br>'+
