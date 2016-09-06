@@ -30,7 +30,7 @@ if(!String.prototype.trim){ String.prototype.trim = function(){ return this.repl
 if(!String.prototype.capitalize){ String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); }; }
 
 //== Globals ==//
-var currentversion = 160110; //local version (timestamp) of Wasabi
+var currentversion = 160601; //local version (timestamp) of Wasabi
 var sequences = {}; //seq. data {name : [s,e,q]}
 var treesvg = {}; //phylogenetic nodetree
 var leafnodes = {}; //all leafnodes+visible ancestral leafnodes
@@ -750,7 +750,7 @@ var koEnsembl = function(){
 	self.compara = ko.observable(self.comparas[0]);
 	self.genomes = ko.pureComputed(function(){ return self.compara()=='vertebrates'?'':'genomes'; });
 	self.seqtype = ko.observable('cdna');
-	self.isblock.subscribe(function(isblock){ if(isblock){ self.compara(self.comparas[0]); self.seqtype='cdna'; }}); //alignblocks restrictions
+	self.isblock.subscribe(function(isblock){ if(isblock){ self.compara(self.comparas[0]); self.seqtype('cdna'); }}); //alignblocks restrictions
 	self.homtype = ko.observable('all');
 	self.aligned = ko.observable(true);
 	self.target = ko.observable('');
@@ -758,11 +758,50 @@ var koEnsembl = function(){
 	self.idname = ko.observable('');
 	//species sets for alignment blocks: rest.ensembl.org/info/compara/species_sets/EPO?content-type=application/json
 	self.alignblocks = [{type: "EPO", set: [{name: "Primates", species: ["homo_sapiens","macaca_mulatta","pongo_abelii","callithrix_jacchus","gorilla_gorilla","pan_troglodytes","papio_anubis","chlorocebus_sabaeus"]}, 
-	{name: "Mammals", species: ["homo_sapiens","macaca_mulatta","pongo_abelii","equus_caballus","oryctolagus_cuniculus","callithrix_jacchus","bos_taurus","gorilla_gorilla","pan_troglodytes","sus_scrofa","mus_musculus","canis_familiaris","felis_catus","ovis_aries","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}, {name: "Fish", species: ["danio_rerio","gasterosteus_aculeatus","oryzias_latipes","tetraodon_nigroviridis","lepisosteus_oculatus"]}, {name: "Sauropsids", species: ["gallus_gallus","taeniopygia_guttata","anolis_carolinensis","meleagris_gallopavo"]}]}, {type: "EPO (low coverage)", set: [{name: "Mammals", species: ["homo_sapiens","macaca_mulatta","echinops_telfairi","tupaia_belangeri","erinaceus_europaeus","sorex_araneus","microcebus_murinus","pongo_abelii","equus_caballus","ochotona_princeps","cavia_porcellus","choloepus_hoffmanni","procavia_capensis","tursiops_truncatus","tarsius_syrichta","dipodomys_ordii","vicugna_pacos","pteropus_vampyrus","loxodonta_africana","oryctolagus_cuniculus","ailuropoda_melanoleuca","nomascus_leucogenys","callithrix_jacchus","myotis_lucifugus","bos_taurus","gorilla_gorilla","otolemur_garnettii","pan_troglodytes","ictidomys_tridecemlineatus","sus_scrofa","mus_musculus","canis_familiaris","mustela_putorius_furo","felis_catus","ovis_aries","dasypus_novemcinctus","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}, {name: "Fish", species: ["danio_rerio","takifugu_rubripes","gasterosteus_aculeatus","oryzias_latipes","tetraodon_nigroviridis","gadus_morhua","oreochromis_niloticus","xiphophorus_maculatus","astyanax_mexicanus","lepisosteus_oculatus","poecilia_formosa"]}, {name: "Sauropsids", species: ["gallus_gallus","taeniopygia_guttata","anolis_carolinensis","meleagris_gallopavo","pelodiscus_sinensis","anas_platyrhynchos","ficedula_albicollis"]}]}, {type:"PECAN", set: [{name: "Vertebrates", species:["homo_sapiens","macaca_mulatta","ornithorhynchus_anatinus","monodelphis_domestica","pongo_abelii","equus_caballus","taeniopygia_guttata","oryctolagus_cuniculus","anolis_carolinensis","meleagris_gallopavo","callithrix_jacchus","bos_taurus","gorilla_gorilla","pan_troglodytes","sus_scrofa","mus_musculus","canis_familiaris","felis_catus","gallus_gallus","ovis_aries","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}]}];
+	{name: "Mammals", species: ["homo_sapiens","macaca_mulatta","pongo_abelii","equus_caballus","oryctolagus_cuniculus","callithrix_jacchus","bos_taurus","gorilla_gorilla","pan_troglodytes","sus_scrofa","mus_musculus","canis_familiaris","felis_catus","ovis_aries","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}, {name: "Fish", species: ["danio_rerio","gasterosteus_aculeatus","oryzias_latipes","tetraodon_nigroviridis","lepisosteus_oculatus"]}, {name: "Sauropsids", species: ["gallus_gallus","taeniopygia_guttata","anolis_carolinensis","meleagris_gallopavo"]}]}, {type: "EPO_LOW_COVERAGE", set: [{name: "Mammals", species: ["homo_sapiens","macaca_mulatta","echinops_telfairi","tupaia_belangeri","erinaceus_europaeus","sorex_araneus","microcebus_murinus","pongo_abelii","equus_caballus","ochotona_princeps","cavia_porcellus","choloepus_hoffmanni","procavia_capensis","tursiops_truncatus","tarsius_syrichta","dipodomys_ordii","vicugna_pacos","pteropus_vampyrus","loxodonta_africana","oryctolagus_cuniculus","ailuropoda_melanoleuca","nomascus_leucogenys","callithrix_jacchus","myotis_lucifugus","bos_taurus","gorilla_gorilla","otolemur_garnettii","pan_troglodytes","ictidomys_tridecemlineatus","sus_scrofa","mus_musculus","canis_familiaris","mustela_putorius_furo","felis_catus","ovis_aries","dasypus_novemcinctus","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}, {name: "Fish", species: ["danio_rerio","takifugu_rubripes","gasterosteus_aculeatus","oryzias_latipes","tetraodon_nigroviridis","gadus_morhua","oreochromis_niloticus","xiphophorus_maculatus","astyanax_mexicanus","lepisosteus_oculatus","poecilia_formosa"]}, {name: "Sauropsids", species: ["gallus_gallus","taeniopygia_guttata","anolis_carolinensis","meleagris_gallopavo","pelodiscus_sinensis","anas_platyrhynchos","ficedula_albicollis"]}]}, {type:"PECAN", set: [{name: "Vertebrates", species:["homo_sapiens","macaca_mulatta","ornithorhynchus_anatinus","monodelphis_domestica","pongo_abelii","equus_caballus","taeniopygia_guttata","oryctolagus_cuniculus","anolis_carolinensis","meleagris_gallopavo","callithrix_jacchus","bos_taurus","gorilla_gorilla","pan_troglodytes","sus_scrofa","mus_musculus","canis_familiaris","felis_catus","gallus_gallus","ovis_aries","papio_anubis","chlorocebus_sabaeus","rattus_norvegicus"]}]}];
 	self.blocktype = ko.observable(self.alignblocks[0]);
 	self.blockset = ko.observable(self.blocktype().set[0]);
 	self.blockref = ko.observable(self.blockset().species[0]);
 	self.mask = ko.observable('');
+	//temp. options for importing multiblock alignment
+	self.alnblocks = [];
+	self.alnblock = ko.observable({});
+	self.alnblockinfo = ko.pureComputed(function(){
+		var data = self.alnblock(), list = '';
+		if(data.loc) list += '<li>Location: '+data.loc+'</li>';
+		if(data.spname) list += '<li>Reference: '+data.spname+'</li>';
+		if(data.len) list += '<li>Block length: '+numbertosize(data.len,'bp')+'</li>';
+		if(data.spcount) list += '<li>Number of species: '+data.spcount+'</li>';
+		return '<ul>'+list+'</ul>';
+	});
+	self.importblockopts = {};
+	self.importblock = function(ko,e){
+		var iopts = self.importblockopts;
+		var btn = e.currentTarget;
+		if(!importedFiles().length || typeof(self.alnblock().index)=='undefined'){ //datafile missing
+			btn.innerHTML = 'Failed!'; btn.title = 'Datafile missing'; return;
+		}
+		
+		try{ //trim phyloxml datafile
+			var blockdata = '<phyloxml><phylogeny>'+
+			$($.parseXML(importedFiles()[0].data)).find('phylogeny')[self.alnblock().index].innerHTML+'</phylogeny></phyloxml>';
+		} catch(e){ btn.innerHTML = 'Failed!'; btn.title = e; return; }
+		 
+		importedFiles([{name:self.alnblock().loc||'Alignment block', data:blockdata}]);
+		iopts.closewindow = true; iopts.importbtn = $(btn);
+		btn.innerHTML = 'Importing...';
+		parseimport(iopts);
+		self.alnblocks = {}; self.alnblock({});
+		importedFiles([]); iopts = {};
+	};
+	self.saveblocks = function(ko,e){
+		var btn = e.currentTarget;
+		var iopts = self.importblockopts;
+		var savename = iopts.ensinfo&&iopts.ensinfo.id?iopts.ensinfo.id:'Alignment blocks';
+		if(!settingsmodel.userid()||!importedFiles().length){ btn.innerHTML = 'Failed!'; btn.title = 'No account or datafile'; return; }
+		var savedata = {writemode:'new', file:importedFiles()[0].data, name: savename};
+		communicate('save', savedata, {btn:btn});
+	}
 }
 var ensemblmodel = new koEnsembl();
 
@@ -1478,7 +1517,8 @@ function savefile(btn){
 			if(item.checked){
 				$.each(item.name.split(","),function(j,n){ //parse: "model.t1"=>model.t1()
 					if(n=="position"){  //store alignment position
-						settings[n] = {left:parseInt(dom.wrap.css('left')), top:parseInt(dom.seq.css('margin-top'))};
+						settings[n] = {left:parseInt(dom.wrap.css('left'))+'px', top:parseInt(dom.seq.css('margin-top'))+'px',
+							tree: dom.tree.width(), names: dom.names.width()};
 						return true;
 					}
 					else{
@@ -2137,6 +2177,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		return /\.ne?x/.test(a)? -1: /\.xml/.test(a)? /\.ne?x/.test(b)? 1:-1 : /\.ph/.test(a)? /\.ne?x|\.xml/.test(b)? 1:-1 : /\.ne?x|\.xml|\.ph/.test(b)? 1: 0;
 	});
 
+	var abort = false;
 	$.each(filenames,function(i,filename){  //detect fileformat
 		var file = container.get(filename).data, marr = false;
 		
@@ -2146,7 +2187,42 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		}
 		else if(typeof(file)!='string'){ errors.push("Unrecognized data format in "+filename); return true; }
 		else if(/^<.+>$/m.test(file)){ //xml
-			if(~file.indexOf("<phyloxml")){ //phyloxml tree
+			if(~file.indexOf("<phyloxml")){ //phyloxml tree (+seq)
+				var firstbl = file.indexOf("<phylogeny")+10;
+				if(~file.indexOf("<phylogeny",firstbl)){ //multiblock phyloXML
+					if(options.ensinfo && options.ensinfo.type && options.ensinfo.type.split('/')[0]=='alignment' && options.ensinfo.id){
+						var refspecies = options.ensinfo.id.split('/')[0];
+					} else if(options.name){ var refspecies = options.name.split('/')[0] } else { var refspecies = 'homo_sapiens' };
+					var alignblocks = [];
+					$($.parseXML(file)).find('phylogeny').each(function(bli,blitm){ //gather metadata for all blocks
+						var alnbl = {index:bli, spcount:0, spname:'', loc:'', spos:0, len: 0};
+						$(this).find('clade').each(function(){
+							var taxaname = $(this).children('name').text();
+							var taxafullname = $(this).children('taxonomy').children('scientific_name').text();
+							var seqloc = $(this).children('sequence').children('location').text();
+							if(taxafullname && seqloc){
+								alnbl.spcount++;
+								if(~taxaname.indexOf(refspecies)){ //the block's query species
+									alnbl.spname = taxafullname;
+									alnbl.loc = seqloc;
+									try{
+										var blcoord = seqloc.split(':')[1].split('-');
+										alnbl.spos = parseInt(blcoord[0]);
+										alnbl.len = parseInt(blcoord[1])-parseInt(blcoord[0]);
+									}catch(e){}
+								}
+							}
+						});
+						alignblocks.push(alnbl);
+					});
+					ensemblmodel.alnblocks = alignblocks.sort(function(l,r){ return l.spos== r.spos?0 : (l.spos<r.spos?-1 : 1); });
+					ensemblmodel.alnblock(alignblocks[0]);
+					options.mode = ''; options.filenames = '';
+					ensemblmodel.importblockopts = options;
+					dialog('alnblocks'); //show dialog for selecting a block for import 
+					abort = true;
+					return false;
+				}
 				parsetree(file,filename,'phyloxml');
 			}
 			else{  //HSAML
@@ -2211,11 +2287,13 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 			errors.push("Unrecognized data format in "+filename);
 		}
 	});//for each file
+
+	if(abort){ closewindow(options.importbtn||'import'); return; }
 	if(options.mode=='check') return datatype;
 	
 	if(options.container) delete options.container()[0].data; //data extracted to Tsequences/Ttreedata. Clear source.
 	else container([]);
-	
+
 	//parse Ttreedata => seq. from phyloxml & visible leaf count
 	var treeopt = {skiprender:true, sequences:Tsequences, nodeinfo:nodeinfo, idnames:idnames};
 	if(~datatype.indexOf('phyloxml')) treeopt.phyloxml = Ttreedata; else treeopt.newick = Ttreedata;
@@ -2261,7 +2339,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	else { //no errors: use parsed data
 		if(treeoverwrite) notes.push('Tree data found in multiple files. Using '+Ttreesource);
 		if(seqoverwrite) notes.push('Sequence data found in multiple files. Using '+Tseqsource);
-				
+
 		var feedback = function(){
 			if(options.dialog){ //import/translate window
 				$('.errors',options.dialog).text('Import complete.');
@@ -2273,7 +2351,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 			}
 			else if(options.importbtn){ //import/library window
 				options.importbtn.text('Imported');
-				if(options.importbtn.closest('#import').length) setTimeout(function(){ closewindow(options.importbtn) }, 1000);
+				if(options.closewindow || options.importbtn.closest('#import').length) setTimeout(function(){ closewindow(options.importbtn) }, 1000);
 			}
 			if(notes.length){
 				var ul = $('<ul class="wrap">');
@@ -2444,7 +2522,7 @@ function ensemblimport(){
 		setTimeout(function(){ ensbtn.innerHTML = 'Import'; $('#enserror').fadeOut(); },4000);
 		return false;
 	}
-	var urlopt = ~idformat.indexOf('homology')? '?content-type=application/json' : '?content-type=text/x-phyloxml%2Bxml';
+	var urlopt = ~idformat.indexOf('homology')? '?content-type=application/json' : '?content-type=text/x-phyloxml';
 		
 	if(ensemblmodel.isblock()){
 		ensid = ensid.replace(/-/,'..')
@@ -3600,6 +3678,7 @@ function makewindow(title,content,options){ //(string,array(,obj{flipside:'front
 			if(typeof(btn)=='string'){ btndiv.append($('<a class="button grey">'+btn+'</a>').click(closefunc)); }
 			else{ if(btn.attr('class').split(' ').length==1) btn.addClass("grey"); btndiv.append(btn); }
 		});
+		btndiv.click(function(e){ e.stopPropagation() }); //fix "owner is null" error with draggable.preventClickEvent
 		content.push(btndiv);
 	}
 	var titlediv = $('<div class="windowtitle"></div>');
@@ -4248,6 +4327,19 @@ function dialog(type,options){
 		setTimeout(function(){
 			makewindow("Import data",[],{backfade:false,flipside:'back',icn:'import.png',id:winid});
 		},1000);
+	}
+// import multiblock ensembl alignment (selection dialog)
+	else if(type=='alnblocks'){
+		var content = '<div>Imported data contains multiple alignment blocks.<br>Select the one to import.<br><br>'+
+		'<span class="buttongroup" data-bind="foreach:alnblocks">'+
+		'<a class="button" data-bind="css:{pressed:$parent.alnblock()==$data, left:$index()==0, right:$index()==$parent.alnblocks.length-1, middle:$index()>0&&$index()<$parent.alnblocks.length-1}, text:\'Block \'+($index()+1), click:function(){$parent.alnblock($data)}"></a></span>'+
+		'<br><div style="color:#555" data-bind="html:alnblockinfo"></div>'+
+		'<hr><span data-bind="visible:settingsmodel.userid">Unselected blocks will be discarded, '+
+		'<a class="button square small blue" data-bind="click:saveblocks">Save to library</a><br>'+
+		'but the full dataset can be stored for later access.</span></div>';
+		var importbtn = $('<a class="button orange" data-bind="click:importblock">Import selected block</a>');
+		var importwindow = makewindow("Import alignment block", content, {icn:'import.png', id:type, btn:importbtn});
+		ko.applyBindings(ensemblmodel, importwindow[0]);
 	}
 // file export window	
 	else if(type=='export'){
