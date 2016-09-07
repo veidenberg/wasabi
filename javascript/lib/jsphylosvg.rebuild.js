@@ -636,7 +636,7 @@ Smits.PhyloCanvas.PhyloxmlParse = function(data){
 		}
 		var taxonomy = clade.children('taxonomy'); //species name & id
 		if(taxonomy.length){
-			node.species = taxonomy.children('scientific_name').text() || taxonomy.children('common_name').text() || '';
+			node.species = taxonomy.children('common_name').text() || taxonomy.children('scientific_name').text() || '';
 			node.species = node.species.replace(/_/g,' ');
 			node.taxa_id = taxonomy.children('id').text();
 			if(node.taxa_id) node.taxa_id_provider = taxonomy.children('id').attr('provider')||'';

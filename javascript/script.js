@@ -318,7 +318,7 @@ var koSettings = function(){
 	self.coloropt = ko.computed(function(){ return self.colorsets[self.ctype()]; });
 	self.colorscheme = ko.computed({ //also checks for valid colorscheme
 		read:function(){ return self.coloropt()[self.cs[self.ctype()]()]; },
-		write:function(newc){ var ci=self.coloropt().indexOf(newc); if(~ci) self.cs[self.ctype()](ci); }
+		write:function(newc){ var ci=self.coloropt().indexOf(newc.capitalize()); if(~ci) self.cs[self.ctype()](ci); }
 	}); //sequence coloring scheme
 	self.colordesc = {rainbow:'Generates even-spaced vibrant colours.', greyscale:'Generates even-spaced greyscale tones.', custom:'Customize the tones of current colourscheme.', nucleotides:'Default colouring.'};
 	self.colordesc.Taylor = self.colordesc.Clustal = self.colordesc.Zappo = self.colordesc.hydrophobicity ='One of commonly used colour schemes.';

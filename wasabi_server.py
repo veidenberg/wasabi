@@ -34,7 +34,7 @@ from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 
 #define some globals
-version = 160420
+version = 160904
 wasabiexec = os.path.realpath(__file__)
 appdir = os.path.dirname(wasabiexec) #get wasabi homedir
 wasabidir = os.path.realpath(os.path.join(appdir,os.pardir))
@@ -480,8 +480,9 @@ class WasabiServer(BaseHTTPRequestHandler):
             filecontent = f.read()
             f.close()
             if(logfile): filecontent = filecontent.replace(librarypath(params['getanalysis']),'fakePath') #sanitize logfile
-            if 'callback' in params:
-                filecontent = params['callback']+'('+filecontent+')' #jsonp
+            if 'callback' in params: #jsonp
+                if(filecontent[0] != '{'): filecontent = "{filedata:'"+filecontent+"'}" #send filedata in json
+                filecontent = params['callback']+"("+filecontent.replace('\n', '').replace('\r', '')+")"
                 filename = ''
             self.send_response(200)
             self.send_header("Content-Type", ctype)
@@ -1404,4 +1405,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-    
