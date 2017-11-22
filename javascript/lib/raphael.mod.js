@@ -13,7 +13,7 @@
 // │ Licensed under the MIT (http://www.opensource.org/licenses/mit-license.php) license. │ \\
 // └──────────────────────────────────────────────────────────────────────────────────────┘ \\
 
-//Modified by Andres Veidenberg, 2012 (http://wasabiapp.org): added support for percentage units, removed VML module
+// Modified by Andres Veidenberg, 2012 (http://wasabiapp.org): added support for percentage units, removed VML module and few css styles
 
 (function (glob) {
     var version = "0.4.0",
@@ -4352,7 +4352,7 @@ window.Raphael.svg && function (R) {
             throw new Error("SVG container not found.");
         }
         var cnvs = $("svg"),
-            css = "overflow:hidden;",
+            //css = "overflow:hidden;",
             isFloating;
         x = x || 0;
         y = y || 0;
@@ -4369,7 +4369,7 @@ window.Raphael.svg && function (R) {
             R._g.doc.body.appendChild(cnvs);
             isFloating = 1;
         } else {
-            cnvs.style.cssText = css + "position:relative";
+            //cnvs.style.cssText = css + "position:relative";
             if (container.firstChild) {
                 container.insertBefore(cnvs, container.firstChild);
             } else {
@@ -4444,7 +4444,7 @@ window.Raphael.svg && function (R) {
             c.removeChild(c.firstChild);
         }
         this.bottom = this.top = null;
-        (this.desc = $("desc")).appendChild(R._g.doc.createTextNode("Created with Rapha\xebl " + R.version));
+        (this.desc = $("desc")).appendChild(R._g.doc.createTextNode("Created with Rapha\xebl in Wasabi"));
         c.appendChild(this.desc);
         c.appendChild(this.defs = $("defs"));
     };

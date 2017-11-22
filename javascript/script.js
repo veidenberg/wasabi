@@ -67,7 +67,11 @@ var libraryopt = {
 };
 //keep state of server data
 var serverdata = {import: {}, library: ko.mapping.fromJS([],libraryopt), params: ko.mapping.fromJS({},{copy:['params']})};
-serverdata.library.subscribe(function(newdata){ $.each(newdata, function(i,itm){ if(!itm){ console.log('Duplicate library item!'); delete serverdata.library()[i]; }} )});
+serverdata.library.subscribe(function(newdata){
+	var cnt = 0; 
+	$.each(newdata, function(i,itm){ if(!itm){ cnt++; delete serverdata.library()[i]; }});
+	if(cnt){ console.log('Note: '+cnt+' duplicate IDs removed from analysis library.'); }
+});
 
 //KO library helper functions
 function unwrap(v){ if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; } //read from (non)observable
@@ -221,11 +225,12 @@ var koSettings = function(){
 	
 	//useraccount & other settings from server
 	self.useraccounts = ko.observable(false); //also account expiry limit (in days)
-	self.useraccounts.subscribe(function(accounts){ if(!accounts) window.history.pushState('', '', window.location.pathname); });
+	self.urlroot = function(){ return window.location.pathname.substring(0,window.location.pathname.lastIndexOf('/'))+'/'; };
+	self.useraccounts.subscribe(function(accounts){ if(!accounts) window.history.pushState('','',self.urlroot()); });
 	self.userid = ko.observable(''); //current userID
 	self.userid.subscribe(function(newid){
 		if(newid){ //update url, library and account settings
-			window.history.pushState('','','/'+newid);
+			window.history.pushState('','',self.urlroot()+newid);
 			if(self.keepuser()) localStorage['userid'] = newid;
 			communicate('getlibrary',{userid:newid});
 			communicate('checkuser',{userid:newid},{retry:true, parse:'JSON',success:function(resp){
@@ -234,7 +239,7 @@ var koSettings = function(){
 				self.datause(parseInt(resp.datause||0));
 				if(resp.datalimit){ self.datalimit = parseInt(resp.datalimit)*1000000; self.datause.valueHasMutated(); }
 			}});
-		} else window.history.pushState('','','/');
+		} else window.history.pushState('','',self.urlroot());
 	});
 	self.urlid = '';
 	self.urlvars = ''; //startup url
@@ -318,7 +323,7 @@ var koSettings = function(){
 	self.coloropt = ko.computed(function(){ return self.colorsets[self.ctype()]; });
 	self.colorscheme = ko.computed({ //also checks for valid colorscheme
 		read:function(){ return self.coloropt()[self.cs[self.ctype()]()]; },
-		write:function(newc){ var ci=self.coloropt().indexOf(newc.capitalize()); if(~ci) self.cs[self.ctype()](ci); }
+		write:function(newc){ var ci=self.coloropt().indexOf(newc); if(~ci) self.cs[self.ctype()](ci); }
 	}); //sequence coloring scheme
 	self.colordesc = {rainbow:'Generates even-spaced vibrant colours.', greyscale:'Generates even-spaced greyscale tones.', custom:'Customize the tones of current colourscheme.', nucleotides:'Default colouring.'};
 	self.colordesc.Taylor = self.colordesc.Clustal = self.colordesc.Zappo = self.colordesc.hydrophobicity ='One of commonly used colour schemes.';
@@ -598,8 +603,8 @@ var koLibrary = function(){
 				}
 				else str += fname;
 				str += '<span class="note">'+numbertosize(fsize,'byte')+'</span>'+self.shareicon(item,fname);
-				if(~fname.indexOf('.xml')){
-					str += '<a class="button" style="right:60px" title="Load to browser" '+
+				if(~fname.indexOf('.xml')||~fname.indexOf('.fas')){
+					str += '<a class="button" style="right:60px" title="Load to browser (and set as default)" '+
 					'onclick="communicate(\'writemeta\',{id:\''+item.id+'\',key:\'outfile\',value:\''+
 					fname+'\'});getfile({id:\''+item.id+'\',file:\''+fname+'\',btn:this})">Open</a>';
 				}
@@ -638,15 +643,16 @@ var koLibrary = function(){
 	}).extend({throttle:500});
 	
 	self.sortopt = [{t:'Name',v:'name'},{t:'Created',v:'created'},{t:'Opened',v:'imported'},{t:'Updated',v:'saved'}];
-	self.sortkey = ko.observable('created');
+	self.sortkey = ko.observable('name');
 	self.sortasc = ko.observable(true);
 	self.libraryview = ko.computed(function(){ //data items in library window
 		var viewitems = [];
 		var key = self.sortkey(), asc = self.sortasc(), curdir = self.cwd();
 		var itemsarray = serverdata.library();
 		$.each(itemsarray, function(i, item){ //add data to library items
-			if(!item.parentid) item.parentid = ko.observable("");
-			if(!item.info) item.info = ko.observable("");
+			if(!item.parentid) item.parentid = ko.observable('');
+			if(!item.info) item.info = ko.observable('');
+			if(!item.saved) item.saved = ko.observable('Never');
 			if(!item.imported && !item.status) item.imported = ko.observable(item.created()); //!job && !library?
 			if(item.folder){
 				if(!item.opendataset) item.opendataset = ko.observable('');
@@ -1226,9 +1232,17 @@ function msectodate(msec){
 //get variables from url as Object
 function parseurl(url){
 	if(!url) url = window.location.search;
-	if(~url.indexOf('?')){ url = url.split('?')[1]; }else{ return {}; }
-	try{ return JSON.parse('{"'+decodeURI(url).replace(/&/g,'","').replace(/=/g,'":"')+'"}'); }
-	catch(e){ console.log('URL error: '+e); return {}; }
+	var startind = url.indexOf('?');
+	if(~startind){ url = url.substring(startind+1).split('&'); }else{ return {}; }
+	var urlvars = {};
+	$.each(url, function(i,varpair){
+		var splitind = varpair.indexOf('=');
+		if(~splitind){ varpair = [varpair.substring(0,splitind), varpair.substring(splitind+1)]; }
+		else { console.log("urlparse error: skipped "+varpair); return true; }
+		if(~varpair[0].indexOf('url')){ urlvars.url = urlvars.url? urlvars.url.concat({url:varpair[1]}) : [{url:varpair[1]}]; }
+		else { urlvars[varpair[0]] = varpair[1]; }
+	});
+	return urlvars;
 }
 
 //url => <a>
@@ -1540,14 +1554,14 @@ function savefile(btn){
 function sendjob(options){
 	var datalimit = settingsmodel.datalimit, joblimit = settingsmodel.joblimit;
 	if(datalimit){
-		var bplimit = datalimit*100000, liblimit = datalimit*1000000;
+		var bplimit = datalimit*100000;
 		if(model.totalseqlen()>bplimit){
 			dialog('notice','Your sequence data size exceeds the server limit of '+numbertosize(bplimit,'bp')+
 			'.<br>Please reduce the input dataset size and try again.');
 			return false;
 		}
 		else if(parseInt(settingsmodel.dataperc())>98){
-			dialog('notice','Your '+numbertosize(liblimit,'byte')+' server space for your analysis library is full.'+
+			dialog('notice','The '+numbertosize(datalimit,'byte')+' server space for your analysis library is used up.'+
 			'<br>Please delete <a onclick="dialog(\'library\')">some</a> or <a onclick="dialog(\'settings\')">all</a> analyses and try again.');
 			return false;
 		}
@@ -1611,10 +1625,7 @@ function sendjob(options){
 		senddata.dots = true;
 		if(options.keepalign) senddata.keep = true;
 		if(options.usecodons) senddata.codon = true;
-		if(!options.form){ //
-			senddata.name = 'Updated '+senddata.name;
-			options.raxmlrebl = true;
-		}
+		if(!options.form) senddata.name = 'Updated '+senddata.name;
 		senddata.idnames = idnames;
 	}
 	
@@ -1686,13 +1697,23 @@ function getfile(opt){
     var trycount = 0;
     
     var showerror = function(msg){
-	    if(opt.btn) opt.btn.html('<span class="label" title="'+msg+'">Download failed</span>');
+	    if(opt.btn) opt.btn.html('<span class="label" title="'+msg+'">Failed &#x24D8;</span>');
 		else dialog('error','File download error: '+msg);
 	}
     
     var download = function(fileopt){ //GET file > import/successfunc()
       if(!fileopt) fileopt = {};
       var filename = fileopt.file || opt.file || (opt.fileurl? opt.fileurl.substring(opt.fileurl.lastIndexOf('/')+1) : "");
+      if(~filename.indexOf(',')){ //download 2 files > import
+	      var files = filename.split(',');
+	      filename = fileopt.file = opt.file = files[0];
+	      fileopt.success = function(data){
+		      importedFiles.push({name:filename.replace(/^.*[\\\/]/,''), data:data});
+		      fileopt.success = false;
+		      fileopt.file = opt.file = files[1];
+		      download();
+		  }
+      }
       var urlparams = opt.id?"&getanalysis="+opt.id:"";
       $.each(["file","dir","plugin"],function(i,p){ var pval = fileopt[p]||opt[p]; if(pval) urlparams += "&"+p+"="+pval; });
       if(!urlparams && !opt.fileurl){ console.log('Download error: no filename/id given'); return; }
@@ -1854,7 +1875,7 @@ function checkfiles(filearr, options){
 		var list = $('<ul>');
 		$.each(filearr,function(i,file){
 			var filesize = file.size ? '<span class="note">('+numbertosize(file.size,'byte')+')</span> ' : '';
-			list.append('<li class="file">'+file.name+' '+filesize+'<span class="icon"></span></li>');
+			list.append('<li class="file">'+(file.name||'unnamed file')+' '+filesize+'<span class="icon"></span></li>');
 		});
 		var filestitle = filearr.length? '<b>Files to import:</b><br>' : '';
 		infodiv.empty().append(filestitle,list,'<br><span class="errors note"></span><br>',btn);
@@ -1877,33 +1898,33 @@ function checkfiles(filearr, options){
 		return false;
 	};
 	
-	//phase 1: read raw data to container //
+	//phase 1: read raw data to container; filearr=[file_info_objects] //
 	if(!filearr.length) return showerror('There is nothing to import');
-	else if(typeof(filearr[0])=='object') container([]); //first round
+	else if(typeof(filearr[0])=="object") container([]); //first round
   	
 	if(!container().length){
 		errorspan.text('Loading files...');
-		$.each(filearr,function(i,file){
+		$.each(filearr, function(i,file){
 			namelist.push(file.name||'unnamed'+i);
 			$('li.file span.icon:eq('+i+')',infodiv).empty().append(spinimg);
 			var senddata = '';
-			if(file.share){
+			if(file.share){ //importdialog urlbox: wasabi sharing ID => {share:{file:,share:},url:}
 				var vars = file.share;
 				if(vars.host=='http://'+window.location.host){
 					setTimeout(function(){getfile({id:vars.share,file:vars.file,btn:errorspan,noimport:noimport})},500);
 					return false;
-				} else if(vars.file){
+				} else if(vars.file){ //importdialog urlbox: wasabi sharing URL => {share:{file:,share:,host:}}
 					senddata = {fileurl:vars.host+"?type=text&share=true&getanalysis="+vars.share+"&file="+vars.file}
 					importurl = senddata.fileurl;
 					if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = vars.file;
 				} else return showerror('URLs from extenal Wasabi servers need \'file=\' parameter'); 
 			}
-			else if(file.url){
+			else if(file.url){ //importdialog urlbox/urlvar: external url => {url:}
 				senddata = {fileurl:file.url};
 				importurl = file.url;
 				if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = file.url.substring(file.url.lastIndexOf('/')+1);
 			}
-			else if(file.text){
+			else if(file.text){ //importdialog urlbox: plaintext => {text:}
 				container.push({name:file.name, data:file.text});
 				importurl = '';
 				checkprogress();
@@ -1939,7 +1960,7 @@ function checkfiles(filearr, options){
 		return;
 	}
   
-	//phase2: check for type of data in container//
+	//phase2: check for type of data in container; filearr=[filename_strings]//
 	var iconimg = '', rejected = [];
 	if(!options.nocheck){
 	  $.each(container(), function(i, item){
@@ -2002,7 +2023,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	serverdata.import = {};
 	_paq.push(['trackEvent','import',options.source||'unknown']); //record import event
 	
-	var parsename = function(name, skipcheck){
+	var parsename = function(name, option){
 		name = name.trim(name);
 		if(!$.isEmptyObject(idnames)){
 			var mapname = name.toLowerCase();
@@ -2010,7 +2031,8 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		}
 		name = name.replace(/_/g,' ');
 		//if(~name.indexOf('#')) name = 'Node '+name.replace(/#/g,''); //replace error-prone Prank symbols
-		if(!skipcheck){
+		if(option=='nospace') name = name.split(' ')[0];
+		if(option!='skipcheck'){
 			var oldname = name;
 			while(Tsequences[name]){ name += '1'; }
 			if(oldname!=name) notes.push('Duplicate sequence name "'+oldname+'" renamed to "'+name+'".');
@@ -2047,13 +2069,14 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 			nodedata.each(parsenodeseq);
 		}
 		else if(format=='fasta'||format=='fastq'){
-			var nameexp = /^[>@](.+)$/mg, noseq = format=='fasta'?">":"+";
+			var nameexp = /^[>@](.+)$/mg;
+			var noseq = format=='fasta'?">":"+";
 			while(result = nameexp.exec(seqtxt)){ //find seqnames from fasta
 				var seqend = seqtxt.indexOf(noseq, nameexp.lastIndex);
 				if(seqend==-1){ seqend = seqtxt.length; }
 				var tmpseq = seqtxt.substring(nameexp.lastIndex, seqend); //get seq between namelines
 				tmpseq = tmpseq.replace(/\s+/g,''); //remove whitespace from seq
-				name = parsename(result[1]);
+				name = parsename(result[1], 'nospace'); //assume metadata after space
 				Tsequences[name] = tmpseq.split('');
 			}
 		}
@@ -4274,17 +4297,16 @@ function dialog(type,options){
 			$('#'+winid+' .front .windowcontent textarea.url').each(function(i,input){
 				var val = $(input).val();
 				if(!val) return true;
-				if(~val.length==6){
+				if(~val.length==6){ //urlbox: analysis ID
 					urlarr.push({share:{share:val, host:'http://'+window.location.host}});
 				}
-				if(~val.indexOf(window.location.host)){
+				if(~val.indexOf(window.location.host)){ //urlbox: wasabi shareurl
 					var urlind = val.lastIndexOf('?');
 					var urlvars = parseurl(val.substring(urlind+1));
 					urlvars.host = val.substring(0,urlind);
 					urlarr.push({share:urlvars,url:val});
 				}
-				else if(val.substr(0,7)=='http://'){
-					var filename = val.substring(val.lastIndexOf('/')+1);
+				else if(val.substr(0,7)=='http://'){ //urlbox: external url
 					urlarr.push({url:val});
 				}
 				else{ urlarr.push({name:'text input '+(i+1), text:val}); }
@@ -4358,7 +4380,7 @@ function dialog(type,options){
 		
 		var hasancestral = treesvg.data && treesvg.data.root.children.length==3?true:false;
 		var frontcontent = $('<div class="sectiontitle" style="min-width:320px"><img src="images/file.png"><span>File</span></div>'+
-		'<span class="cell">Data<hr><select data-bind="options:categories, optionsText:\'name\', value:category"></select></span>'+
+		'<span class="cell">Data<hr><select data-bind="options:categories, optionsText:\'name\', value:$data.category"></select></span>'+
 		'<span class="cell" data-bind="fadevisible:category().formats.length,with:category">Format<hr><span data-bind="visible:formats.length==1,text:formats[0].name"></span><select data-bind="visible:formats.length>1, options:formats, optionsText:\'name\', value:$parent.format"></select></span>'+
 		'<span class="cell" data-bind="with:format,fadevisible:format().variants.length>1">Variant<hr><select data-bind="options:variants, optionsText:\'name\', value:$parent.variant"></select></span> '+
 		'<span class="svgicon" style="margin-left:-8px" data-bind="fadevisible:variant().desc,attr:{title:variant().desc,onclick:infolink()}">'+svgicon('info')+'</span>'+
@@ -4456,7 +4478,7 @@ function dialog(type,options){
 		'<br><input type="checkbox" name="iterate" data-bind="checked:iterate"><span class="label" title="Iterating re-alignment cycles can improve tree phylogeny. Uncheck this option to keep the input tree intact">'+
 			'iterate alignment for</span> <select name="rounds"><option>2</option><option>3</option><option>4</option><option selected="selected">5</option></select> cycles'+
 		'<br><div class="sectiontitle small"><span class="grey">or</span></div>'+
-		'<input type="checkbox" name="e"><span class="label" title="Keep current alignment intact and just add sequences for ancestral nodes">keep current alignment</span></form>');
+		'<input type="checkbox" name="keep"><span class="label" title="Keep current alignment intact and just add sequences for ancestral nodes">keep current alignment</span></form>');
 		var tunediv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
 		'<input type="checkbox" checked="checked" name="F"><span class="label" title="Force insertions to be always skipped. Enabling this option is generally beneficial but may cause an excess of gaps if the guide tree is incorrect">trust insertions (+F)</span>'+
 		'<br><input type="checkbox" name="nomissing"><span class="label" title="Do not treat gaps as missing data. Use +F for terminal gaps">no missing data</span>'+
@@ -5499,8 +5521,8 @@ function startup(response){
 	try{ var data = JSON.parse(response); }catch(e){ //offline mode
 		console.log('Startup: server response error');
 		model.offline(true);
-		if(urlvars.file){ urlvars.url = true; urlstr='url=http://'+window.location.host+window.location.pathname+urlvars.file; }
-		if(urlvars.url){ checkfiles({url:urlstr.substr(urlstr.indexOf('url=')+4)}); }
+		if(urlvars.file){ urlvars.url = {url:'http://'+window.location.host+window.location.pathname+urlvars.file}; }
+		if(urlvars.url){ checkfiles(urlvars.url); }
 		return;
 	}
 	
@@ -5521,7 +5543,7 @@ function startup(response){
 			if(localid && !data.userid) dialog('warning','User ID '+localid+' was not found on Wasabi server.'+userexpire);
 			settingsmodel.keepuser(false);
 			settingsmodel.userid('');
-			setTimeout(function(){dialog('jobstatus')},5000);
+			//setTimeout(function(){dialog('jobstatus')},5000);
 		}
 	}
 	if(data.cpulimit) settingsmodel.jobtimelimit = data.cpulimit;
@@ -5548,8 +5570,8 @@ function startup(response){
 		getfile({id:urlvars.id||urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', aftersync:true});
 	}
 	else if(urlvars.file){ getfile({file:urlvars.file, aftersync:true}); } //import local file
-	else if(urlvars.url){ //import remote file
-		checkfiles({url:urlstr.substr(urlstr.indexOf('url=')+4)});
+	else if(urlvars.url){ //import remote file(s) => [url,url]
+		checkfiles(urlvars.url);
 	}
 	else if(launchact=='demo data'){ getfile({id:'example', file:'out.xml'}); } //or load demo data (default)
 	else if(settingsmodel.userid() && settingsmodel.keepid() && localStorage.openid && localStorage.openfile){ //or load last data

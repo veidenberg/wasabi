@@ -34,7 +34,7 @@ from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 
 #define some globals
-version = 160904
+version = 170517
 wasabiexec = os.path.realpath(__file__)
 appdir = os.path.dirname(wasabiexec) #get wasabi homedir
 wasabidir = os.path.realpath(os.path.join(appdir,os.pardir))
@@ -210,10 +210,14 @@ def maplibrary(rootid='', remove=False): #index library directories
     else: #full remap
         libroot = datadir
         libdirs = {}
-    for (dirpath,dirs,files) in os.walk(libroot):
+    
+    for (dirpath,dirs,files) in os.walk(libroot, topdown=True):
         path = dirpath.split(os.path.sep)
-        if('meta.txt' not in files): Metadata.create(dirpath, imported=True)
-        libdirs[path[-1]] = {'parent':path[-2],'children':dirs}
+        if('meta.txt' in files): #index an analysis id
+            libdirs[path[-1]] = {'parent':path[-2], 'children':[]}
+            if(path[-2] in libdirs): libdirs[path[-2]]['children'].append(path[-1])
+        else: del dirs[:] #skip subtree indexing
+            
     if useraccounts: #remove reference to analysis root folder
         try: del libdirs[os.path.basename(datadir)]
         except KeyError: pass
@@ -232,10 +236,13 @@ def librarypath(jobid, getroot=False): #library ID => absolute directory path
 
 def librarypaths(libraryid, inclroot=False): #get all subfolder paths
     dirpaths = [librarypath(libraryid)] if inclroot else []
-    if libraryid in libdirs:
+    if libraryid in libdirs: #valid ID
         for childid in libdirs[libraryid]['children']:
-            dirpaths.append(librarypath(childid))
-            dirpaths += librarypaths(childid)
+            if childid in libdirs:
+                dirpaths.append(librarypath(childid))
+                dirpaths += librarypaths(childid)
+            else:
+                logging.error("Invalid analysis ID "+childid+" found in "+librarypath(libraryid))
     return dirpaths
 
 
@@ -253,7 +260,10 @@ def getlibrary(jobid='', uid='', checkowner=False): #search analyses library
 
 def getmeta(dirpath, rootlevel, shareroot=None): #get processed metadata
     md = Metadata(dirpath)
-    if(md['imported']):  #library item
+    if('status' in md and 'imported' not in md): #running job
+        md.update_log()
+    else:  #library item
+        if('imported' not in md): md.update('imported', time.time())
         dirid = md['id'] or os.path.basename(dirpath)
         md['parentid'] = "" if libdirs[dirid]['parent'] == rootlevel else libdirs[dirid]['parent']
         md['children'] = len(libdirs[dirid]['children'])
@@ -264,8 +274,6 @@ def getmeta(dirpath, rootlevel, shareroot=None): #get processed metadata
         elif shareroot is not None: #mark as shared analysis
             if not md['parentid']: md['parentid'] = shareroot
             md['shared'] = "true"
-    elif md['status']: #running job
-        md.update_log()
     return md
 
 
@@ -961,15 +969,17 @@ class Metadata(object):
         try:
             self.metadata = json.load(open(self.md_file))
         except ValueError as why:
-            os.rename(self.md_file,self.md_file+".corrupted")
+            try:
+                os.rename(self.md_file,self.md_file+".corrupted")
+                logging.error("Renamed corrupt metadata file: "+self.md_file)
+            except OSError as e:
+                logging.error("Corrupt metadata file renaming failed: "+e)
             self.metadata = {}
-            logging.error("Renamed corrupt metadata file: "+self.md_file)
     
     def __getitem__(self, key) :
         try: return self.metadata[key]
         except KeyError:
-            mid = self.metadata["id"]+": " if "id" in self.metadata else ""
-            logging.debug(mid+'no "'+key+'" in metadata!')
+            logging.debug(self.jobdir+': no "'+key+'" in metadata!')
             return ""
     
     def __setitem__(self, key, value) :
@@ -1182,12 +1192,12 @@ class Job(object):
         
         if program=='prank': #prepare params for Prank aligner
             self.bin = os.path.join(appdir,'binaries',program,program)
-            self.params = ['-d='+self.qpath('infile'), '-o='+self.qpath('out'), '-prunetree', '-showxml', '-dots', '-showevents']
+            self.params = ['-d='+self.qpath('infile'), '-o='+self.qpath('out'), '-showanc', '-showxml', '-showevents', '-dots']
             
             if self.files['treefile']:
                 self.params.append('-t='+self.qpath('treefile'))
             
-            flags = ['F','e','keep','update','nomissing','uselogs','raxmlrebl']
+            flags = ['F','e','keep','update','nomissing','uselogs','raxmlrebl','codon']
             numvals = ['gaprate','gapext','kappa','rho']
             optset = set()
             
@@ -1301,7 +1311,7 @@ class Job(object):
         
         logfile = open(self.fullpath(self.files["logfile"]), "wb")
         cputime = 'ulimit -t '+str(cpulimit*3600)+'; ' if(cpulimit) else ''  #limit cpu time (default settings: 5 hours)
-        jobcommand = cputime+'nice -n 20 '+self.bin+' '+(' '.join(self.params))
+        jobcommand = cputime+'nice -n 5 '+self.bin+' '+(' '.join(self.params))
         self.popen = subprocess.Popen(jobcommand, stdout=logfile, stderr=logfile, close_fds=True, shell=True)
         logging.debug('Job launched: '+jobcommand)
         
