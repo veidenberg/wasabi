@@ -1,6 +1,6 @@
 /*
 Main javascript file for Wasabi webapp (http://wasabiapp.org)
-Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2015)
+Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of Helsinki (2017)
 Distributed under AGPL license (http://www.gnu.org/licenses/agpl)
 */
 
@@ -30,7 +30,7 @@ if(!String.prototype.trim){ String.prototype.trim = function(){ return this.repl
 if(!String.prototype.capitalize){ String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); }; }
 
 //== Globals ==//
-var currentversion = 160601; //local version (timestamp) of Wasabi
+var currentversion = 171122; //local version (timestamp) of Wasabi
 var sequences = {}; //seq. data {name : [s,e,q]}
 var treesvg = {}; //phylogenetic nodetree
 var leafnodes = {}; //all leafnodes+visible ancestral leafnodes
@@ -2029,9 +2029,9 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 			var mapname = name.toLowerCase();
 			if(idnames[mapname]) name = idnames[mapname];
 		}
-		name = name.replace(/_/g,' ');
 		//if(~name.indexOf('#')) name = 'Node '+name.replace(/#/g,''); //replace error-prone Prank symbols
 		if(option=='nospace') name = name.split(' ')[0];
+		name = name.replace(/_/g,' ');
 		if(option!='skipcheck'){
 			var oldname = name;
 			while(Tsequences[name]){ name += '1'; }
