@@ -4659,11 +4659,11 @@ function dialog(type,options){
 // shortcut for error dialogs
 	else if(type=='error'||type=='warning'||type=='notice'){
 		if(typeof(options)=='string') options = { msg: options };
+		console.trace();
 		if($('div.popupwindow').length>5 || (options.id && $('#'+options.id).length)){
 			console.log('Skipped notice window: '+options.msg); return;
 		}
-		if($('div.popupwindow').length>5) return;
-		makewindow(type.charAt(0).toUpperCase()+type.slice(1), options.msg ,{btn:'OK',icn:'warning',id:options.id});
+		if(options.msg) makewindow(type.charAt(0).toUpperCase()+type.slice(1), options.msg ,{btn:'OK',icn:'warning',id:options.id});
 	}
 // batch filter/collapse for sequence area
 	else if(type=='seqtool'){
