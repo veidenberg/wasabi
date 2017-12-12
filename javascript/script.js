@@ -4,27 +4,6 @@ Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of He
 Distributed under AGPL license (http://www.gnu.org/licenses/agpl)
 */
 
-//Use AnimationFrame in jQuery animations when supported
-if(!requestAnimationFrame) var requestAnimationFrame = document.webkitRequestAnimationFrame || document.mozRequestAnimationFrame;
-if(!cancelAnimationFrame) var cancelAnimationFrame = document.webkitCancelAnimationFrame || document.mozCancelAnimationFrame;
-(function($){
-	var animating;
-
-	function raf(){
-		if(animating){ requestAnimationFrame(raf); jQuery.fx.tick(); }
-	}
-
-	if(requestAnimationFrame){
-		jQuery.fx.timer = function(timer){
-			if(timer() && jQuery.timers.push(timer) && !animating){ animating = true; raf(); }
-		};
-		jQuery.fx.stop = function(){ animating = false; };
-	} else {
-		requestAnimationFrame = function(callback){ return window.setTimeout(callback, 1000/60); };
-		cancelAnimationFrame = function(id){ window.clearTimeout(id); };
-	}
-}(jQuery));
-
 //string class polyfills
 if(!String.prototype.trim){ String.prototype.trim = function(){ return this.replace(/^\s+|\s+$/g, '');}; }
 if(!String.prototype.capitalize){ String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); }; }
@@ -478,7 +457,7 @@ var koLibrary = function(){
 		if(url) urlstr = 'url='+url;
 		else if(item && item.id) urlstr = 'id='+item.id+filestr;
 		if(urlstr) urlstr = '?'+urlstr;
-		return encodeURI('http://'+window.location.host+urlstr);
+		return encodeURI(window.location.href+urlstr);
 	}
 	
 	self.shareicon = function(item,file,title,url){ //generate share link icon
@@ -734,7 +713,7 @@ var koLibrary = function(){
 	self.jobtimer = '';
 	self.runningjobs.subscribe(function(running){
 		if(running){ //set up a status check loop
-			if(!self.jobtimer) self.jobtimer = setInterval(function(){ communicate('getlibrary'); },5000);
+			if(!self.jobtimer && !model.offline()) self.jobtimer = setInterval(function(){ communicate('getlibrary'); },5000);
 		}
 		else{ clearInterval(self.jobtimer); self.jobtimer = ''; }
 	});
@@ -819,7 +798,6 @@ var koModel = function(){
 	self.offline.subscribe(function(offline){
 		if(offline){
 			communicate('checkserver'); //re-check
-			setTimeout(function(){var l=librarymodel,t=l.jobtimer; if(t&&model.offline()){ clearInterval(t); l.jobtimer=''; }},1000);
 		} else { setTimeout(function(){communicate('getlibrary')},700); }
 	});
 	self.helsinki = Boolean(~window.location.hostname.indexOf('helsinki.fi')||~window.location.hostname.indexOf('wasabiapp.org'));
@@ -1257,8 +1235,12 @@ function makeurl(url,title,regextitle){  //with urlregex: (urlmatch, parenth1, p
 /* Server communication functions */
 //send and receive(+save) data from local server fn(str,obj,[str|obj])
 //options: 'saveResponseTo' || {'saveto', $form[0], $btn, error(), success(), after(), restorefunc(), nosync?, 'parse'}
-function communicate(action,senddata,options){
+function communicate(action, senddata, options){
 	if(!action) return false;
+	if(model.offline()){ //no backend server
+		if(action == 'geturl'){ options.fileurl = senddata.fileurl; getfile(options); } //try CORS/jsonp
+		if(action != 'checkserver') return false;
+	}
 	if(!options) options = {};
 	else if(typeof(options)=='string') options = {saveto:options,retry:true}; //retry in case of error
 	if(!senddata) senddata = {};
@@ -1316,24 +1298,21 @@ function communicate(action,senddata,options){
 		}
     };
     
-    var successfunc = errorfunc = '';
+    var successfunc = '';
     if(action=='save' && senddata.file){
 		options.aftersync = true; //postpone successfunc after sync
 		options.parse = 'json';
 		successfunc = function(resp){
-		if(!resp.id) return;
-		librarymodel.openid(resp.id);
-		if(options.btn) options.btn.innerHTML = 'Saved';
+			if(!resp.id) return;
+			librarymodel.openid(resp.id);
+			if(options.btn) options.btn.innerHTML = 'Saved';
 		}
 	}
 	else if(action=='getlibrary'){
 		if(!options.saveto) options.saveto = 'library';
-		if(missinguser){ if(options.success) options.success(); if(options.after) options.after(); return; }
 	}
 	else if(action=='checkserver'){
-		errorfunc = function(msg){
-			if(~msg.indexOf('internet')||~msg.indexOf('communication')) model.offline(true);
-		};
+		if(!options.error) options.error = function(){ model.offline(true); };
 		successfunc = function(resp){
 			resp = parseResp(resp,'json');
 			if(resp) model.offline(false);
@@ -1343,10 +1322,9 @@ function communicate(action,senddata,options){
     
     if(typeof(options.success)=='function') successfunc = options.success;
     var errorfunc = function(errmsg){
-		var errt = typeof(options.error);
-		if(errt!='undefined'){ if(errt=='function') options.error(errmsg); }
+		if(typeof(options.error)=='function') options.error(errmsg);
 		else if(options.btn) options.btn.innerHTML = '<span class="label red" title="'+errmsg+'">Error</span>';
-		else dialog('error',errmsg);
+		//else dialog('error',errmsg);
 		if(options.restore) setTimeout(restorefunc, 3000);
     };
     
@@ -1362,7 +1340,9 @@ function communicate(action,senddata,options){
     var noabort = ['terminate','rmdir','newdir','movedir'];
     var nonabortaction = noabort.indexOf(action)+1;
     if(missinguser && !nonuseraction){
-	  console.log('Cancelled "'+action+'" request: userID missing.'); return false;
+	    if(options.after) options.after();
+		console.log('Cancelled "'+action+'" request: userID missing.');
+		return false;
 	}
     if(libaction){ //action changes library content
       if(librarymodel.getitem(senddata.id).shared && libaction<=5 && (!senddata.writemode||senddata.writemode!='new')){
@@ -1381,14 +1361,14 @@ function communicate(action,senddata,options){
 	  }}}
     }
     
-    var parseResp = function(data, isJSON){ //check and parse server response
+    var parseResp = function(data, isJSON){ //check and parse Wasabi server response
 		var errmsg = '', resp = data;
-		if(isJSON){ try{ resp = JSON.parse(data); }catch(e){ if(isJSON!='guess') errmsg = 'Unexpected response: '+e; } }
+		try{ resp = JSON.parse(data); }catch(e){ if(isJSON) errmsg = 'JSON parse error: '+e; }
 		if(~data.indexOf('Error response')){ errmsg = data.match(/Message:(.+)/im)[1]; }
 		if(errmsg){
-			//if(errorfunc) errorfunc(errmsg);
-			console.log('ParseResp: '+errmsg);
+			console.log(action+' response error: '+errmsg);
 			resp = false;
+			errorfunc(errmsg);
 		}
 		return resp;
     }
@@ -1407,8 +1387,7 @@ function communicate(action,senddata,options){
 			}
 		},
 	success: function(rawdata){
-		parseformat = typeof(options.parse)=='string'? options.parse : 'guess';
-		response = parseResp(rawdata,parseformat);
+		response = parseResp(rawdata, options.parse||'');
 		restdelay = 500;
 		if(options.saveto){ //save data from server
 			if(typeof(options.saveto)=='string'){ //save to 'serverdata' array
@@ -1455,7 +1434,7 @@ function communicate(action,senddata,options){
 		  		if(action!='errorlog') communicate('errorlog',{errorlog:errorstr}); //send error to server
 		  	}
 		  	console.log('Wasabi server responded to "'+action+'" with error: '+msg);
-		  	if(errorfunc) errorfunc(msg);
+		  	errorfunc(msg);
 		  }
 		  else{ //no response
 				if(options.retry){ //allow 2 retries
@@ -1463,11 +1442,9 @@ function communicate(action,senddata,options){
 					setTimeout(retryfunc, 2000); return;
 				} else { //probably a server exception
 					msg = 'Server communication error ("'+action+'" failed).<br>Strange stuff may follow...';
-					//if(status=="error" && !xhrobj.responseText) model.offline(true);
-					//if(errorfunc) errorfunc(msg); //displays message window by default
 					console.log('No server response with '+action);
 					if(action!='checkserver') communicate('checkserver'); //server offline?
-					else if(errorfunc) errorfunc(msg);
+					else errorfunc(msg);
 				}
 			}
 		}
@@ -1696,19 +1673,22 @@ function getfile(opt){
     importedFiles([]);
     var trycount = 0;
     
-    var showerror = function(msg){
-	    if(opt.btn) opt.btn.html('<span class="label" title="'+msg+'">Failed &#x24D8;</span>');
+    var showerror = function(msg, fileopt){
+	    if(fileopt && typeof(fileopt.error)=='function') fileopt.error(msg);
+	    else if(typeof(opt.error)=='function') opt.error(msg);
+	    else if(opt.btn) opt.btn.html('<span class="label" title="'+msg+'">Failed &#x24D8;</span>');
 		else dialog('error','File download error: '+msg);
 	}
     
     var download = function(fileopt){ //GET file > import/successfunc()
       if(!fileopt) fileopt = {};
-      var filename = fileopt.file || opt.file || (opt.fileurl? opt.fileurl.substring(opt.fileurl.lastIndexOf('/')+1) : "");
-      if(~filename.indexOf(',')){ //download 2 files > import
+      var filename = fileopt.file || opt.file || opt.name || "";
+      if(~filename.indexOf(',')){ //download 2 files (from library) > import
 	      var files = filename.split(',');
 	      filename = fileopt.file = opt.file = files[0];
 	      fileopt.success = function(data){
-		      importedFiles.push({name:filename.replace(/^.*[\\\/]/,''), data:data});
+		      if(typeof(opt.success)=='function') opt.success(data);
+		      else importedFiles.push({name:filename.replace(/^.*[\\\/]/,''), data:data});
 		      fileopt.success = false;
 		      fileopt.file = opt.file = files[1];
 		      download();
@@ -1716,19 +1696,20 @@ function getfile(opt){
       }
       var urlparams = opt.id?"&getanalysis="+opt.id:"";
       $.each(["file","dir","plugin"],function(i,p){ var pval = fileopt[p]||opt[p]; if(pval) urlparams += "&"+p+"="+pval; });
-      if(!urlparams && !opt.fileurl){ console.log('Download error: no filename/id given'); return; }
-      if(opt.fileurl && !~opt.fileurl.indexOf(window.location.host)){ console.log('Download error: foreign fileurl'); return; }
+      if(!urlparams && !opt.fileurl){ console.log('Download error: no URL/filename/ID given'); return; }
+      var fileurl = opt.fileurl || settingsmodel.userid()+"?type=text"+urlparams;
 	  setTimeout(function(){ $.ajax({
 	  type: "GET",
-	  url: opt.fileurl || settingsmodel.userid()+"?type=text"+urlparams,
-	  dataType: "text",
+	  url: fileurl,
+	  dataType: opt.datatype || "text",
 	  success: function(data){
 		if(typeof(fileopt.success)=='function'){ fileopt.success(data); }
+		else if(typeof(opt.success)=='function'){ opt.success(data); }
 		else if(!opt.noimport){ //load and parse filedata for import
 			importedFiles.push({name:filename.replace(/^.*[\\\/]/,''), data:data});
 			var srcurl = opt.sharedid? 'id='+opt.sharedid : '';
 			var source = 'import';
-			if(opt.fileurl){ opt.id=''; opt.name=''; srcurl=opt.fileurl; source='local web address'; }
+			if(opt.fileurl){ opt.id=''; srcurl=opt.fileurl; source='web address'; }
 			setTimeout(function(){ parseimport({source:source, id:opt.id, importbtn:opt.btn, name:opt.name, importurl:srcurl}) }, 300);
 			if(settingsmodel.keepid()){
 				localStorage.openid = opt.id;
@@ -1737,14 +1718,21 @@ function getfile(opt){
 		}
 		else if(opt.btn && opt.btn.prop('tagName')=='DIV') opt.btn.html('<pre>'+data+'</pre>'); //display filecontents inside a div
 	  },
-	  error: function(xhrobj,status,msg){ 
-		if(!msg && status!="abort" && trycount==0){ //no response. try again
-			trycount++; setTimeout(function(){download(fileopt)}, 1000);
-			return;
+	  error: function(xhrobj,status,msg){
+		if(status=="abort"){ msg = "Download cancelled"; }
+		if(model.offline() && !~fileurl.indexOf(window.location.host)){ //cross-domain request
+			if(!trycount){ fileopt.datatype = 'jsonp'; } //fallback to jsonp
+			else{ msg = 'The URL source does not support cross-domain download.'; }
 		}
-		if(!msg) msg = 'Server file '+(filename||opt.id)+' inaccessible.';
-		if(typeof(fileopt.error)=='function') fileopt.error(msg);
-		else showerror(msg);
+		if(!msg){ //no reponse
+			if(!trycount){ //try one more time
+				trycount++;
+				setTimeout(function(){download(fileopt)}, 1000);
+				return;
+			}
+			msg = 'Server file '+(filename||opt.id)+' inaccessible.';
+		}
+		showerror(msg, fileopt);
       },
       xhr: function(){
 		var xhr = $.ajaxSettings.xhr();
@@ -1837,7 +1825,7 @@ function getfile(opt){
 	}
 	
 	if(opt.id && !opt.noimport){ getmeta(); } //import analysis (meta>(show library)>importmeta>import)
-	else{ download(opt); } //just download the requested file
+	else{ download(); } //just download the requested file
 }
 
 // Validation of files in import dialog
@@ -1846,159 +1834,135 @@ function checkfiles(filearr, options){
 	else if(!filearr[0]) filearr = [filearr];
 	if(!options) options = {};
 	if(options.onefile && filearr.length>1) filearr = [filearr[0]];
-	var noimport = options.noimport||(options.mode&&options.mode=='noimport');
-	var windowid = options.windowid||'import';
-	var importurl = options.url||false;
-	var fileroute = options.fileroute || (window.File && window.FileReader && window.FileList ? 'localread' : 'upload');
-	var infowindow = $('#'+windowid).length? $('#'+windowid) : makewindow("Importing data",[],{id:windowid,icn:'import.png',btn:false,hidden:options.silent});
+	if(options.mode && options.mode=='noimport') options.noimport = true;
+	if(!options.windowid) options.windowid = 'import';
+	var infowindow = $('#'+options.windowid).length? $('#'+options.windowid) : makewindow("Importing data",[],{id:options.windowid, icn:'import.png', btn:false, hidden:options.silent});
 	var backside = $('.back',infowindow).length;
 	var infodiv = backside? $('.back .windowcontent', infowindow) : $('.windowcontent', infowindow);
 	if(!infodiv.length) return;
-	var tickimg = $('<img class="icn mall" src="images/tick.png">'); //preload status icons
-	var spinimg = $('<img class="icn small" src="images/spinner.gif">');
-	var warnimg = $('<img class="icn small" src="images/warning.png">');
 	
 	var container = options.container || importedFiles;
 	
-	//phase 1: display list of files //
+	// display list of files //
 	var ajaxcalls=[], btn=false;
-	if(!$('ul',infodiv).length){
-		var btn = $('<a class="button" style="padding-left:15px">&#x25C0; Back</a>');
-		btn.click(function(){
-			$.each(ajaxcalls,function(c,call){ if(call.readyState!=4){call.abort()}});
-			ajaxcalls = []; //cancel hanging filetransfers
-			container([]);
-			infowindow.removeClass('finished flipped');
-			setTimeout(function(){ infowindow.addClass('finished') },900);
-		});
-		if(!backside){ btn.text('Cancel'); btn = $('<div class="btndiv" style="text-align:center">').append(btn); }
-		var list = $('<ul>');
-		$.each(filearr,function(i,file){
-			var filesize = file.size ? '<span class="note">('+numbertosize(file.size,'byte')+')</span> ' : '';
-			list.append('<li class="file">'+(file.name||'unnamed file')+' '+filesize+'<span class="icon"></span></li>');
-		});
-		var filestitle = filearr.length? '<b>Files to import:</b><br>' : '';
-		infodiv.empty().append(filestitle,list,'<br><span class="errors note"></span><br>',btn);
-		if(backside && !options.silent) infowindow.addClass('flipped');
-	}
+	var btn = $('<a class="button" style="padding-left:15px">&#x25C0; Back</a>');
+	btn.click(function(){
+		$.each(ajaxcalls,function(c,call){ if(call.readyState!=4){call.abort()}});
+		ajaxcalls = []; //cancel hanging filetransfers
+		container([]);
+		infowindow.removeClass('finished flipped');
+		setTimeout(function(){ infowindow.addClass('finished') },900);
+	});
+	if(!backside){ btn.text('Cancel'); btn = $('<div class="btndiv" style="text-align:center">').append(btn); }
+	var list = $('<ul>');
+	$.each(filearr,function(i,file){
+		file.i = i;
+		if(typeof file=='string'){ if(~val.search(/https?\:\/\//)){ file = {url:file} } else { file = {}; } }
+		if(!file.name){
+			if(file.url){ var furl = file.url.split('?')[0]; file.name = furl.substring(furl.lastIndexOf('/')+1)||'faulty URL!'; }
+			else file.name = file.id? 'Wasabi analysis' : 'File '+(i+1);
+		}
+		var filesize = file.size ? '<span class="note">('+numbertosize(file.size,'byte')+')</span> ' : '';
+		list.append('<li class="file">'+file.name+' '+filesize+'<span class="icon"></span></li>');
+	});
+	var filestitle = filearr.length? '<b>Files to import:</b><br>' : '';
+	infodiv.empty().append(filestitle,list,'<br><span class="errors note"></span><br>',btn);
+	if(backside && !options.silent) infowindow.addClass('flipped');
+
 	var errorspan = $('span.errors',infodiv);
 	
-	var namelist = [];
-	var checkprogress = function(){ //check if all files are imported
-		if(container().length==filearr.length){
-			ajaxcalls = []; checkfiles(namelist, options); //go to phase2
-        } 
-	};
+	var seticon = function(i,icn){ //preload and show icon ('spinner'>'save'>'warning'/'tick')
+		if(icn){
+			var ext = icn=='spinner'?'.gif':'.png';
+			var img = $('<img class="icn mall">').hide().on("load",function(){$(this).fadeIn()}).attr("src","images/"+icn+ext);
+			$('li.file span.icon:eq('+i+')',infodiv).empty().append(img);
+		} else { $('li.file span.icon:eq('+i+')',infodiv).empty(); }
+	}
+	
+	var rejected = ko.observableArray(); //flag rejected files in the list
+	rejected.subscribe(function(i){ seticon(i,'warning'); });
+	
 	var showerror = function(msg){
-		errorspan.html('<span class="red">'+msg+'</span>');
+		errorspan.append('<span class="red">'+msg+'</span><br>');
 		if(options.silent){
 			infowindow.css('display','block');
 			if(backside) infowindow.addClass('flipped');
 		}
-		return false;
 	};
 	
-	//phase 1: read raw data to container; filearr=[file_info_objects] //
-	if(!filearr.length) return showerror('There is nothing to import');
-	else if(typeof(filearr[0])=="object") container([]); //first round
-  	
-	if(!container().length){
-		errorspan.text('Loading files...');
-		$.each(filearr, function(i,file){
-			namelist.push(file.name||'unnamed'+i);
-			$('li.file span.icon:eq('+i+')',infodiv).empty().append(spinimg);
-			var senddata = '';
-			if(file.share){ //importdialog urlbox: wasabi sharing ID => {share:{file:,share:},url:}
-				var vars = file.share;
-				if(vars.host=='http://'+window.location.host){
-					setTimeout(function(){getfile({id:vars.share,file:vars.file,btn:errorspan,noimport:noimport})},500);
-					return false;
-				} else if(vars.file){ //importdialog urlbox: wasabi sharing URL => {share:{file:,share:,host:}}
-					senddata = {fileurl:vars.host+"?type=text&share=true&getanalysis="+vars.share+"&file="+vars.file}
-					importurl = senddata.fileurl;
-					if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = vars.file;
-				} else return showerror('URLs from extenal Wasabi servers need \'file=\' parameter'); 
-			}
-			else if(file.url){ //importdialog urlbox/urlvar: external url => {url:}
-				senddata = {fileurl:file.url};
-				importurl = file.url;
-				if(!file.name) namelist[namelist.indexOf('unnamed'+i)] = file.name = file.url.substring(file.url.lastIndexOf('/')+1);
-			}
-			else if(file.text){ //importdialog urlbox: plaintext => {text:}
-				container.push({name:file.name, data:file.text});
-				importurl = '';
-				checkprogress();
-			}
-			else if(fileroute=='upload'){ senddata = {upfile:file} }
-			else if(fileroute=='localread'){
-				var reader = new FileReader(); 
-				reader.onload = function(evt){
-					container.push({name:file.name, data:evt.target.result});
-					checkprogress();
-				}
-				reader.readAsText(file);
-			}
-  				
-			var successfunc = function(data){
-				$('li.file span.icon:eq('+i+')',infodiv).empty();
-    			container.push({name:file.name, data:data});
-    			checkprogress();
-    		};
-			
-    		if(senddata){
-				if(model.offline()){
-					if(senddata.fileurl && ~senddata.fileurl.indexOf(window.location.host)){ //same-origin import
-						senddata.btn = btn;
-						getfile(senddata);
-					}
-					else{ return showerror('Import of this file needs Wasabi server, which is currently offline'); }
-				} else {
-    				ajaxcalls.push(communicate(fileroute=='upload'?'echofile':'geturl',senddata,{retry:true, error:showerror, success:successfunc}));
-				}
-			}
-		});
-		return;
-	}
-  
-	//phase2: check for type of data in container; filearr=[filename_strings]//
-	var iconimg = '', rejected = [];
-	if(!options.nocheck){
-	  $.each(container(), function(i, item){
-		item.type = parseimport({filenames:[item.name], mode:'check', container:options.container||''});
-		if(item.type) iconimg = tickimg.clone(); //item.type==false/"sequence"/"tree"
-		else{ rejected.push(item.name); iconimg = warnimg.clone(); }
-		$('li.file span.icon:eq('+filearr.indexOf(item.name)+')',infodiv).empty().append(iconimg);
-	  });
-	  container.valueHasMutated();
-	} else { closewindow(infowindow); }
-	
-	if(options.container){ closewindow(infowindow); }
-	
-	//phase3: import (convert to tree + seq) //
-	var importfunc = function(){
-		errorspan.text('Importing data...');
-		var source = options.source||(importurl===false?fileroute:'download');
-		setTimeout(function(){
-			parseimport({source:source,mode:options.mode||windowid,importurl:importurl,dialog:infowindow,container:options.container||''});
-			container.valueHasMutated(); 
-		}, 800);
-	};
-	
-	if(rejected.length){ //cancel import: errors in check phase
-		var s = rejected.length>1? 's' : '';
-		var msg = 'Cannot recognize the "!"-marked file'+s+'.<br><span style="color:#666">Please choose a different file';
-		var acceptlen = container().length-rejected.length;
-		if(acceptlen>0 && !noimport){
-			$.each(rejected,function(r,name){ container.remove(function(item){ return item.name==name }); });
-			var importbtn = $('<a class="button" style="padding-left:15px">Import</a>');
-			importbtn.click(function(){ importbtn.css('color','#999'); importfunc(); });
-			infodiv.append(importbtn);
-			msg += ',<br> or proceed to import the recognized file'+(acceptlen>1?'s':'');
+	//step 1: read files to memory; input: filearr=[{sourceinfo},{sourceinfo}] //
+	container([]);
+	if(!filearr.length) return showerror('Nothing to import');
+	errorspan.html('Loading files...<br>');
+		
+	$.each(filearr, function(i,file){
+		var loadfile = function(data){
+			seticon(i, 'save');
+			container.push({name:file.name, data:data, i:i});
+			if(container().length+rejected().length == filearr.length) peekfiles();
+		};
+		var showerror = function(msg){
+			showerror(msg); rejected.push(i); 
+			if(container().length+rejected().length == filearr.length) peekfiles();
+		};
+		seticon(i,'spinner');
+		
+		if(file.id){ //wasabi sharing ID
+			getfile({id:file.id, file:file.file, i:file.i, error:showerror, noimport:options.noimport});
+			return false; //skip datacheck, straight to import
 		}
-		return showerror(msg+'</span>.');
+		else if(file.url){ //external url
+			options.importurl = file.url;
+			if(model.offline()){ //direct download (maybe cross-domain)
+				getfile({fileurl:file.url, name:file.name, error:showerror, success:loadfile});
+			} else { //through Wasabi server
+				ajaxcalls.push(communicate('geturl', {fileurl:file.url}, {retry:true, error:showerror, success:loadfile}));
+			}
+		}
+		else if(file.text){ //plain text
+			loadfile(file.text);
+		}
+		else{ //local file?
+			var reader = new FileReader(); 
+			reader.onload = function(evt){
+				loadfile(evt.target.result);
+			}
+			try{ reader.readAsText(file); }catch(e){ showerror('Unknown data source type'); }
+		}
+	});
+	  
+	//step 2: peek loaded files: check for datatype //
+	var peekfiles = function(){
+		if(options.nocheck || options.container){ closewindow(infowindow); } //import to (plugin) container
+		else{
+			if(!options.nocheck){
+			  $.each(container(), function(i, item){
+				item.type = parseimport({filenames:[item.name], mode:'check'});
+				if(item.type) seticon(item.i,'tick'); //item.type = "sequence"|"tree"|false
+				else rejected.push(item.i);
+			  });
+			}
+			importfiles();
+		}
 	}
-	else if(noimport) closewindow(infowindow);
-	else importfunc();
+
+	
+	//step 3: import files//
+	var importfiles = function(){
+		if(rejected().length){ //cancel import: errors in check phase
+			var s = rejected().length>1? 's' : '';
+			showerror('Cannot recognize the marked file'+s+'.');
+		}
+		else if(options.noimport) closewindow(infowindow);
+		else if(container().length){
+			errorspan.append('Importing data...<br>');
+			var source = options.source||(options.importurl?'download':'localread');
+			setTimeout(function(){
+				parseimport({source:source, mode:options.mode||options.windowid, importurl:options.importurl, dialog:infowindow});
+				container.valueHasMutated(); 
+			}, 800);
+		}
+	};
 }
 
 //Input file parsing
@@ -2577,7 +2541,7 @@ function ensemblimport(){
 			if(!ensdata.data) return showerror('Received data is in unexpected format.');
 			importedFiles.push({name:ensid+'.json', data:ensdata, type:'seq:json'});
 		} else { //XHTML => genetree & alignments data
-			if(ensdata.indexOf('phyloxml')==-1) return showerror('Received data is in unexpected format.');
+			if(!~ensdata.indexOf('phyloxml')) return showerror('Received data is in unexpected format.');
 			importedFiles.push({name:ensid+'.xml', data:ensdata, type:'seq:phyloxml tree:phyloxml'});
 		}
 		setTimeout(function(){ parseimport({source:'Ensembl',importbtn:$(ensbtn),importurl:urlstring,ensinfo:{type:idformat,id:ensid}}) },600);
@@ -3144,7 +3108,6 @@ function makeImage(target,cleanup,slowfade,starttime){
 				tilediv.css({'left': c*boxw+'px', 'top': r*boxh+'px'});
 				tilediv.append(canvas);
 				dom.seq.append(tilediv);
-				//d = new Date(); console.log((r-endrow)*(c-endcol)+'bp drawn on '+(cstep*boxw)+'*'+(rstep*boxh)+'px canvas: '+(d.getTime()-starttime)+'ms');
 				tilediv.fadeIn(fadespeed);
 				curcanvas++;
 				if(curcanvas==lastcanvas){ //last tile made => cleanup
@@ -3159,7 +3122,6 @@ function makeImage(target,cleanup,slowfade,starttime){
 		}//make canvas	
 	}//for cols
 	}//for rows
-	//d = new Date(); if(importstart) console.log('from importstart: '+(d.getTime()-importstart)+'ms');
 }
 
 //make seqeuence area ruler bar
@@ -3491,21 +3453,15 @@ function tooltip(evt,title,options){
 		var titleadd = $('<span class="right">'+(hiddencount?' <span class="svgicon" style="padding-right:0" title="Hidden leaves">'+svgicon('hide')+'</span>'+hiddencount : '')+'</span>');
 		if(hiddencount && title.length>10) titleadd.css({position:'relative',right:'0'});
 		var infoicon = $('<span class="svgicon">'+svgicon('info')+'</span>').css({cursor:'pointer'}); //info icon
-		infoicon.mouseenter(function(e){ //hover infoicon=>show info
+		infoicon.mouseenter(function(e){ //hover infoicon=>show info (branch node)
 			var nodeinf = [];
 			nodeinf.push('<span class="note">Branch length</span> '+(Math.round(node.len*1000)/1000));
-			/*'Length from root: '+(Math.round(node.lenFromRoot*1000)/1000),'<span class="note">Levels from root: '+node.level];
-			if(hiddencount) nodeinf.unshift('<span class="note">Hidden leaves: '+hiddencount);
-			if(node.children.length) nodeinf.unshift('Visible leaves: '+node.visibleLeafCount);*/
-			var metatags = ['species','taxa_id','gene','gene_id','bootstrap','duplications','speciations','accession','EC','EC_class'];
-			$.each(metatags,function(i,tag){ if(node[tag]) nodeinf.push('<span class="note">'+tag.capitalize().replace('_',' ')+'</span> '+node[tag]); });
-			/*if(node.bootstrap) nodeinf.push('Branch support: '+node.bootstrap);
-			if(node.events){ //gene evol. events (ensembl)
-				if(node.events.duplications) nodeinf.push('Duplications: '+node.events.duplications);
-				if(node.events.speciations) nodeinf.push('Speciations: '+node.events.speciations);
-			}
-			if(node.taxaid) nodeinf.push('Taxonomy ID: '+node.taxaid);
-			if(node.ec) nodeinf.push('EC number: '+node.ec);*/
+			//'Length from root: '+(Math.round(node.lenFromRoot*1000)/1000);
+			//if(hiddencount) nodeinf.unshift('<span class="note">Hidden leaves: '+hiddencount);
+			//if(node.children.length) nodeinf.unshift('Visible leaves: '+node.visibleLeafCount);*/
+			$.each(node.nodeinfo, function(title,val){ //display all metadata
+				nodeinf.push('<span class="note">'+title.capitalize().replace('_',' ')+'</span> '+val); 
+			});
 			tooltip(e,'',{target:infoicon[0],data:nodeinf,arrow:'left',style:'bulletmenu',hoverhide:true});
 		});
 		titleadd.append(infoicon);
@@ -4297,23 +4253,18 @@ function dialog(type,options){
 			$('#'+winid+' .front .windowcontent textarea.url').each(function(i,input){
 				var val = $(input).val();
 				if(!val) return true;
-				if(~val.length==6){ //urlbox: analysis ID
-					urlarr.push({share:{share:val, host:'http://'+window.location.host}});
+				if(val.length==6){ //urlbox: analysis ID
+					urlarr.push({name: 'Wasabi analysis', id:val});
 				}
-				if(~val.indexOf(window.location.host)){ //urlbox: wasabi shareurl
-					var urlind = val.lastIndexOf('?');
-					var urlvars = parseurl(val.substring(urlind+1));
-					urlvars.host = val.substring(0,urlind);
-					urlarr.push({share:urlvars,url:val});
+				else if(~val.search(/https?\:\/\//)){
+					if(~val.indexOf(window.location.host) && ~val.indexOf('id=')){ //wasabi shareurl
+						urlarr.push(parseurl(val));
+					} else { urlarr.push({url:val}); } //external url
 				}
-				else if(val.substr(0,7)=='http://'){ //urlbox: external url
-					urlarr.push({url:val});
-				}
-				else{ urlarr.push({name:'text input '+(i+1), text:val}); }
-				
+				else if(val.length>20){ urlarr.push({name:'Text input', text:val}); } //raw data	
 			});
 			options.source = 'download';
-			checkfiles(urlarr, options); 
+			if(urlarr.length) checkfiles(urlarr, options); 
 		});
 		
 		var ensheader = '<br><br><div class="sectiontitle"><img src="images/ensembl.png"><span>Import from <a href="http://www.ensembl.org" target="_blank">Ensembl</a></span>'+
@@ -4535,7 +4486,7 @@ function dialog(type,options){
 		
 		var offlinenotif = $('<div data-bind="visible:offline" class="sectiontext"><b>Wasabi is offline</b><br>'+
 		'The Wasabi server is currently out of reach, so some functions may not work.<br>'+
-		'<a class="button square orange" onclick="communicate(\'checkserver\',\'\',{btn:this,retry:true,restore:true})" title="Check server connection">Reconnect</a>'+
+		'<a class="button square orange" onclick="communicate(\'checkserver\',\'\',{btn:this,restore:true})" title="Check server connection">Reconnect</a>'+
 		'<a class="button square" href="http://wasabiapp.org/feedback">Contact us</a> <hr></div>');
 		
 		var accountnotif = $('<div data-bind="visible:noaccount" class="sectiontext"><b>Wasabi is working in basic mode</b><br>For '+
@@ -4659,11 +4610,11 @@ function dialog(type,options){
 // shortcut for error dialogs
 	else if(type=='error'||type=='warning'||type=='notice'){
 		if(typeof(options)=='string') options = { msg: options };
-		console.trace();
 		if($('div.popupwindow').length>5 || (options.id && $('#'+options.id).length)){
 			console.log('Skipped notice window: '+options.msg); return;
 		}
 		if(options.msg) makewindow(type.charAt(0).toUpperCase()+type.slice(1), options.msg ,{btn:'OK',icn:'warning',id:options.id});
+		else{ console.log('Empty error dialog'); console.trace(); }
 	}
 // batch filter/collapse for sequence area
 	else if(type=='seqtool'){
@@ -5512,14 +5463,16 @@ function seqmenu(selectid){
 
 //== Launch Wasabi ==//
 //load startup data from server
+var startupdone = false;
 function startup(response){
+	if(startupdone){ return false; } else { startupdone = true; }
 	if(typeof(localStorage.collapse)!='undefined') toggletop(localStorage.collapse);
 	var launchact = settingsmodel.onlaunch();
 	var urlstr = settingsmodel.urlvars, urlvars = parseurl(settingsmodel.urlvars);
 	setTimeout(function(){window.history.pushState('', '', window.location.pathname)}, 1000); //clear urlvars
 	
 	try{ var data = JSON.parse(response); }catch(e){ //offline mode
-		console.log('Startup: server response error');
+		console.log('Startup: Wasabi server offline.');
 		model.offline(true);
 		if(urlvars.file){ urlvars.url = {url:'http://'+window.location.host+window.location.pathname+urlvars.file}; }
 		if(urlvars.url){ checkfiles(urlvars.url); }
@@ -5570,7 +5523,7 @@ function startup(response){
 		getfile({id:urlvars.id||urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', aftersync:true});
 	}
 	else if(urlvars.file){ getfile({file:urlvars.file, aftersync:true}); } //import local file
-	else if(urlvars.url){ //import remote file(s) => [url,url]
+	else if(urlvars.url){ //import remote file(s): urlvars.url = Array [url,url]
 		checkfiles(urlvars.url);
 	}
 	else if(launchact=='demo data'){ getfile({id:'example', file:'out.xml'}); } //or load demo data (default)
@@ -5734,5 +5687,5 @@ $(function(){
 		}, 400); }});
 	}, 700); };
 	if(~window.location.host.indexOf('localhost')||window.location.protocol=='file:') settingsmodel.sharelinks(false);
-	communicate('checkserver',{userid:settingsmodel.urlid||settingsmodel.userid()||''},{success:startup, error:startup, retry:true, after:showbuttons});
+	communicate('checkserver',{userid:settingsmodel.urlid||settingsmodel.userid()||''},{success:startup, error:startup, after:showbuttons});
 });
