@@ -642,6 +642,12 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 	stroke-linecap: round;
   }
   
+  #tree circle:hover{
+	fill: red;
+	stroke: red;
+	z-index: 10
+  }
+  
   
   #left.dragmode #tree line.horizontal{
   	stroke: rgb(170,170,170);

@@ -293,9 +293,7 @@ var koSettings = function(){
 		localStorage.openfile = unwrap(openitem.outfile);
 	}});
 	self.keepzoom = ko.observable(true); //save zoom level
-	//UI settings
-	self.tooltipclasses = ['white','black','beige'];
-	self.tooltipclass = ko.observable('white');
+	//seq display settings
 	self.colorsets = {nuc: ['nucleotides','rainbow','greyscale'], aa: ['Taylor','Clustal','Zappo','hydrophobicity','rainbow','greyscale']};
 	self.cs = {nuc:ko.observable(0), aa:ko.observable(0)};
 	self.ctype = ko.observable('aa'); //model.isdna() will change ctype
@@ -329,6 +327,22 @@ var koSettings = function(){
 		makeImage('','cleanup','slowfade');
 		return true;
 	}).extend({throttle:500});
+	//tree display settings
+	self.leaflabels = ['label'];
+	self.leaflabel = ko.observable('label');
+	self.nodelabels = ['none'];
+	self.nodelabel = ko.observable('none');
+	self.csizes = ['hidden',3,5,7,10];
+	self.csize = ko.observable(3);
+	self.redrawtree = ko.computed(function(){ //redraw tree after settings change
+		var ll = self.leaflabel(); var nl = self.nodelabel(); var cs = self.nodelabel();
+		if(treesvg.refresh) treesvg.refresh({treeonly:true});
+	}).extend({throttle:1000});
+	//UI settings
+	self.backgrounds = ['beige','white','grey'];
+	self.bg = ko.observable('beige');
+	self.tooltipclasses = ['white','black','beige'];
+	self.tooltipclass = ko.observable('white');
 	self.allanim = ko.observable(true);
 	self.allanim.subscribe(function(val){
 		if(val){ $('body').removeClass('notransition'); $.fx.off = false; }
@@ -344,6 +358,9 @@ var koSettings = function(){
 }
 var settingsmodel = new koSettings();
 var toggle = settingsmodel.toggle;
+$.each(Smits.PhyloCanvas.NewickMeta, function(k,v){ //add tree metalabels to settings
+	if(!~settingsmodel.leaflabels.indexOf(v)){ settingsmodel.leaflabels.push(v); settingsmodel.nodelabels.push(v); }
+});
 
 //datamodel to represent analyses library (including running jobs)
 var koLibrary = function(){
@@ -4694,9 +4711,9 @@ function dialog(type,options){
 		'<div class="row">Keep up to <select data-bind="options:[1,5,15,30],value:undolength"></select> <span class="label" title="Actions history enables to undo/redo previous data edits. With large datasets, it may affect the application performance.">actions in undo list</span>'+
 		'<a class="button toggle" data-bind="css:{on:undo},click:toggle.bind($data,undo)"><span class="light"></span><span class="text" data-bind="text:btntxt(undo)"></span></a></div>');
 		
-		var clrwrap = $('<div class="rowwrap" data-bind="visible:model.seqsource()">');
-		var clrrows = $('<div class="row bottombtn">').append(expandtitle({title:'Colour sequences:', desc:'Click for additional settings', target:clrwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
-		clrrows.append(' <select data-bind="options:coloropt,value:colorscheme"></select> colour scheme<br>'+
+		var seqwrap = $('<div class="rowwrap" data-bind="visible:model.seqsource()">');
+		var seqrows = $('<div class="row bottombtn">').append(expandtitle({title:'Colour sequences:', desc:'Click for additional settings', target:seqwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		seqrows.append(' <select data-bind="options:coloropt,value:colorscheme"></select> colour scheme<br>'+
 		//'<span class="note" data-bind="text:colordesc[colorscheme()]"></span><br>'+
 			'<span>Show letters in <select style="margin-top:10px" data-bind="options:fontopt,value:font"></select> with '+
 			'<select data-bind="options:[\'border\',\'no border\'],value:boxborder"></select></span><br>'+
@@ -4704,7 +4721,14 @@ function dialog(type,options){
 			'<select style="margin-top:10px" data-bind="options:maskcolors,value:maskcolor"></select> background</span><br>'+
 			'<span>Ancestral sites in <select data-bind="options:cases,value:ancletter"></select> with '+
 			'<select style="margin-top:10px" data-bind="options:anccolors,value:anccolor"></select> backg.</span>');
-		clrwrap.append(clrrows);
+		seqwrap.append(seqrows);
+		
+		var treewrap = $('<div class="rowwrap" data-bind="visible:model.treesource()">');
+		var treerows = $('<div class="row bottombtn">').append(expandtitle({title:'Tree leaf labels:', desc:'Click for additional settings', target:treewrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		treerows.append(' <select data-bind="options:leaflabels,value:leaflabel"></select><br>'+
+			'<span>Tree node labels <select style="margin-top:10px" data-bind="options:nodelabels,value:nodelabel"></select></span><br>'+
+			'<span>Node spot size <select style="margin-top:10px" data-bind="options:csizes,value:csize"></select></span>');
+		treewrap.append(treerows);
 			
 		var launchwrap = $('<div class="rowwrap">');
 		var launchrows = $('<div class="row bottombtn">').append(expandtitle({title:'When Wasabi launches:', desc:'Click for additional settings. These settings take effect after reloading the web page'+(settingsmodel.local?' and/or restarting Wasabi server':''), target:launchwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
@@ -4745,7 +4769,7 @@ function dialog(type,options){
 		'<div class="row"><span class="label" title="The analysis sharing links are only useful when Wasabi server is accessible to other computers">Library data sharing links</span>'+
 			'<a class="button toggle" data-bind="css:{on:sharelinks},click:toggle.bind($data,sharelinks)"><span class="light"></span><span class="text" data-bind="text:btntxt(sharelinks)"></span></a></div>');
 		
-		content.append(clrwrap, launchwrap, uiwrap);
+		content.append(launchwrap, seqwrap, treewrap, uiwrap);
 		content.append('<div class="row bottombtn" data-bind="visible:userid"><span class="label" data-bind="attr:{title:\'User ID: \'+userid()}">User account</span> <span class="progressline" style="width:150px;margin-left:20px" '+
 			'data-bind="visible:datalimit, attr:{title:dataperc()+\' of \'+numbertosize(datalimit,\'byte\')+\' server space in use\'}">'+
 			'<span class="bar" data-bind="style:{width:dataperc}"></span><span class="title" data-bind="html:\'Library size: \'+numbertosize(datause(),\'byte\')"></span></span>'+
