@@ -92,6 +92,10 @@ body.mintop #namesborderDragline{ top: 70px; }
 body.mintop.hiddentop #namesborderDragline{ top: 30px; }
 body.mintop #right{ top: 60px; bottom: 10px; }
 body.mintop.hiddentop #right{ top: 20px; }
+body.notop #top{ display:none; }
+body.notop #namesborderDragline{ top: 15px; }
+body.notop #left{ top: 25px; }
+body.notop #right{ top: 5px; }
 
 .toptext{
 	position: absolute;
@@ -636,15 +640,40 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 	height: 100%;
   }
   
+  #tree text, #names text{
+	fill: black;
+	font-family: Verdana;
+	text-anchor: start;
+  }
+  
+  #tree text {
+	font-weight: bold;
+	stroke: white;
+  }
+  
   #tree line{
-	stroke: rgb(0,0,0);
+	stroke: black;
 	stroke-width: 1;
 	stroke-linecap: round;
   }
   
-  #tree circle:hover{
-	fill: red;
+  #tree line.dashed{
+	  stroke-dasharray: 1,4;
+  }
+  
+  #tree circle{
+	fill: black;
+	stroke: black;
+  }
+  
+  #tree circle.edge{
+	fill: none;
 	stroke: red;
+  }
+  
+  #tree circle:hover{
+	stroke: red;
+	stroke-width: 3;
 	z-index: 10
   }
   
@@ -652,7 +681,6 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
   #left.dragmode #tree line.horizontal{
   	stroke: rgb(170,170,170);
   	stroke-width: 6;
-  	stroke-dasharray: none;
   	stroke-linecap: butt;
   }
   

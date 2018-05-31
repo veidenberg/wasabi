@@ -1,0 +1,83 @@
+{
+  program: "mafft",
+  name: "MAFFT aligner",
+  desc: "Currently open sequence data will be aligned with <a href=\"https://mafft.cbrc.jp/alignment/software\" target=\"_blank\">MAFFT</a>.",
+  menudesc: "Realign sequences using MAFFT aligner",
+  outfile: "output.fasta",
+  libraryname: "MAFFT realignment",
+  submit: "Start alignment",
+  prefix: "--",
+  options: [
+	{output: "output.fasta", prefix: ">"},
+	{hidden: "", option: "treeout"},
+    {group: "Edit alignment options", desc: "Hover option labels for description", options: [
+    {section: "Alignment algorithm", options: [
+	  {select: "Alignment strategy", selection: [
+		{option: "auto", desc: "Automatically selects an appropriate strategy from L-INS-i, FFT-NS-i and FFT-NS-2, according to data size."},
+		{title: "L-INS-i", option:["localpair", {"maxiterate":1000}], desc: "Probably most accurate. Recommended for <200 sequences."},
+		{title: "G-INS-i", option:["globalpair", {"maxiterate":1000}], desc: "Accuracy-oriented. Suitable for sequences of similar lengths. Recommended for <200 sequences."},
+		{title: "E-INS-i", option:["genafpair", {"ep":0}, {"maxiterate":1000}], desc: "Accuracy-oriented. Suitable for sequences containing large unalignable regions; recommended for <200 sequences."},
+		{title: "FFT-NS-i", option:[{"retree":2}, {"maxiterate":2}], desc: "Speed-oriented method. Iterative refinement method. Two cycles only."},
+		{title: "FFT-NS-i", value: "FFT-NS-i2", option:[{"retree":2}, {"maxiterate":1000}], desc: "Speed-oriented method. Iterative refinement method. Max. 1000 cycles."},
+		{title: "FFT-NS-2", option:[{"retree":2}, {"maxiterate":0}], default:"true", desc: "Fast, progressive method."},
+		{title: "FFT-NS-1", option:[{"retree":1}, {"maxiterate":0}], desc: "Very fast. Recommended for >2000 sequences. Progressive method with a rough guide tree"},
+		{title: "NW-NS-i", option:[{"retree":2}, {"maxiterate":2}, "nofft"], desc: "Speed-oriented. Iterative refinement method without FFT approximation. Two cycles only."},
+		{title: "NW-NS-2", option:[{"retree":2}, {"maxiterate":0}, "nofft"], desc: "Fast, progressive method without the FFT approximation."},
+		{title: "NW-NS-PartTree-1", option:[{"retree":1}, {"maxiterate":0}, "nofft", "parttree"], desc: "Speed-oriented method. Recommended for ~10,000 to ~50,000 sequences. Progressive method with the PartTree algorithm."},
+	  ]},
+	  {group: "Fine-tuning", desc: "Adjust individual algorithm parameters", options: [
+		  {select: "Pairwise distance calculation", selection: [
+		  	{option: "6merpair", desc: "Distance is calculated based on the number of shared 6mers.", default: "on"},
+		  	{option: "globalpair", desc: "All pairwise alignments are computed with the Needleman-Wunsch algorithm. More accurate but slower than 6merpair. Suitable for a set of globally alignable sequences. Applicable to up to ~200 sequences. A combination with maxiterate=1000 is recommended (G-INS-i)."},
+		  	{option: "localpair", desc: "All pairwise alignments are computed with the Smith-Waterman algorithm. More accurate but slower than 6merpair. Suitable for a set of locally alignable sequences. Applicable to up to ~200 sequences. A combination with maxiterate=1000 is recommended (L-INS-i)."},
+		  	{option: "genafpair", desc: "All pairwise alignments are computed with a local algorithm with the generalized affine gap cost (Altschul 1998). More accurate but slower than 6merpair. Suitable when large internal gaps are expected. Applicable to up to ~200 sequences. A combination with maxiterate=1000 is recommended (E-INS-i)."},
+		  	{option: "fastapair", desc: "All pairwise alignments are computed with FASTA (Pearson and Lipman 1988). FASTA is required."}
+		  ]},
+		  {number: "weighti", desc: "Weighting factor for the consistency term calculated from pairwise alignments. Valid when either of globalpair, localpair, genafpair, fastapair or blastpair is selected.", default: 2.7},
+		  {int: "retree", desc: "Guide tree is built number times in the progressive stage. Valid with 6mer distance.", default: 2},
+		  {int: "maxiterate", desc: "Number of cycles that iterative refinement is performed.", default:0},
+		  {select:"FFT approximation", selection:[
+			{option:"fft", desc: "Use FFT approximation in group-to-group alignment.", default:"on"},
+			{option:"fft", desc: "Use FFT approximation in group-to-group alignment.", default:"on"}
+		  ]},
+		  {tickbox: "noscore", desc: "Alignment score is not checked in the iterative refinement stage.", default: "off"},
+		  {tickbox: "memsave", desc: "Use the Myers-Miller (1988) algorithm (turned on by default when the alignment length exceeds 10,000 aa/nt)."},
+		  {select:"Tree building", selection:[
+			{option:"parttree", desc: "Use a fast tree-building method (PartTree, Katoh and Toh 2007) with the 6mer distance. Recommended for a large number (> ~10,000) of sequences input."},
+			{option:"dpparttree", desc: "The PartTree algorithm is used with distances based on DP. Slightly more accurate and slower than parttree. Recommended for a large number (> ~10,000) of sequences input."},
+			{option:"fastaparttree", desc: "The PartTree algorithm is used with distances based on FASTA. Slightly more accurate and slower than parttree. Recommended for a large number (> ~10,000) of sequences are input. FASTA is required."}
+		  ]},
+		  {int: "partsize", desc: "The number of partitions in the PartTree algorithm.", default: 50},
+		  {int: "groupsize", desc: "Do not make alignment larger than number sequences. Valid only with the *parttree options."},
+		  {group: "Scoring parameters", options: [
+			  {line:"Group alignment, gap", options: [
+				{number: "opening", option: "op", desc: "Gap opening penalty at group-to-group alignment.", default: 1.53},
+				{number: "extension", option: "ep", desc: "Offset value, which works like gap extension penalty, for group-to-group alignment.", default: "0.123"}
+			  ]},
+			  {line:"Local alignment, gap", options: [
+				{number: "opening", option: "lop", desc: "Gap opening penalty at local pairwise alignment.", default: -2, enable:"localpair or genafpair"},
+				{number: "offset", option: "lep", desc: "Offset value at local pairwise alignment.", default: 0.1, enable:"localpair or genafpair"},
+				{number: "extension", option: "lexp", desc: "Gap extension penalty at local pairwise alignment.", default: -0.1, enable:"localpair or genafpair"}
+			  ]},
+			  {line:"Alignment skipping, gap", options: [
+				{number: "opening", option: "LOP", desc: "Gap opening penalty to skip the alignment.", default: -6, enable:"genafpair"},
+				{number: "extension", option: "LEXP", desc: "Gap extension penalty to skip the alignment.", default: 0, enable:"genafpair"}
+			  ]},
+			  {line:"Scoring matrix", options: [
+				{select: "", name: "matrix", selection: [
+					{title: "BLOSUM", option: "bl", desc: "BLOSUM matrix (Henikoff and Henikoff 1992) is used."},
+					{title: "JTT", option: "jtt", desc: "JTT PAM number (Jones et al. 1992) matrix is used."},
+					{title: "transmembrane", option: "tm", desc: "Transmembrane PAM number (Jones et al. 1994) matrix is used."},
+					{title: "matrix file", option: "aamatrix", desc: "Use a user-defined AA scoring matrix. Ignored when nucleotide sequences are input."}
+				]},
+				{select: "", option: "bl", selection: ["30","45",{default:"62"},"80"], enable: "matrix is BLOSUM"},
+				{number: "", option: "jtt", required: {"jtt > 0":"Positive number required"}, enable: "matrix is JTT", default: "number"},
+				{number: "", option: "tm", required: {"tm > 0":"Positive number required"}, enable: "matrix is transmembrane", default: "number"},
+				{file: "matrix file", option: "aamatrix", desc: "The format of matrixfile is the same to that of BLAST.", enable: "matrix is 'matrix file'"}
+			  ]},
+			  {tickbox: "Use seq. composition for scoring", option: "fmodel", desc: "Incorporate the AA/nuc composition information into the scoring matrix."}
+		  ]}
+	  ]}
+	]}
+  ]}
+]}

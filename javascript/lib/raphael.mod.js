@@ -3648,33 +3648,8 @@ window.Raphael.svg && function (R) {
             }
         }
     },
-    dasharray = {
-        "": [0],
-        "none": [0],
-        "-": [3, 1],
-        ".": [1, 1],
-        "-.": [3, 1, 1, 1],
-        "-..": [3, 1, 1, 1, 1, 1],
-        ". ": [1, 3],
-        "- ": [4, 3],
-        "--": [8, 3],
-        "- .": [4, 3, 1, 3],
-        "--.": [8, 3, 1, 3],
-        "--..": [8, 3, 1, 3, 1, 3]
-    },
     addDashes = function (o, value, params) {
     	$(o.node, {"stroke-dasharray": value});
-        /*value = dasharray[Str(value).toLowerCase()];
-        if (value) {
-            var width = o.attrs["stroke-width"] || "1",
-                butt = {round: width, square: width, butt: 0}[o.attrs["stroke-linecap"] || params["stroke-linecap"]] || 0,
-                dashes = [],
-                i = value.length;
-            while (i--) {
-                dashes[i] = value[i] * width + ((i % 2) ? 1 : -1) * butt;
-            }
-            $(o.node, {"stroke-dasharray": dashes.join(",")});
-        }*/
     },
     setFillAndStroke = function (o, params) {
         var node = o.node,
@@ -4271,7 +4246,7 @@ window.Raphael.svg && function (R) {
         var el = $("circle");
         svg.canvas && svg.canvas.appendChild(el);
         var res = new Element(el, svg);
-        res.attrs = {cx: x, cy: y, r: r, fill: "none", stroke: "#000"};
+        res.attrs = {cx: x, cy: y, r: r};
         res.type = "circle";
         $(el, res.attrs);
         return res;
@@ -4321,11 +4296,7 @@ window.Raphael.svg && function (R) {
         res.attrs = {
             x: x,
             y: y,
-            "text-anchor": "middle",
-            text: text,
-            font: R._availableAttrs.font,
-            stroke: "none",
-            fill: "#000"
+            text: text
         };
         res.type = "text";
         setFillAndStroke(res, res.attrs);

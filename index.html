@@ -25,7 +25,7 @@
 	<script type="text/javascript" src="javascript/piwik.js"></script>
 	<script type="text/javascript" src="javascript/script.js"></script>
 </head>
-<body data-bind="css:{hiddentop:settingsmodel.hidebar}">
+<body data-bind="css:{hiddentop:settingsmodel.hidebar, notop:!settingsmodel.menubar()}">
   <div id="page" data-bind="style:{minWidth:840+(statusbtn().replace(/<[^>]+>/g,'').length*13)+'px'}">
     <noscript><div><img src="images/warning.png">You have disabled Javascript in your web browser.<br>Please turn on Javascript to use the Wasabi web application.</div></noscript>
     
@@ -38,17 +38,17 @@
 	  
 	  <div id="topcollapse" title="Click to toggle menubar collapse" onclick="toggletop()"><span>&#x25B2;<br>&#x25B2;</span><br>...</div>
 	  
-	  <div class="buttonblock" style="left:5%">
+	  <div class="buttonblock" style="left:5%" data-bind="visible:settingsmodel.data">
 	  	<a id="file" class="button transparent icon" onclick="topmenu(event,this)" title="Click for data menu"><img src="images/file.png"></a>
 	    <div class="toptext">Data</div>
 	  </div>
 	  
-	  <div class="buttonblock" style="left:12%">
+	  <div class="buttonblock" style="left:12%" data-bind="visible:settingsmodel.tools">
 	  	<a id="tools" class="button transparent icon" onclick="topmenu(event,this)" title="Click for tools menu"><img src="images/run.png"></a>
 	    <div class="toptext">Tools</div>
 	  </div>
 	   
-	  <div class="buttonblock" style="left:20%">
+	  <div class="buttonblock" style="left:20%" data-bind="visible:settingsmodel.zoom">
 	    <div id="zoombtns" style="display:inline-block;position:relative;">
 	      <a id="zoomout" onclick="redraw({zoom:'out'});" class="button zoom" title="Zoom out">-</a> <a id="zoomin" onclick="redraw({zoom:'in'});" class="button zoom" title="Zoom in">+</a>
 	      <div class="toptext zoomperc" data-bind="text:zoomperc"></div>
@@ -71,7 +71,7 @@
 	    <div class="toptext">Notifications</div>  
 	  </div>
 	  
-	  <div id="logo" class="buttonblock" onclick="dialog('about')" title="Click for more information">
+	  <div id="logo" class="buttonblock" onclick="dialog('about')" title="Click for more information" data-bind="visible:settingsmodel.logo">
 	  	<img src="images/wasabi_logo.png">
 	    <div class="toptext">About Wasabi</div>  
 	  </div>

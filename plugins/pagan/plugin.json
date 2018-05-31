@@ -20,7 +20,7 @@
       {"file": "current sequence", "option": "seqfile", "required": "Open a sequence data to be aligned"},
 	  {"bool": "Compute guidetree", "desc": "Create a new phylogenetic tree to guide the sequence alignment process (uncheck to use the current tree)", "name": "compute_tree", "default": {"no tree": "checked"}, "fixed": "no tree"},
 	  {"file": "current tree", "enable": "tree and no compute_tree", "fileformat": "extended newick", "option": "treefile"},
-      {"select": "Align as", "enable": "sequence is DNA", "desc": "Translate and align cDNA with protein or codon model", "options": [
+      {"select": "Align as", "enable": "sequence is DNA", "desc": "Translate and align cDNA with protein or codon model", "selection": [
 	    {"title": "untranslated", "default":true}, {"title": "codons", "option": "codons"}, {"title": "protein", "option": "translate"}
 	  ]},
 	  {"section": "Alignment model parameters", "options": [
@@ -63,13 +63,13 @@
       {"file": "current tree", "enable": "tree", "fileformat": "extended newick", "option": "ref-treefile"},
       {"enable": "sequence is DNA", "bool": "Translate to protein", "desc": "Translate reference sequence to protein", "option": "translate"},
       {"line": "", "options":[ 
-	    {"select": "Use", "options": [
+	    {"select": "Use", "selection": [
 		  {"title": "fast", "option": "fast-placement", "default": true},
 		  {"title": "very fast", "option": "very-fast-placement"}
 		]}, "placement"
 	  ]},
       {"line": "", "options":[
-	    {"select": "Consider", "name":"test", "options": [
+	    {"select": "Consider", "name":"test", "selection": [
 			{"title": "terminal", "option": "terminal-nodes", "default": true},
 			{"title": "internal", "option": "internal-nodes"},
 			{"title": "all", "option": "all-nodes"}
@@ -109,7 +109,7 @@
       ]}
     ]},
     {"section": "", "options": [
-		{"select": "Correct for", "options": [
+		{"select": "Correct for", "selection": [
 			{"title": "no", "default": true}, {"option": "454"}, {"option": "homopolymer"}, {"option": "pacbio"}
 		], "line":true},
     	"sequencing errors"
