@@ -615,20 +615,13 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 #tree>svg{
 	background-color: white;
 	position: absolute;
-}
- 
- #tree circle, #names text{
-	cursor: pointer;
- }
- #left.dragmode #tree circle, #left.dragmode #names text{
-	cursor: default;
- } 
+} 
  
  #names svg{
 	-webkit-transition: font-size 0.5s;
 	transition: font-size 0.5s;
  }
- #treewrap.minimal #tree circle, #treewrap.minimal #tree line[stroke-dasharray], #treewrap.minimal #names svg{
+ #treewrap.minimal #tree circle, #treewrap.minimal #tree line.dashed{
 	display: none;
  }
  
@@ -640,15 +633,17 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 	height: 100%;
   }
   
+  #tree circle, #names text{
+	cursor: pointer;
+ }
+ #left.dragmode #tree circle, #left.dragmode #names text{
+	cursor: default;
+ }
+  
   #tree text, #names text{
 	fill: black;
 	font-family: Verdana;
 	text-anchor: start;
-  }
-  
-  #tree text {
-	font-weight: bold;
-	stroke: white;
   }
   
   #tree line{
@@ -658,7 +653,7 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
   }
   
   #tree line.dashed{
-	  stroke-dasharray: 1,4;
+	stroke-dasharray: 1,4;
   }
   
   #tree circle{
@@ -673,8 +668,13 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
   
   #tree circle:hover{
 	stroke: red;
+	fill: red;
 	stroke-width: 3;
-	z-index: 10
+	r: 5;
+  }
+  
+  #tree circle.highlight, #names text.highlight{
+	  fill: red;
   }
   
   
@@ -693,6 +693,8 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
   	display: none;
   	top: 40%;
   	width: 80%;
+  	min-width: 70px;
+  	margin: 15px;
   	text-align: center;
   	font-size: 36px;
     color: #EEE9E3;

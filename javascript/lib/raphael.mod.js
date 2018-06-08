@@ -3416,7 +3416,7 @@ window.Raphael.svg && function (R) {
             }
         } else {
             el = R._g.doc.createElementNS("http://www.w3.org/2000/svg", el);
-            el.style && (el.style.webkitTapHighlightColor = "rgba(0,0,0,0)");
+            //el.style && (el.style.webkitTapHighlightColor = "rgba(0,0,0,0)");
         }
         return el;
     },
@@ -3653,10 +3653,12 @@ window.Raphael.svg && function (R) {
     },
     setFillAndStroke = function (o, params) {
         var node = o.node,
-            attrs = o.attrs,
-            vis = node.style.visibility;
-        node.style.visibility = "hidden";
-        for (var att in params) {
+            attrs = o.attrs;
+        //var vis = node.style.visibility;
+        //node.style.visibility = "hidden";
+        if(attrs.text) tuneText(o, params);
+        else{
+          for (var att in params) {
             if (params[has](att)) {
                 if (!R._availableAttrs[has](att)) {
                     continue;
@@ -3895,26 +3897,26 @@ window.Raphael.svg && function (R) {
                         break;
                 }
             }
+          }
         }
-
-        tuneText(o, params);
-        node.style.visibility = vis;
+        //node.style.visibility = vis;
     },
     leading = 1.2,
-    tuneText = function (el, params) {
+    tuneText = function (el, params){ //add text node
         if (el.type != "text" || !(params[has]("text") || params[has]("font") || params[has]("font-size") || params[has]("x") || params[has]("y"))) {
             return;
         }
         var a = el.attrs,
             node = el.node,
-            fontSize = node.firstChild ? toInt(R._g.doc.defaultView.getComputedStyle(node.firstChild, E).getPropertyValue("font-size"), 10) : 10;
+            //fontSize = node.firstChild ? toInt(R._g.doc.defaultView.getComputedStyle(node.firstChild, E).getPropertyValue("font-size"), 10) : 10;
+            fontSize = 10;
 
         if (params[has]("text")) {
             a.text = params.text;
             while (node.firstChild) {
                 node.removeChild(node.firstChild);
             }
-            var texts = Str(params.text).split("\n"),
+            /*var texts = Str(params.text).split("\n"),
                 tspans = [],
                 tspan;
             for (var i = 0, ii = texts.length; i < ii; i++) {
@@ -3923,9 +3925,10 @@ window.Raphael.svg && function (R) {
                 tspan.appendChild(R._g.doc.createTextNode(texts[i]));
                 node.appendChild(tspan);
                 tspans[i] = tspan;
-            }
+            }*/
+            node.appendChild(R._g.doc.createTextNode(a.text)); //hack: no multiline texts
         } else {
-            tspans = node.getElementsByTagName("tspan");
+            var tspans = node.getElementsByTagName("tspan");
             for (i = 0, ii = tspans.length; i < ii; i++) if (i) {
                 $(tspans[i], {dy: fontSize * leading, x: a.x});
             } else {
@@ -3934,9 +3937,9 @@ window.Raphael.svg && function (R) {
         }
         $(node, {x: a.x, y: a.y});
         el._.dirty = 1;
-        var bb = el._getBBox(),
-            dif = a.y - (bb.y + bb.height / 2);
-        dif && R.is(dif, "finite") && $(tspans[0], {dy: dif});
+        //var bb = el._getBBox(),
+        //    dif = a.y - (bb.y + bb.height / 2);
+        //dif && R.is(dif, "finite") && $(tspans[0], {dy: dif});
     },
     Element = function (node, svg) {
         var X = 0,
@@ -4091,19 +4094,19 @@ window.Raphael.svg && function (R) {
         this.removed = true;
     };
     elproto._getBBox = function () {
-        if (this.node.style.display == "none") {
+        /*if (this.node.style.display == "none") {
             this.show();
             var hide = true;
-        }
+        }*/
         var bbox = {};
-        try {
-            bbox = this.node.getBBox();
+        /*try {
+            //bbox = this.node.getBBox();
         } catch(e) {
             // Firefox 3.0.x plays badly here
         } finally {
-            bbox = bbox || {};
+            //bbox = bbox || {};
         }
-        hide && this.hide();
+        hide && this.hide();*/
         return bbox;
     };
     

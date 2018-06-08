@@ -256,6 +256,7 @@ var koSettings = function(){
 	self.skipversion = ko.observable(0); //skip a version update
 	//autosave settings
 	self.undo = ko.observable(true); //save actions to history list
+	self.undo.subscribe(function(enable){ if(!enable) model.clearundo(); });
 	self.undolength = ko.observable(5); //max lenght of actions history
 	self.storeundo = false; //autosave on undo
 	self.autosave = ko.observable(false); //autosave dataset to library
@@ -330,14 +331,30 @@ var koSettings = function(){
 	//tree display settings
 	self.leaflabels = ['label'];
 	self.leaflabel = ko.observable('label');
+	self.leaflabel.subscribe(function(newlabel){ //change tree leaflabel text
+		if(treesvg.data && $('#treewrap').css('display')!='none'){
+			$('#tree text').each(function(i,el){
+				var tnode = treesvg.data.root.getById(parseInt(el.getAttribute('nodeid')));
+				el.textContent = tnode.nodeinfo[newlabel] || ' ';
+			});
+		}
+	});
 	self.nodelabels = ['none','label','branchlength'];
 	self.nodelabel = ko.observable('none');
+	self.nodelabel.subscribe(function(newlabel){ //change tree nodelabel text
+		if(treesvg.data && $('#treewrap').css('display')!='none'){
+			$('#tree text').each(function(i,el){
+				var tnode = treesvg.data.root.getById(parseInt(el.getAttribute('nodeid')));
+				el.textContent = tnode.nodeinfo[newlabel] || ' ';
+			});
+		}
+	});
 	self.csizes = ['hidden',3,5,7,10];
 	self.csize = ko.observable(3);
-	self.redrawtree = ko.computed(function(){ //redraw tree after settings change
-		var ll = self.leaflabel(); var nl = self.nodelabel(); var cs = self.nodelabel();
-		if(treesvg.refresh) treesvg.refresh({treeonly:true});
-	}).extend({throttle:1000});
+	self.csize.subscribe(function(newsize){
+		if(newsize=='hidden') $('#tree circle').css('display','none');
+		else $('#tree circle').css({r:newsize, display:''});
+	});
 	//UI settings
 	self.backgrounds = ['beige','white','grey'];
 	self.bg = ko.observable('beige');
@@ -361,10 +378,10 @@ var koSettings = function(){
 	self.tools = ko.observable(true);
 	self.zoom = ko.observable(true);
 	self.logo = ko.observable(true);
-	//toggle seq/tree area
-	self.hidearea = function(hideseq){
+	//resize seq/tree area
+	self.resizew = function(hide){
 		var leftedge = dom.left.position().left;
-		var rightedge = hideseq?dom.page.width()-30:leftedge+12;
+		var rightedge = hide=='seq'? dom.page.width()-30 : hide=='tree'? leftedge+12 : parseInt(dom.page.width()/3);
 		var namesw = Math.min(Math.max(50,parseInt(rightedge/3)),200); //tree names width 50-200px
 		dom.left.css('width', rightedge-leftedge);
 		dom.right.css('left', rightedge);
@@ -373,10 +390,15 @@ var koSettings = function(){
 		dom.tree.css('right', namesw);
 		dom.names.css('width', namesw);
 	}
-	self.tree = ko.observable(true); // =>model.treesource
-	self.tree.subscribe(function(enable){ if(!enable) self.hidearea(); }); //hide tree
-	self.seq = ko.observable(true); // =>model.seqsource
-	self.seq.subscribe(function(enable){ if(!enable) self.hidearea('seq'); }); //hide msa
+	self.seq = ko.observable(false); // =>model.seqsource
+	self.tree = ko.observable(false); // =>model.treesource
+	self.togglearea = ko.computed(function(){
+		var seq = self.seq(); var tree = self.tree();
+		if(!dom.left) return; //init run
+		if(seq && !tree){ self.resizew('tree'); } //hide tree
+		else if(tree && !seq){ self.resizew('seq'); } //hide seq
+		else{ self.resizew(); } //show both
+	}).extend({throttle:500});
 }
 var settingsmodel = new koSettings();
 var toggle = settingsmodel.toggle;
@@ -493,7 +515,7 @@ var koLibrary = function(){
 		if(url) urlstr = 'url='+url;
 		else if(item && item.id) urlstr = 'id='+item.id+filestr;
 		if(urlstr) urlstr = '?'+urlstr;
-		return encodeURI(window.location.href+urlstr);
+		return encodeURI('http://'+window.location.host+urlstr);
 	}
 	
 	self.shareicon = function(item,file,title,url){ //generate share link icon
@@ -844,7 +866,7 @@ var koModel = function(){
 	self.zoomlevel = ko.observable(5); //index of the zlevel array
 	self.zoomlevel.subscribe(function(val){
 		if(settingsmodel.keepzoom()) localStorage.zoomlevel = JSON.stringify(val); //store new zoom level
-		if(settingsmodel.nodelabel()!='none' && treesvg.refresh) treesvg.refresh({treeonly:true}); //redraw tree labels
+		if(settingsmodel.nodelabel()!='none') $('#tree text').css('font-size', parseInt(self.boxh()*0.8)); //resize tree labels
 	});
 	self.zoomperc = ko.pureComputed(function(){
 		var l = self.zoomlevel(), lc = self.zlevels.length-1;
@@ -972,6 +994,7 @@ var koModel = function(){
 	self.clearundo = function(){
 		self.undostack.removeAll();
 		self.refreshundo();
+		self.treebackup = '';
 	};
 	self.activeundo = {name:ko.observableArray(), undone:ko.observable(''), data:ko.observable('')};
 	self.refreshundo = function(data,redo){
@@ -1192,7 +1215,7 @@ var koTools = function(){
 	};
 	self.processLeafs = function(func,affected){ //hide/remove all marked/unmarked leafs
 		if(typeof(func)!='string'){
-			var markedcount = $('#names tspan[fill=orange]').length;
+			var markedcount = $('#names text[fill=orange]').length;
 			var target = self.leafsel()=='unmarked'? false : true;
 			var affected = target? markedcount : model.visiblerows().length-markedcount;
 			var func = self.leafaction()=='prune'? 'remove':'hideToggle';
@@ -1207,7 +1230,9 @@ var koTools = function(){
 		$.each(leafnodes,function(n,node){ if(node.active==target) node[func]('hide','nocount'); });
 		treesvg.refresh();
 		var actdesc = func=='remove'? 'removed' : 'hidden', actname = func=='remove'? 'Remove' : 'Hide';
-		model.addundo({name:actname+' leafs',type:'tree',data:treesvg.data.root.removeAnc().write('undo'),info:affected+' leafs were '+actdesc+'.'});
+		if(settingsmodel.undo()){ setTimeout(function(){
+			model.addundo({name:actname+' leafs',type:'tree',data:treesvg.data.root.removeAnc().write('undo'),info:affected+' leafs were '+actdesc+'.'});
+		},100)}
 		closewindow('treetool');
 	};
 };
@@ -1476,7 +1501,7 @@ function communicate(action, senddata, options){
 		  		if(action!='errorlog') communicate('errorlog',{errorlog:errorstr}); //send error to server
 		  	}
 		  	console.log('Wasabi server responded to "'+action+'" with error: '+msg);
-		  	errorfunc(msg);
+		  	errorfunc(toString(msg));
 		  }
 		  else{ //no response
 				if(options.retry){ //allow 2 retries
@@ -2406,7 +2431,9 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		treesvg = treeobj.data? treeobj : {}; treeobj = '';
 		leafnodes = {};
 		model.clearundo();
-		model.treebackup = treesvg.data? treesvg.data.root.removeAnc().write('undo') : '';
+		if(treesvg.data && settingsmodel.undo()){
+			setTimeout(function(){ model.treebackup = treesvg.data.root.removeAnc().write('undo'); }, 100);
+		}
 		model.treesource(treesvg.data? Ttreesource : '');
 		model.treealtered(false);
 		model.noanc(false);
@@ -2907,7 +2934,7 @@ function redraw(options){
 			svg.mousedown(function(e){ //handle nodedrag on tree
 				e.preventDefault();
 				var draggedtag = e.target.tagName;
-				if(draggedtag=='circle' || draggedtag=='tspan'){
+				if(draggedtag=='circle' || draggedtag=='text'){
 					var nodeid = parseInt(e.target.getAttribute('nodeid'));
 					var draggednode = treesvg.data.root.getById(nodeid);
 					if(!draggednode) return;
@@ -3224,7 +3251,7 @@ function movenode(drag,movednode,movedtype){
 		if(movedtype=='circle'){ //add drag helper (node preview)
 			var helper = $(movednode.makeCanvas()).attr('id','draggedtree');
 		}
-		else if(movedtype=='tspan'){
+		else if(movedtype=='text'){
 			var helper = $('<div id="draggedlabel">'+movednode.name+'</div>');
 		}
 		$("body").append(helper);
@@ -3255,7 +3282,7 @@ function movenode(drag,movednode,movedtype){
 		
 	$("body").one('mouseup',function(evnt){ //mouse release
 		var targettype = evnt.target.tagName;
-		if(targettype=='circle'||targettype=='tspan'||(targettype=='line'&&$(evnt.target).attr('class')=='horizontal')){
+		if(targettype=='circle'||targettype=='text'||(targettype=='line'&&$(evnt.target).attr('class')=='horizontal')){
 			var targetid = parseInt(evnt.target.getAttribute('nodeid'));
 			var targetnode = treesvg.data.root.getById(targetid);
 			if(movednode && targetnode){ movednode.move(targetnode); refresh(); }
@@ -4970,7 +4997,7 @@ function dialog(type,options){
 		var dironly = opt.item.folder || (!opt.file && !unwrap(opt.item.outfile));
 		settingsmodel.sharedir(dironly);
 		_paq.push(['trackEvent','share',opt.id]); //record sharing event
-		
+
 		if(opt.library){
 			var desc = '<br>to launch Wasabi with your analysis library';
 			url = librarymodel.sharelink()+'/'+settingsmodel.userid();
@@ -4995,6 +5022,7 @@ function dialog(type,options){
 				var shareopt = '<div class="insidediv">'+dirtoggle+selectdataset+'</div><br>';
 			}
 		}
+		
 		var content = ['<div>Paste this URL to a web browser address bar'+desc+'.</div><br>'];
 		var input = $('<input class="transparent" style="width:350px;padding:0" onclick="this.select()" data-bind="value:sharedir()?\''+dirurl+'\':\''+url+'\'"></input>');
 		setTimeout(function(){input[0].select()},500);
