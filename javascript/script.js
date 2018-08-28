@@ -275,7 +275,7 @@ var koSettings = function(){
 		} else self.storeundo = false;
 	});
 	self.launchopt = ['blank page','import dialog','demo data','last Library item','last session'];
-	self.onlaunch = ko.observable(self.launchopt[2]);
+	self.onlaunch = ko.observable('');
 	self.onlaunch.subscribe(function(val){
 		if(~val.indexOf('last')){
 			if(val=='last session'){
@@ -394,11 +394,11 @@ var koSettings = function(){
 	self.tree = ko.observable(false); // =>model.treesource
 	self.togglearea = ko.computed(function(){
 		var seq = self.seq(); var tree = self.tree();
-		if(!dom.left) return; //init run
+		if(!dom.left) return; //init (no DOM yet)
 		if(seq && !tree){ self.resizew('tree'); } //hide tree
 		else if(tree && !seq){ self.resizew('seq'); } //hide seq
 		else{ self.resizew(); } //show both
-	}).extend({throttle:500});
+	});
 }
 var settingsmodel = new koSettings();
 var toggle = settingsmodel.toggle;
@@ -1238,6 +1238,7 @@ var koTools = function(){
 };
 var toolsmodel = new koTools();
 
+
 //== Utility functions ==//
 //prettyformat a number
 function numbertosize(number,type,min){ //prettyformat a number
@@ -1262,6 +1263,7 @@ function numbertosize(number,type,min){ //prettyformat a number
     }
 };
 
+
 //convert datestamps to  dates
 function msectodate(msec){
 	msec = unwrap(msec);
@@ -1270,6 +1272,7 @@ function msectodate(msec){
 	return ('0'+t.getDate()).slice(-2)+'.'+('0'+(t.getMonth()+1)).slice(-2)+'.'+t.getFullYear().toString().substr(2)+
 	' at '+t.getHours()+':'+('0'+t.getMinutes()).slice(-2);
 }
+
 
 //parse URL parameters as Object{"param"="val"|["val1","val2"]}
 function parseurl(url){
@@ -1290,6 +1293,7 @@ function parseurl(url){
 	return urlvars;
 }
 
+
 //url => <a>
 var urlregex = /(https?\:\/\/|www\.)+(\w+\.)+[^\s\\]+/ig;
 function makeurl(url,title,regextitle){  //with urlregex: (urlmatch, parenth1, parenth2)
@@ -1298,6 +1302,7 @@ function makeurl(url,title,regextitle){  //with urlregex: (urlmatch, parenth1, p
 	title = regextitle||!title?url:title; 
 	return '<a href="'+url+'" target="_blank">'+title+'</a>';
 }
+
 
 /* Server communication functions */
 //send and receive(+save) data from local server fn(str,obj,[str|obj])
@@ -1820,16 +1825,14 @@ function getfile(opt){
 	}; //func download
     
     var showdir = function(refreshed){
-	    if(model.noaccount()){ //cannot use library
-		    var hasdataset = opt.dir||opt.opendataset? 'A shared dataset was opened.' : 'The sharing URL has no default dataset to open.';
-		    dialog('notice', {id:'sharenote', msg:hasdataset+'<br>In order to import the associated analysis history, please create a Wasabi account.'});
-		    return;
-		}
-	    if(librarymodel.getitem(opt.id)){ //folder in library?
-		    if(opt.folder) librarymodel.dirpath(['',opt.id]); //no dataset opened; show content of shared folder.
+	    if(model.noaccount()){ //show shared folder without useraccount
+			communicate('getlibrary', {userid:opt.sharedid}, {after: function(){ dialog('library'); }});   
+	    }
+	    else if(model.userid() && librarymodel.getitem(opt.id)){ //analysisid in library
+		    if(opt.folder) librarymodel.dirpath(['',opt.id]); //show shared folder
 		    dialog('library');
 		}
-	    else if(!refreshed) communicate('getlibrary','',{after: function(){ showdir(true); }}); //refresh library & try again
+	    else if(!refreshed) communicate('getlibrary','',{after: function(){ showdir(true); }}); //sync first
 	};
 		
 	var getmeta  = function(){
@@ -1845,7 +1848,7 @@ function getfile(opt){
 			};
 			var metaerror = function(e){ //no meta.txt
 				if(!e) e = 'No response';
-				if(~e.indexOf('Invalid library ID')){
+				if(typeof(e)=='string' && ~e.indexOf('Invalid library ID')){
 					console.log('Invalid analysis ID: '+opt.id);
 					showerror('Analysis ID <b>'+opt.id+'</b> was not found in server.<br>'+
 					'The source dataset may have been deleted or the sharing URL may be faulty.');
@@ -1861,17 +1864,17 @@ function getfile(opt){
 	var usemeta = function(libitem){
 		opt.name = unwrap(libitem.name);
 		if(!opt.file) opt.file = unwrap(libitem.outfile);
-		if(opt.dir){
-			opt.sharedid = opt.id;
-			showdir();
+		if(opt.dir){ //shareid+dirid (analysis+downstream steps)
+			opt.sharedid = optid;
+			showdir(); //sync library
 			delete opt.dir //folder now imported: skip child ID check
 			importdataset();
-		} else if(libitem.folder){
+		} else if(libitem.folder){ //shareid=analysis folder
 			opt.sharedid = opt.id;
 			opt.opendataset = unwrap(libitem.opendataset);
-			if(opt.opendataset){ opt.id = opt.opendataset; getmeta(); }
-			else opt.folder = true;
-			showdir();
+			if(opt.opendataset){ opt.id = opt.opendataset; getmeta(); } //open dataset
+			opt.folder = true;
+			showdir(); //show shared folder
 		}
 		else importdataset(); //import a dataset
 	};
@@ -3040,7 +3043,7 @@ function redraw(options){
 		}
 		
 		dom.treewrap.animate({height:newheight, top:top},
-			{duration:400, complete: function(){ zoomtimer = setTimeout(function(){ renderseq(); }, 600);}
+			{duration:300, complete: function(){ zoomtimer = setTimeout(function(){ renderseq(); }, 300);}
 		});
 		if(!$.isEmptyObject(treesvg)) $("#names svg").css('font-size',model.fontsize()+'px');
 		else $("#names span").css({height:model.boxh(),'font-size':model.fontsize()+'px'});
@@ -3479,40 +3482,44 @@ function tooltip(evt,title,options){
 	
 	if(options.target){ //place next to target element
 		var target = typeof(options.target)=='object'? options.target : evt.currentTarget;
-		if(target.jquery) target = target[0];	
-		if(target.tagName){ //target is DOM element
+		if(target.jquery) target = target[0];
+		var tagname = target.tagName? target.tagName.toLowerCase() : '';	
+		if(tagname){ //target is DOM element
 			var elem = $(target);
-			if(!target.width) target.width = elem.width();
-			if(!target.height) target.height = elem.height();
-			if(target.tagName.toLowerCase()=='circle'){ //target is treenode
+			var tpos = target.getBoundingClientRect();
+			target = {
+				x: parseInt(tpos.x||elem.offset().left),
+				y: parseInt(tpos.y||elem.offset().top),
+				width: parseInt(tpos.width||elem.width()),
+				height: parseInt(tpos.height||elem.height())
+			}
+			
+			if(tagname == 'circle'){ //target is treenode
 				if(options.nodeid) treetip = true;
-				target.x = elem.offset().left+25;
-				target.y = elem.offset().top-7;
+				target.x += 25;
+				target.y -= 7;
 			}
-		else if(target.tagName.toLowerCase()=='li'){ //target is tooltip. place as submenu
-			target.x = elem.innerWidth()-2;
-			target.y = elem.position().top-2;
-			if(tipstyle=='white') target.y -= 1;
-		}
-		else{ //place tooltip next to element
-			target.x = elem.offset().left;
-			target.y = elem.offset().top;
-			if(elem.hasClass('svgicon')){ target.x += 27; target.y -= 3; }
-			if(!arr){
-				target.x += 15;
-				target.y += target.height+5;
+			else if(tagname == 'li'){ //target is tooltip. place as submenu
+				target.x = elem.innerWidth()-2;
+				target.y = elem.position().top-2;
+				if(tipstyle=='white') target.y -= 1;
+			}
+			else{ //place tooltip next to element
+				if(elem.hasClass('svgicon')){ target.x += 27; target.y -= 3; }
+				if(!arr){
+					target.x += 15;
+					target.y += target.height+5;
+				}
 			}
 		}
-	  }
-	  if(!target.x) target.x = evt.pageX+5||0;
-	  if(!target.y) target.y = evt.pageY+5||0;
-    }
-    else{ var target = { x: evt.pageX+5, y: evt.pageY+5 }; } //tooltip next to cursor
+    } else { var target = { x: evt.pageX+5, y: evt.pageY+5 }; var elem = ''; } //tooltip next to cursor
+    if(!target.x) target.x = evt.pageX+5||0;
+	if(!target.y) target.y = evt.pageY+5||0;
+	if(!target.width) target.width = 5;
+	if(!target.height) target.height = 5;
     target.x += parseInt(options.shiftx||0); target.y += parseInt(options.shifty||0);
     var rightedge = $('body').innerWidth()-200;
     if(!options.container && target.x > rightedge) target.x = rightedge;
-    if(!target.width) target.width = 5;
-	if(!target.height) target.height = 5;
     
     var node = titleadd = menutooltip = false;
 	if(options.nodeid && treesvg.data){
@@ -3594,8 +3601,8 @@ function tooltip(evt,title,options){
 			setTimeout(function(){tipcontentwrap.css('overflow','visible')},500); //unblock submenus
 		}
 		
-		if(target.tagName && target.tagName.toLowerCase() == 'li'){ //submenu
-			$(target).append(tipdiv);
+		if(elem && elem[0].tagName.toLowerCase() == 'li'){ //submenu
+			elem.append(tipdiv);
 			options.hoverhide = true;
 		}
 	  } //if options.data
@@ -3606,7 +3613,7 @@ function tooltip(evt,title,options){
 			else if(!title) title = 'Tree node. Click for options.';
 		}
 		if(!options.nohide){
-			if(typeof(options.target)!='object' || options.target.tagName) options.hoverhide = true; //DOM target
+			if(typeof(options.target)!='object' || elem) options.hoverhide = true; //DOM target
 			if(typeof(options.autohide)!='string') setTimeout(function(){hidetooltip(tipdiv)}, options.autohide||3000); //remote target
 		} 
 	}
@@ -3614,7 +3621,7 @@ function tooltip(evt,title,options){
 	if(title){ tiptitle.html(title); if(titleadd) tiptitle.append(titleadd); }
 	else{ tiptitle.css('display','none'); }
 	
-   if(options.hoverhide && target.tagName){ $(target).one('mouseleave',function(e){ //hide tooltip on mouseleave
+   if(options.hoverhide && elem){ elem.one('mouseleave',function(e){ //hide tooltip on mouseleave
 	   var hidetip = function(){ hidetooltip(tipdiv,'',activenode); };
 	   if(options.tiphover){ //cancel hide if mouse goes over tooltip
 		   var leavetimer = setTimeout(hidetip, 600);
@@ -3825,7 +3832,7 @@ pluginModel.prototype = {
 	apierr: function(errtxt, iswarning){
 		var addtxt = iswarning?'warning':'error';
 		if(this._curopt){ addtxt += ' when parsing "'+this._curopt+'"'; }
-		var errtxt = 'Wasabi plugin API '+addtxt+': '+errtxt+'!';
+		var errtxt = this._title+' Wasabi plugin '+addtxt+': '+errtxt+'!';
 		if(!iswarning) this._errors.push(errtxt);
 		console.log(errtxt);
 		return '';
@@ -3932,7 +3939,7 @@ pluginModel.prototype = {
 			"tickbox":"checkbox", "switch":"checkbox", "checkbox":"", "hidden":"", "output":"hidden", "select":"", "file":""};
 		var t = data.type && (data.type in types)? data.type : "text", classname = ""; //option type
 		
-		for(var k in data){ if(k in types){ t = k; if(data[k] && !data.title) data.title = data[k]; }} //shorthand "title"
+		for(var k in data){ if(k in types){ t = k; if(data[k] && !data.title) data.title = data[k]; }} //shorthand "title" 
 		if(!data.name) data.name = data.option||"trackName"+Object.keys(this).length; //register tracking/reference name
 		var trackname = this._curopt = data.name;
 		var firstrun = !(trackname in this); //first occurrence in JSON
@@ -3974,10 +3981,11 @@ pluginModel.prototype = {
 				if(typeof(sel)=='string' || typeof(sel)=='number'){ selitem.t = selitem.v = sel; } //string item
 				else if(typeof(sel)=='object'){ //parse object item
 					if(!("value" in sel) && typeof(sel.default)=='string' && sel.default!="yes") sel.value = sel.default;
-					else if(typeof(sel.value)=='object'){ this.apierr('selection item "value" in wrong type (object)'); continue; }
+					else if(typeof(sel.value)=='object'){ this.apierr('selection item "value" needs to be a string (object instead)'); continue; }
 					if(!("title" in sel)){ //fill missing title/value
 						selitem.t = typeof(sel.option)=='string'? sel.option : ("value" in sel)? sel.value : '';
-					} else if(typeof(sel.title)=='object'){ this.apierr('selection item "title" in wrong type (object)'); continue; }
+					} else if(typeof(sel.title)=='object'){ this.apierr('selection item "title" needs to be a string (object instead)'); continue; }
+					else selitem.t = sel.title;
 					selitem.v = ("value" in sel)? sel.value : selitem.t;
 					if(typeof(sel.desc)=='string') selitem.d = sel.desc;
 					if("default" in sel || selitem.v===''){ defsel = true; if(selitem.v) this[trackname](selitem.v); } //initial selection
@@ -4002,29 +4010,15 @@ pluginModel.prototype = {
 							else if(typeof(selopt)=='object'){ $.extend(selitem.opt, selopt); }
 							else{ this.apierr('selection item "option" attribute needs to be string or object'); continue; }
 						}
-							//var isSelected = (function(thisval){ return function(){ return this[trackname]()==thisval; }})(selval);
-							//if(firstrunsel) this[selopt] = ko.pureComputed(isSelected, this);
-							//elems.push('<input type="hidden" name="'+prefix+selopt+'" data-bind="value:$data[\''+selopt+'\']">');	
 					}	
 				}else{ this.apierr('selection item needs to be string, number or object'); }
 				if(firstrunsel){ this[selarr].push(selitem); }//add selection item
 			} //foreach selection item
 			
 			if(firstrunsel){ //add selection list description/option trackers
-				this[trackname].subscribe(function(newsel){ //set dependent options on selection change
-					console.log('selection value set to:'); console.log(newsel);
-					console.log(this);
-					//for(var optname in ){
-					//	if(newsel==sopt.selval){ this[soptname](sopt.optval); console.log('dep. option '+soptname+' set to '+optval);}
-					//});
-				});
 				this[trackname].sindex = ko.pureComputed(function(){ //track index of selected opt
-				return indexOfObj(this[selarr], 'v', this[trackname]());
-			  }, this);
-			}
-			
-			if(!this[trackname].sindex){
-			  
+					return indexOfObj(this[selarr], 'v', this[trackname]());
+				}, this);
 			}
 			
 			var dstr = "option";
@@ -4184,7 +4178,8 @@ pluginModel.prototype = {
 				UI.prepend('<div class="sectiontitle small">'+(data.section?'<span>'+data.section+'</span>':'')+'</div>');
 			}
 			else if("line" in data){
-				if(data.line) UI.prepend('<span>'+data.line+'<span>'); $('div',UI).css('display','inline-block');
+				if(data.line) UI.prepend('<span>'+data.line.trim()+' <span>');
+				$('div',UI).css('display','inline-block');
 			}
 			var existrule = data.enable||data.disable;
 			if(existrule) UI.attr("data-bind","if"+(data.disable?"not":"")+":"+this.processRule(existrule));
@@ -4244,10 +4239,12 @@ pluginModel.prototype = {
 		if(!data) return this.apierr('input JSON missing');
 		if(typeof(data)=='string'){ //JSON or native JS
 			try{ data = JSON.parse(data); }
-			catch(e){
-				this.apierr('failed to parse plugin file as JSON: '+e,'warning');
+			catch(err1){
 				try{ eval("data = "+data); }
-				catch(e){ return this.apierr('failed to parse plugin file as javascript object: '+e); }
+				catch(err2){
+					this.apierr('failed to parse plugin file as JSON: '+err1, 'warning');
+					return this.apierr('failed to parse plugin file as javascript object: '+err2);
+				}
 			}
 		}
 		if($.isArray(data)) data = {options:data};
@@ -5597,6 +5594,7 @@ function startup(response){
 	if(startupdone){ return false; } else { startupdone = true; }
 	if(typeof(localStorage.collapse)!='undefined') toggletop(localStorage.collapse);
 	var launchact = settingsmodel.onlaunch();
+	if(!launchact){ launchact = 'demo data'; settingsmodel.onlaunch('blank page'); } //first time launch in this browser
 	var urlstr = settingsmodel.urlvars, urlvars = parseurl(settingsmodel.urlvars);
 	setTimeout(function(){window.history.pushState('', '', window.location.pathname)}, 1000); //clear urlvars
 	
@@ -5631,7 +5629,6 @@ function startup(response){
 		if(data.userid && data.userid==localid){ //valid proposed user (data.userid comes from server)
 			if(settingsmodel.urlid && (settingsmodel.urlid!==settingsmodel.userid())){ //new userID from URL
 				settingsmodel.keepuser(false);
-				launchact = 'demo data';
 				dialog('newuser',{newid:settingsmodel.urlid}, 2000);
 			}
 			settingsmodel.userid(data.userid);
@@ -5714,7 +5711,8 @@ $(function(){
 			$dragline.css('width',dragger.offset.left);
 			$namedragger.css('left',dragger.offset.left-draggerpos);
 		},
-		stop: function(){
+		stop: function(e, dragger){
+			dragger.helper.css('left',''); //revert css override
 			$(window).trigger('resize');
 		}
 	});

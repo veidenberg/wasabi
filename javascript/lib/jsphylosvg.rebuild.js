@@ -190,10 +190,10 @@ Smits.PhyloCanvas.Node.prototype = {
 	highlight: function(flag){ //toggle svg element highlight color
 		var node = this;
 		node.active = typeof(flag)!='undefined'?flag:!node.active;
-		var svgel = (node.type=='stem'?'#tree circle':'#names text')+'[nodeid='+node.id+']';
-		if(node.active) $(svgel).addClass('highlight');
-		else $(svgel).removeClass('highlight');
-		return svgel;
+		var svgel = $((node.type=='stem'?'#tree circle':'#names text')+'[nodeid='+node.id+']');
+		if(node.active) svgel.addClass('highlight');
+		else svgel.removeClass('highlight');
+		return svgel[0];
 	},
 	
 	removeAnc: function(){ //strip all ancestral seq. leaves
@@ -647,12 +647,12 @@ Smits.PhyloCanvas.PhyloxmlParse = function(data){
 		if(clade.children('name').length) node.name = node.nodeinfo.gene_id = clade.children('name').text(); //Ensembl gene ID
 		
 		clade.children('confidence').each(function(){ //confidence scores
-			node.nodeinfo[$(this).attr('type')] = parseFloat($(this).text()); //bootstrap || duplication_confidence_score
+			node.nodeinfo[$(this).attr('type')||'confidence'] = parseFloat($(this).text()); //bootstrap || duplication_confidence_score
 		});
-		if(clade.attr('color')) node.color = clade.attr('color');
+		if(clade.attr('color')) node.color = node.bcolor = clade.attr('color');
 		else if(clade.children('color').length){
 			var rgb = clade.children('color');
-			node.color = 'rgb('+rgb.children('red').text()+','+rgb.children('green').text()+','+rgb.children('blue').text()+')';
+			node.color = node.bcolor = 'rgb('+rgb.children('red').text()+','+rgb.children('green').text()+','+rgb.children('blue').text()+')';
 		}
 		var taxonomy = clade.children('taxonomy'); //species name & id
 		if(taxonomy.length){
@@ -886,7 +886,6 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 			//horizontal line
 			var branchattr = {nodeid: node.id};
 			if(node.bcolor) branchattr.style = {stroke: node.bcolor};
-			
 			drawInstruct.horLine.push([x1, y, x2, y, branchattr]);
 						
 			//traverse to children and draw vertical line
@@ -900,7 +899,9 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 			  	if(node.visibleLeafCount>1){ //get vertical bounds of children
 			  		var verticalY1 = Math.min.apply(null, nodeCoords);
 			  		var verticalY2 = Math.max.apply(null, nodeCoords);
-			  		drawInstruct.Line.push([positionX, verticalY1, positionX, verticalY2]);
+			  		var branchattr = {nodeid: node.id};
+			  		if(node.bcolor) branchattr.style = {stroke: node.bcolor};
+			  		drawInstruct.Line.push([positionX, verticalY1, positionX, verticalY2, branchattr]);
 				}
 			}
 			
@@ -938,7 +939,7 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 			var labeltxt = node.nodeinfo[node.nodelabel||nodelabel] || ' ';
 			var texth = parseInt(rowh*0.8);
 			var labelattr = {nodeid:node.id, style:{"font-size": texth}};
-			drawInstruct.nodeText.push([x2+2, y+(texth/2)-3, labeltxt, labelattr]); //tree node label
+			drawInstruct.nodeText.push([x2+6, y+(texth/2)-1, labeltxt, labelattr]); //tree node label
 		} else { //draw leaflines and leaflabels
 			if(node.hidden){ if(node.type!='ancestral') leafnodes[node.name] = node; return []; }
 			else leafnodes[node.name] = node;

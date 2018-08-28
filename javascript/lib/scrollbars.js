@@ -261,7 +261,8 @@ function mCustomScrollbar(){
 			$verticalDragger.css("top", $verticalDragger_container.height()-$verticalDragger.height());
 		}
 		clearTimeout(resizeTimer);
-		resizeTimer = setTimeout(function(){ CustomScroller("resize"); },100);
+		resizeTimer = setTimeout(function(){ CustomScroller("resize"); },100); //redraw scrollbars
+		if(dom.page[0].scrollWidth > dom.page[0].clientWidth || !settingsmodel.seq()) settingsmodel.seq.valueHasMutated(); //adjust tree/seq area
 	});
 }//mCustomScrollbar()
 

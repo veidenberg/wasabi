@@ -176,8 +176,7 @@ def write_file(filepath, filedata='', checkdata=False):
         f.write(filedata)
         f.close()
         return os.path.basename(f.name)
-
-
+        
 
 def upgrade_library(): #upgrade metadata files to new structure
     global version
@@ -187,8 +186,6 @@ def upgrade_library(): #upgrade metadata files to new structure
             md = Metadata(id)
             md.replace({'starttime':'created','endtime':'completed','lasttime':'updated','savetime':'saved','aligner':'program'})
         libmd.update({'name':'Wasabi library', 'imported':'', 'version':version})
-
-
 
 
 def maplibrary(rootid='', remove=False): #index library directories
@@ -222,6 +219,7 @@ def maplibrary(rootid='', remove=False): #index library directories
         try: del libdirs[os.path.basename(datadir)]
         except KeyError: pass
 
+
 def librarypath(jobid, getroot=False): #library ID => absolute directory path
     if(jobid not in libdirs): raise IOError(404, "Invalid library ID: "+jobid)
     libpath = jobid
@@ -234,6 +232,7 @@ def librarypath(jobid, getroot=False): #library ID => absolute directory path
     dirpath = os.path.join(rootpath,libpath)
     return dirpath
 
+
 def librarypaths(libraryid, inclroot=False): #get all subfolder paths
     dirpaths = [librarypath(libraryid)] if inclroot else []
     if libraryid in libdirs: #valid ID
@@ -244,7 +243,6 @@ def librarypaths(libraryid, inclroot=False): #get all subfolder paths
             else:
                 logging.error("Invalid analysis ID "+childid+" found in "+librarypath(libraryid))
     return dirpaths
-
 
 
 def getlibrary(jobid='', uid='', checkowner=False): #search analyses library
@@ -267,17 +265,14 @@ def getmeta(dirpath, rootlevel, shareroot=None): #get processed metadata
         dirid = md['id'] or os.path.basename(dirpath)
         md['parentid'] = "" if libdirs[dirid]['parent'] == rootlevel else libdirs[dirid]['parent']
         md['children'] = len(libdirs[dirid]['children'])
-        if 'shared' in md and shareroot is None: #check validity of shared IDs in current folder
+        if 'shared' in md and shareroot is None: #check validity of shared IDs in the library folder
             idlist = [id for id in md['shared'] if id in libdirs]
             if len(idlist) is not len(md['shared']): md["shared"] = md.update({"shared": idlist})
             md['children'] += len(idlist)
-        elif shareroot is not None: #mark as shared analysis
+        elif shareroot is not None: #analysis in a shared folder; mark as shared
             if not md['parentid']: md['parentid'] = shareroot
             md['shared'] = "true"
     return md
-
-
-
 
 def sendmail(subj='Email from Wasabi', msg='', to='', useraddr=''):
     if not gmail: return 'Failed: no gmail user'
@@ -549,16 +544,17 @@ class WasabiServer(BaseHTTPRequestHandler):
     #send summary of entire analysis library
     def post_getlibrary(self, form, userid):
         rootlevel = userid or os.path.basename(datadir)
+        sharedir = bool(userid and libdirs[userid]['parent']!=os.path.basename(datadir)) #send content of shared dir
         metadata = []
-        for path in librarypaths(rootlevel,inclroot=True):
-            md = getmeta(path,rootlevel)
-            if(md['id'] == rootlevel): md['id'] = ''
+        for path in librarypaths(rootlevel, inclroot=True):
+            md = getmeta(path, rootlevel)
+            if(md['id'] == rootlevel and not sharedir): md['id'] = ''
             if 'shared' in md.metadata: #add shared analyses/folders
-                if md['shared']: #add metadata for each ID in shared[]
+                if md['shared']: #fill in metadata for each ID in shared[]
                     metadata += [str(getmeta(spath, libdirs[sid]['parent'], md['id'])) for sid in md['shared'] for spath in librarypaths(sid,True)]
-                del md['shared'] #remove from senddata
+                del md['shared'] #remove idarr from shared rootfolder in senddata
+            if(sharedir): md['shared'] = "true"
             if(md['id']): metadata.append(str(md))
-        #rootmd = Metadata(getlibrary(jobid=rootlevel))
         self.sendOK()
         self.wfile.write('['+','.join(metadata)+']')
 
@@ -682,7 +678,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         if(not jobid): raise IOError(404,'No jobID given for writemeta')
         if(userid and userid!=librarypath(jobid,True)): raise IOError(404, 'Write access denied: not the owner of analysis '+jobid)
         key = form.getvalue('key', 'imported')
-        value = form.getvalue('value', time.time())
+        value = form.getvalue('value', time.time() if key=='imported' else '')
 
         md = Metadata(jobid, uid=userid)
         md[key] = value
@@ -938,7 +934,7 @@ class WasabiServer(BaseHTTPRequestHandler):
 
             if(action!='getlibrary'): logging.debug("Post: %s, userid=%s" % (action, userid))
             if(useraccounts and action not in ['checkserver','errorlog','terminate','save','createuser','geturl']): #userid check
-                if(not userid or userid not in libdirs or libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'):
+                if(not userid or userid not in libdirs or (action!='getlibrary' and (libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'))):
                     raise IOError(404,'Request '+action+' => Invalid user ID:'+(userid if userid else '[Userid required but missing]'))
    
             getattr(self, "post_%s" % action)(form, userid)
