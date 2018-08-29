@@ -985,9 +985,12 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 		//y = absoluteY + rowh;
 		y = 20;
 		x1 = 10;
+		labelWidth = 20; // fixme: should be computed dynamically
 		x2 = x1 + (sParams.showScaleBar * scaleX);
 		svg.draw(new Smits.PhyloCanvas.Render.Line(x1, y, x2, y));
-		svg.draw(new Smits.PhyloCanvas.Render.Text((x1+x2)/2, y-8, sParams.showScaleBar));
+		scaleLabel = new Smits.PhyloCanvas.Render.Text((x1+x2)/2 - labelWidth/2, y-8, sParams.showScaleBar);
+		scaleLabel.svg = 'svg1';
+		svg.draw(scaleLabel);
 	};
 	
 	var drawTree = function(){
