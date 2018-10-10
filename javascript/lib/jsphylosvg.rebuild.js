@@ -712,7 +712,7 @@ Smits.PhyloCanvas.Render = {
 		paddingR: 1,		//Padding on tree left side
 		paddingNames: 2, 		//Tree namelabel left side padding, pixels
 		dotLine: true,		//Right-adjust tree edges with dotted lines
-		showScaleBar: false		//(STRING,  e.g. "0.05") Shows a scale bar on tree canvas
+		showScaleBar: "auto"	//(STRING,  e.g. "0.05") Shows a scale bar on tree canvas. "auto" for dynamic computation
 	},
 	
 	/*  Leaf label mouse events. Params: {svg,node,x,y} */
@@ -985,10 +985,25 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 		//y = absoluteY + rowh;
 		y = 20;
 		x1 = 10;
-		labelWidth = 20; // fixme: should be computed dynamically
-		x2 = x1 + (sParams.showScaleBar * scaleX);
+		scaleVal="unset";
+		if (sParams.showScaleBar == "auto") {
+			xraw = 80 / scaleX;
+			if (xraw < 1) {
+				mul=10;
+				while (mul * xraw < 1) {
+					mul*=10;
+				}
+				scaleVal=xraw*mul;
+				scaleVal=Math.floor(scaleVal);
+				scaleVal/=mul;
+			}
+		} else {
+			scaleVal=sParams.showScaleBar
+		}
+		x2 = x1 + (scaleVal * scaleX);
 		svg.draw(new Smits.PhyloCanvas.Render.Line(x1, y, x2, y));
-		scaleLabel = new Smits.PhyloCanvas.Render.Text((x1+x2)/2 - labelWidth/2, y-8, sParams.showScaleBar);
+		labelWidth = 30; // fixme: should be computed dynamically
+		scaleLabel = new Smits.PhyloCanvas.Render.Text((x1+x2)/2 - labelWidth/2, y-8, scaleVal);
 		scaleLabel.svg = 'svg1';
 		svg.draw(scaleLabel);
 	};
