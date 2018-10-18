@@ -640,13 +640,14 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 	cursor: default;
  }
   
-  #tree text, #names text{
+  #tree text, #names text, #scalebar text{
 	fill: black;
 	font-family: Verdana;
 	text-anchor: start;
   }
+  #scalebar text{ text-anchor: middle; }
   
-  #tree line{
+  #tree line, #scalebar line{
 	stroke: black;
 	stroke-width: 1;
 	stroke-linecap: round;
@@ -833,6 +834,17 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
     -ms-user-select: none;
     border-radius: 3px;
     top: -5px;
+ }
+ 
+ #scalebar{
+	position: absolute;
+	left: 10px;
+	bottom: 35px;
+	height: 25px;
+	width: 260px;
+	font-size: 12px;
+	opacity: 0;
+ 	transition: opacity 0.5s;
  }
  
   #page div.treescroll{
@@ -1741,6 +1753,7 @@ div.windowcontent option{ padding: 0; }
 div.windowcontent ul{ margin: 0; padding-left: 30px; }
 div.windowcontent ul li{ margin-top: 5px; white-space: nowrap; }
 div.windowcontent ul.wrap li{ white-space: normal; }
+div.windowcontent ul>li>span.icon { display: inline-block; }
 
 div.windowcontent div.btndiv{
 	text-align: center;

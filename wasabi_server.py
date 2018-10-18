@@ -34,7 +34,7 @@ from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from SocketServer import ThreadingMixIn
 
 #define some globals
-version = 170517
+version = 180925
 wasabiexec = os.path.realpath(__file__)
 appdir = os.path.dirname(wasabiexec) #get wasabi homedir
 wasabidir = os.path.realpath(os.path.join(appdir,os.pardir))
@@ -96,6 +96,7 @@ userexpire = getconf('userexpire','int') or ''
 userlog = os.path.join(datadir,'user.log')
 userheader = ''
 linuxdesktop = getconf('linuxdesktop','bool')
+urldomain = getconf('urldomain') or ''
 
 #set up logging
 class TimedFileHandler(logging.handlers.TimedRotatingFileHandler):
@@ -389,12 +390,17 @@ class WasabiServer(BaseHTTPRequestHandler):
 
     #send error response (and log error details)
     def sendError(self, errno=404, msg='', action='', skiplog=False): #log the error and send it to client browser
-        #try: linenr = str(sys.exc_info()[2].tb_lineno)
-        #except AttributeError: linenr = 'unknown'
         if(not skiplog):
             logging.error('Request "'+action+'" => '+str(errno)+': '+msg)
             if(debug and action!='GET'): logging.exception('Details: ')
-        self.send_error(errno,msg)
+        if(msg[0]!='{'): msg = '{"error":"'+msg+'"}' #add json padding
+        if hasattr(self, 'callback'): #send as jsonp
+            msg = self.callback+'('+msg+')'
+            self.command = 'HEAD' #own HTML text (jsonp)
+            self.send_error(errno)
+            self.wfile.write(msg)
+        else:
+            self.send_error(errno, msg)
 
     #send OK response (status:200)
     def sendOK(self, msg='', size=0):
@@ -405,7 +411,11 @@ class WasabiServer(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
         else: self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        if msg: self.wfile.write(msg)
+        if msg:
+            if hasattr(self, 'callback'): #add jsonp padding
+                if(msg[0]!='{' and msg[0]!='['): msg = '{"data":"'+msg+'"}' #plaintext=>json
+                msg = self.callback+'('+msg+')'
+            self.wfile.write(msg)
 
     #HEAD reaquests
     def do_HEAD(self):
@@ -433,13 +443,11 @@ class WasabiServer(BaseHTTPRequestHandler):
             urlarr = url.split('?')
             url = urlarr[0]
             params = dict([x.split('=') for x in urlarr[1].split('&')])
-            #if('type' not in params): params = {}
-            logging.debug("Get: userid=%s %s" % (userid, str(params))) 
+            logging.debug("Get: %s %s" % (userid, str(params))) 
         
         if("." not in url and "/" not in url):
             if(url in libdirs): userid = url #check user ID
             url = "index.html"
-        
         
         if 'type' in params:
             ctype = 'text/plain' if('text' in params['type']) else 'application/octet-stream'
@@ -450,26 +458,54 @@ class WasabiServer(BaseHTTPRequestHandler):
         else: #send as binary
             ctype = 'image' if url.endswith(".jpg")|url.endswith(".png")|url.endswith(".gif") else 'application/octet-stream'
         
+        if 'callback' in params: self.callback = params['callback']
+        
         logfile = False
         try:
             checkroot = wasabidir
-            if 'getanalysis' in params and params['getanalysis']: #access datafiles from library directory (?id=>getfile()=>?getanalysis)
+            if 'getanalysis' in params and params['getanalysis']: #access datafiles from analysis library
                 filename = params['file'] if 'file' in params else 'meta.txt'
                 md = Metadata(params['getanalysis'])  #throws error for invalid ID
                 if('logfile' in md and md['logfile']==filename): logfile = True  #logfile requested
-                if('dir' in params and params['dir']) or 'folder' in md.metadata: #library folder requested (from foreign library account)
+                if('dir' in params and params['dir']) or 'folder' in md.metadata: #library folder/analysis tree
                     if('dir' in params):  #check child ID
                         if params['getanalysis'] not in librarypath(params['dir']): raise IOError(404, "Child check: Invalid analysis ID: "+params['dir'])
-                    if userid: #add shared folder ID to user library
+                    if userid: #has useraccount: add shared folder to user library
                         md = Metadata(librarypath(userid))
                         idlist = md['shared'] or []
                         isowner = librarypath(params['getanalysis'], getroot=True) == userid
                         if not isowner and params['getanalysis'] not in idlist: md.update({'shared': idlist+[params['getanalysis']]})
                 url = os.path.join(librarypath(params['getanalysis']), filename)
                 checkroot = datadir
+            elif 'getlibrary' in params: #(shared) analysis library content via GET
+                self.post_getlibrary(None, params['getlibrary'])
+                return
+            elif 'getdir' in params: #analysis folder filelist
+                self.post_getdir(None, params['getdir'])
+                return
+            elif 'checkserver' in params:
+                self.post_checkserver(None, userid)
+                return
+            elif 'checkuser' in params:
+                self.post_checkuser(None, userid)
+                return
+            elif 'maplibrary' in params:
+                if(not userid):
+                    self.sendError(msg="GET maplibrary: userid missing")
+                else:
+                    maplibrary(None, userid)
+                    self.sendOK('{"status":"library cache updated"}')
+                return
+            elif 'debug' in params:
+                if(not userid):
+                    self.sendError(msg="GET debug: (admin)userid missing")
+                else:
+                    self.post_debug(None, userid)
+                return
             elif 'getexport' in params:
-                url = os.path.join(exportdir, params['getexport'])
                 filename = params['getexport']
+                url = os.path.join(exportdir, filename)
+                filename = filename.split('/')[1]
                 checkroot = exportdir
             elif 'plugin' in params:
                 filename = params['file'] if 'file' in params else 'plugin.json'
@@ -482,10 +518,11 @@ class WasabiServer(BaseHTTPRequestHandler):
             f = open(apath(url, checkroot)) if 'text' in ctype else open(apath(url, checkroot),'rb') #includes symlink check
             filecontent = f.read()
             f.close()
-            if(logfile): filecontent = filecontent.replace(librarypath(params['getanalysis']),'fakePath') #sanitize logfile
-            if 'callback' in params: #jsonp
-                if(filecontent[0] != '{'): filecontent = "{filedata:'"+filecontent+"'}" #send filedata in json
-                filecontent = params['callback']+"("+filecontent.replace('\n', '').replace('\r', '')+")"
+            if(logfile): filecontent = filecontent.replace(librarypath(params['getanalysis']),'analysisPath') #mask librarypaths in logfile
+            if 'callback' in params: #add jsonp padding
+            	filecontent = filecontent.replace('\n','').replace('\r','').replace('\t','')
+                if(filecontent[0]!='{' and filecontent[0]!='['): filecontent = '{"filedata":"'+filecontent.replace('"','\'')+'"}' #textfile=>json
+                filecontent = params['callback']+"("+filecontent+")"
                 filename = ''
             self.send_response(200)
             self.send_header("Content-Type", ctype)
@@ -495,7 +532,9 @@ class WasabiServer(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(filecontent)
         except IOError as e:
-            self.sendError(e.errno, 'File Not Found: %s (%s)' % (url, e.strerror), 'GET', filename=='importmeta.txt')
+            errmsg = 'File Not Found: %s (%s)' % (url, e.strerror)
+            if(params['getanalysis']): errmsg = errmsg.replace(librarypath(params['getanalysis']),'analysisPath') #mask librarypaths 
+            self.sendError(e.errno, errmsg, 'GET', filename=='importmeta.txt')
 
 
 #======POST request functions========
@@ -528,7 +567,7 @@ class WasabiServer(BaseHTTPRequestHandler):
         md = Metadata(userid)
         md.update("updated", time.time()) #timestamp last visit
         if(datalimit): md["datause"] = getsize(joinp(datadir, userid, uid='skip'))
-        self.sendOK(md)
+        self.sendOK(str(md))
 
     #create new user
     def post_createuser(self, form, userid=''):
@@ -544,7 +583,7 @@ class WasabiServer(BaseHTTPRequestHandler):
     #send summary of entire analysis library
     def post_getlibrary(self, form, userid):
         rootlevel = userid or os.path.basename(datadir)
-        sharedir = bool(userid and libdirs[userid]['parent']!=os.path.basename(datadir)) #send content of shared dir
+        sharedir = bool(userid and libdirs[userid]['parent']!=os.path.basename(datadir)) #non-owner userid: send as shared dir
         metadata = []
         for path in librarypaths(rootlevel, inclroot=True):
             md = getmeta(path, rootlevel)
@@ -555,24 +594,24 @@ class WasabiServer(BaseHTTPRequestHandler):
                 del md['shared'] #remove idarr from shared rootfolder in senddata
             if(sharedir): md['shared'] = "true"
             if(md['id']): metadata.append(str(md))
-        self.sendOK()
-        self.wfile.write('['+','.join(metadata)+']')
+        self.sendOK('['+','.join(metadata)+']')
 
     #reflect uploaded file
     def post_echofile(self, form, userid):
-        self.sendOK()
-        self.wfile.write(form.getvalue('upfile'))
+        self.sendOK(form.getvalue('upfile'))
 
     #forward remote file
     def post_geturl(self, form, userid):
+        global urldomain
         url = form.getvalue('fileurl','')
+        if(urldomain and urldomain not in url):
+            raise IOError(404, 'Downloads restricted to '+urldomain)
         try:
             urlfile = urllib2.urlopen(url)
-            totalsize = int(urlfile.info().getheaders("Content-Length")[0])
+            fsize = int(urlfile.info().getheaders("Content-Length")[0])
+            self.sendOK(urlfile.read(), fsize)
         except (ValueError, urllib2.URLError) as e:
             raise IOError(404, e.reason or 'Invalid URL: '+url)
-        self.sendOK(size=totalsize)
-        self.wfile.write(urlfile.read())
 
     #store form fields
     def _add_if_present(self, store, form, key):
@@ -669,8 +708,7 @@ class WasabiServer(BaseHTTPRequestHandler):
                 metadata["folder"] = "yes"
             metadata.flush()
 
-        self.sendOK()
-        self.wfile.write(json.dumps(response))
+        self.sendOK(json.dumps(response))
 
     #add data to job metadata file
     def post_writemeta(self, form, userid):
@@ -683,12 +721,11 @@ class WasabiServer(BaseHTTPRequestHandler):
         md = Metadata(jobid, uid=userid)
         md[key] = value
         md.flush()
-        self.sendOK()
-        self.wfile.write('['+str(md)+']')
+        self.sendOK('['+str(md)+']')
 
     #send a library directory filelist
     def post_getdir(self, form, userid):
-        dirid = form.getvalue('id', '')
+        dirid = form.getvalue('id', '') if form else userid
         if(not dirid or dirid not in libdirs):
             self.sendOK()
             return
@@ -699,8 +736,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             itempath = os.path.join(dirpath,item)
             fsize = "folder" if os.path.isdir(itempath) else os.path.getsize(itempath)
             files[item] = fsize
-        self.sendOK()
-        self.wfile.write(json.dumps(files))
+        self.sendOK(json.dumps(files))
 
     #remove data dir from library
     def post_rmdir(self, form, userid):
@@ -781,22 +817,15 @@ class WasabiServer(BaseHTTPRequestHandler):
     def post_makefile(self, form, userid):
         global exportdir
         filename = form.getvalue('filename','exported_data.txt')
-        filepath = joinp(exportdir, filename, d=exportdir, uid=userid)
-        if(os.path.isfile(filepath)):
-            filepath += '_'+str(len(os.listdir(exportdir)))
-        filedata = form.getvalue('filedata','')
+        filedir = tempfile.mkdtemp(prefix='', dir=exportdir)
+        filepath = joinp(filedir, filename, d=exportdir)
         exportfile = open(filepath,'wb')
-        exportfile.write(filedata)
-        self.sendOK()
-        self.wfile.write(userid+'?type=binary&getexport='+os.path.basename(filepath))
+        exportfile.write(form.getvalue('filedata',''))
+        self.sendOK(userid+'?type=binary&getexport='+os.path.basename(filedir)+'/'+filename)
 
-        for filename in os.listdir(exportdir): #cleanup old files (>2 days)
-            filepath = os.path.join(exportdir,filename)
-            filestat = os.stat(filepath)
-            filetime = filestat.st_mtime
-            curtime = time.time()
-            fileage = (curtime-filetime)/86400
-            if(fileage > 2): os.remove(filepath)
+        for dname in os.listdir(exportdir): #cleanup old files (>24h)
+            dpath = os.path.join(exportdir, dname)
+            if((time.time() - os.stat(dpath).st_mtime) > 86400): shutil.rmtree(dpath)
 
     #save a client-sent errorlog
     def post_errorlog(self, form, userid=''):
@@ -905,8 +934,8 @@ class WasabiServer(BaseHTTPRequestHandler):
         else: raise IOError(404, 'Restricted request: only for local installation.')
 
     #send server debug info
-    def post_serveradmin(self, form, userid=''):
-        if("admin" not in Metadata(userid)): raise IOError(404, "Access denied")
+    def post_debug(self, form, userid=''):
+        if("admin" not in Metadata(userid)): raise IOError(404, '{"error": "Access denied: userid is not admin"}')
         serverdata = {"jobs":len(job_queue.jobs), "users":{}}
         def childcount(id):
             if("children" in libdirs[id]):
@@ -922,8 +951,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             serverdata["users"][uid] = Metadata(uid).metadata
             serverdata["users"][uid]["analyses"] = childcount(uid)
             serverdata["users"][uid]["datause"] = getsize(joinp(datadir,uid,uid='skip'))
-        self.sendOK()
-        self.wfile.write(json.dumps(serverdata))
+        self.sendOK(json.dumps(serverdata))
 
     #POST request sent to server
     def do_POST(self):
@@ -932,7 +960,7 @@ class WasabiServer(BaseHTTPRequestHandler):
             action = form.getvalue('action','')
             userid = form.getvalue('userid','') if useraccounts else ''
 
-            if(action!='getlibrary'): logging.debug("Post: %s, userid=%s" % (action, userid))
+            logging.debug("Post: %s, userid=%s" % (action, userid))
             if(useraccounts and action not in ['checkserver','errorlog','terminate','save','createuser','geturl']): #userid check
                 if(not userid or userid not in libdirs or (action!='getlibrary' and (libdirs[userid]['parent']!=os.path.basename(datadir) or userid=='example'))):
                     raise IOError(404,'Request '+action+' => Invalid user ID:'+(userid if userid else '[Userid required but missing]'))
@@ -1386,7 +1414,7 @@ def main():
         info("Wasabi HTTP server started at port %d\n" % serverport)
         if(not osxbundle): info("Press CRTL+C to stop the server.\n")
         logging.debug('Serving from: '+str(appdir))
-        logging.debug(socket.getfqdn()) #get server hostname
+        logging.debug('Hostname: '+socket.getfqdn()) #get server hostname
         
         if(local and browsername!='NO'): #autolaunch wasabi in a webbrowser
             if(browsername=='default'): browsername = None
@@ -1403,6 +1431,8 @@ def main():
     except KeyboardInterrupt:
         info("\nShutting down server...")
         server.socket.close()
+    except Exception as e:
+        logging.exception("Runtime error: %s", e)
     
     if(len(job_queue.jobs)):
         info("Warning: %s jobs in the queue were cancelled." % len(job_queue.jobs))
