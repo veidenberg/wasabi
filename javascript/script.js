@@ -957,12 +957,12 @@ var koModel = function(){
 		return self.version.local<self.version.remote() && settingsmodel.skipversion()!=self.version.remote();
 	});
 	self.noaccount = ko.pureComputed(function(){ return settingsmodel.useraccounts()&&!settingsmodel.userid(); });
-	self.notifications = ko.pureComputed(function(){ return self.treealtered()||self.update()||self.offline()||self.errors()||self.noanc()||self.noaccount(); });
+	self.notifications = ko.pureComputed(function(){ return self.treealtered()||self.update()||self.offline()||self.errors()||self.noaccount(); });
 	self.statusbtn = ko.computed(function(){ //construct notifications button
 		var msgarr = [], running = librarymodel.runningjobs(), ready = librarymodel.readyjobs(), str = '';
 		var jobs = running||ready;
 		
-		if(self.treealtered()||self.noanc()) msgarr.push({short:'<span class="red">Realign</span>', long:'<span class="red">Update alignment</span>'});
+		if(self.treealtered()) msgarr.push({short:'<span class="red">Realign</span>', long:'<span class="red">Update alignment</span>'});
 		if(self.offline()) msgarr.push({short:'<span class="red">Offline</span>', long:'<span class="red">Offline</span>'});
 		if(self.errors()){ msgarr.push({short:'<span class="red">Error</span>', long:'<span class="red">Server error</span>'}); }
 		if(self.update()){ msgarr.push({short:'<span class="green">Update</span>',long:'<span class="green">Update Wasabi</span>'}); }
@@ -4589,7 +4589,7 @@ function dialog(type,options){
 		//set up sections of notifications window
 		var notifheader = $('<div class="sectiontitle" data-bind="visible:notifications"><img src="images/info.png"><span>Notifications</span></div>');
 		
-		var realignnotif = $('<div data-bind="visible:treealtered()||noanc()" class="sectiontext"><b>Update the alignment</b><br>'+
+		var realignnotif = $('<div data-bind="visible:treealtered()" class="sectiontext"><b>Update the alignment</b><br>'+
 		'Current sequence alignment needs to be updated to <span data-bind="visible:treealtered">reflect the modifications in phylogenetic tree and </span>calculate ancestral sequences.<br>'+
 		'<div class="insidediv">'+(exportmodel.savetargets().length>1?'<span class="label" title="Choose a library slot '+
 		'for the updated alignment, relative the to the input (currently open) analysis">Store update as</span> '+
@@ -4598,7 +4598,7 @@ function dialog(type,options){
 		'<input id="keepalign" type="checkbox" data-bind="checked:!treealtered()"><span class="label" title="Freeze alignment, only '+
 		'calculate the ancestral sequences (fast update)">keep current alignment</span>'+
 		'<span data-bind="visible:isdna"><br><input type="checkbox" checked="checked" id="usecodons">use codon model</span></div><br>'+
-		'<a class="button square" onclick="model.treealtered(false);model.noanc(false);" title="Hide this notification">Dismiss</a>'+
+		'<a class="button square" onclick="model.treealtered(false)" title="Hide this notification">Dismiss</a>'+
 		'<a class="button square red" data-bind="visible:treealtered()&&treebackup" onclick="model.selectundo(\'firsttree\');model.undo();" title="Undo tree modifications">Revert tree</a></div>');
 		exportmodel.savetarget(exportmodel.savetargets()[0]);
 		var realignbtn = $('<a class="button square orange" title="Update current dataset using PRANK">Update alignment</a>');
@@ -5713,6 +5713,7 @@ $(function(){
 	/* set up interface-event bindings */
 	$("#treebin div").append(svgicon('trash'));
 	var $left = $("#left"), $right = $("#right"), $dragline = $("#namesborderDragline"), $namedragger = $("#namesborderDrag"), draggerpos;
+	$('#scalebar').css('opacity',0);
 	
 	$("#borderDrag").draggable({ //make sequence/tree width resizable
 		axis: "x", 
@@ -5844,6 +5845,7 @@ $(function(){
 		$('#top').removeClass('away');
 		$('#startup').fadeOut({complete:function(){ setTimeout(function(){
 			$('#left,#right').css('opacity',1);
+			settingsmodel.scalebar.valueHasMutated();
 			$('#namesborderDragline').removeClass('dragmode');
 		}, 400); }});
 	}, 700); };

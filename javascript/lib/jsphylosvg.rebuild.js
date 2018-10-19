@@ -31,7 +31,7 @@ Smits = {
 		//Process nodetree lengths & levels, add metadata. Used (rescoped) in fileparsing classes.
 		processNodes: function(tree){
 			var dataobj = this; //tree data object from Parse()
-			var node = tree || dataobj.root || ''; 
+			var node = tree || dataobj.root || '';
 			if(!node) return;
 			for(var i in node.children){
 				var child = node.children[i];
@@ -44,9 +44,10 @@ Smits = {
 				else if(dataobj.nodeinfo && dataobj.nodeinfo[child.name]){ //add external leaf metadata
 					$.each(dataobj.nodeinfo[child.name], function(k,v){ child[k] = v; });
 				}
-				if(child.nodeinfo){ //register available node metadata
-					var ltype = child.children.length? 'nodelabels':'leaflabels';
-					$.each(child.nodeinfo, function(k,v){ if(typeof(v)!='object') dataobj[ltype][k] = 1; });
+				if(child.nodeinfo){ //register available node metadata & used nodelabels
+					var ltype = child.children.length? 'nodelabel':'leaflabel';
+					$.each(child.nodeinfo, function(k,v){ if(typeof(v)!='object') dataobj[ltype+'s'][k] = 1; });
+					if(child.nodelabel) dataobj[ltype][child.nodelabel] = 1;
 				}				
 			}
 			return node;
@@ -79,7 +80,11 @@ Smits.PhyloCanvas = function(inputData){
 		if(dataobj.phyloxml) self.data = new Smits.PhyloCanvas.PhyloxmlParse(dataobj); //parse input data => tree obj
 		else if(dataobj.newick) self.data = new Smits.PhyloCanvas.NewickParse(dataobj);
 		else dialog('error','No data given for tree import.');
-		['leaflabels','nodelabels'].forEach(function(ltype){ settingsmodel[ltype] = Object.keys(self.data[ltype]); }); //register available tree metadata
+		['leaflabels','nodelabels'].forEach(function(ltype){ settingsmodel[ltype] = Object.keys(self.data[ltype]); }); //found labels
+		['leaflabel','nodelabel'].forEach(function(ltype){ //used (displayed) treelabels
+			var labels = Object.keys(self.data[ltype]);
+			if(labels.length==1) settingsmodel[ltype](labels[0]); //single label (set as global)
+		}); 
 		settingsmodel.nodelabels.unshift('none');
 		if(!dataobj.skiprender) self.refresh(dataobj);
 	}
@@ -629,6 +634,8 @@ Smits.PhyloCanvas.NewickParse = function(data){
 	this.nodeinfo = data.nodeinfo || {}; //external tree metadata (Ensembl)
 	this.leaflabels = {};
 	this.nodelabels = {};
+	this.leaflabel = {};
+	this.nodelabel = {};
 	this.processNodes(); //process nodetree
 };  //<--NewickParse
 
@@ -690,6 +697,8 @@ Smits.PhyloCanvas.PhyloxmlParse = function(data){
 	this.processNodes = Smits.Common.processNodes;
 	this.maxLevel = 0;
 	this.maxLenFromRoot = 0;
+	this.leaflabel = {};
+	this.nodelabel = {};
 	this.leaflabels = {};
 	this.nodelabels = {};
 	//initiate	
@@ -707,8 +716,8 @@ Smits.PhyloCanvas.PhyloxmlParse = function(data){
 Smits.PhyloCanvas.Render = {
   Parameters: { // Style & mouse event parameters for tree SVG elements
 	Rectangular: {
-		paddingL: 1, 		//Padding on tree right side
-		paddingR: 1,		//Padding on tree left side
+		paddingL: 5, 		//Padding on tree left side
+		paddingR: 5,		//Padding on tree right side
 		paddingNames: 2, 		//Tree namelabel left side padding, pixels
 		dotLine: true,		//Right-adjust tree edges with dotted lines
 	},
@@ -728,7 +737,7 @@ Smits.PhyloCanvas.Render = {
 			namelabelspan.text(textEl.textContent);
 			namelabel.css({'font-size': model.fontsize()+'px', 'display':'block', 'opacity':0});
 			namelabel.offset({left:$("#right").offset().left-16, top:topy-1+topadj});
-			namelabelspan.css('margin-left',0-$("#names").innerWidth()+6+'px');
+			namelabelspan.css({'margin-left': 0-$("#names").innerWidth()+6+'px', 'color': node.color||node.bcolor||'red'});
 			if(topy){ namelabel.fadeTo(100,1); }
 		},300);
 	},
@@ -833,8 +842,8 @@ Smits.PhyloCanvas.Render.SVG = function(){
 	this.svg2 = Raphael('names', "100%", "100%"); //#names > SVG
 	this.svg3 = Raphael('scalebar', "100%", "100%"); //#scalebar > SVG
 	$(this.svg2.canvas).css('font-size',model.fontsize()+'px');
-	this.percX = function(num){ return (num/this.canvasSize[0]*100).toFixed(2)+'%'; }; //convert all coordinates from px to %
-	this.percY = function(num){ return (num/this.canvasSize[1]*100).toFixed(2)+'%'; };
+	this.percX = function(num){ return (parseInt(num)/this.canvasSize[0]*100).toFixed(2)+'%'; }; //convert all coordinates from px to %
+	this.percY = function(num){ return (parseInt(num)/this.canvasSize[1]*100).toFixed(2)+'%'; };
 };
 
 Smits.PhyloCanvas.Render.SVG.prototype = {
@@ -846,7 +855,7 @@ Smits.PhyloCanvas.Render.SVG.prototype = {
 		else if(instruct.type == 'circle') svgobj = this.svg1.circle(this.percX(instruct.x), this.percY(instruct.y), instruct.radius);
 		else if(instruct.type == 'text'){
 			if(instruct.svg && instruct.svg == 'svg1') svgobj = this.svg1.text(this.percX(instruct.x), this.percY(instruct.y), instruct.text);
-			else svgobj = this.svg2.text(instruct.x, this.percY(instruct.y), instruct.text);
+			else svgobj = this.svg2.text(parseInt(instruct.x), this.percY(instruct.y), instruct.text);
 		} else { console.log('Tree rendering error: Unknown SVG element type: '+instruct.type); return svgobj; }
 		if(instruct.attr.style){ $(svgobj[0]).css(instruct.attr.style); delete instruct.attr.style; }
 		if(Object.keys(instruct.attr).length){ $(svgobj[0]).attr(instruct.attr); }
@@ -885,20 +894,25 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 			if(node.bcolor) branchattr.style = {stroke: node.bcolor};
 			drawInstruct.horLine.push([x1, y, x2, y, branchattr]);
 						
-			//traverse to children and draw vertical line
+			//vertical line
 			if(node.visibleChildCount>0){
+				var childn = {};
 				for(var i = 0; i < node.children.length; i++){
 					var child = node.children[i];
 					if(child.hidden) continue;
+					if(child.type!='ancestral') childn[i] = child;
 					nodeCoords.push(calculateNodePositions(child, positionX)); //traverse nodes leafs->root
 				}
 				nodeCoords.push(y);
-			  	if(node.visibleLeafCount>1){ //get vertical bounds of children
+				
+			  	if(node.visibleLeafCount>1){ //get vertical bounds & draw
 			  		var verticalY1 = Math.min.apply(null, nodeCoords);
 			  		var verticalY2 = Math.max.apply(null, nodeCoords);
-			  		var branchattr = {nodeid: node.id};
-			  		if(node.bcolor) branchattr.style = {stroke: node.bcolor};
-			  		drawInstruct.Line.push([positionX, verticalY1, positionX, verticalY2, branchattr]);
+			  		$.each(childn, function(i, cnode){ //split vertical line (upper/lower child node)
+			  			var branchattr = {nodeid: cnode.id};
+			  			if(cnode.bcolor) branchattr.style = {stroke: cnode.bcolor};
+			  			drawInstruct.Line.push([positionX, i=='0'?verticalY1:y, positionX, i=='0'?y:verticalY2, branchattr]);
+			  		});
 				}
 			}
 			
@@ -936,7 +950,8 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 			var labeltxt = node.nodeinfo[node.nodelabel||nodelabel] || ' ';
 			var texth = parseInt(rowh*0.8);
 			var labelattr = {nodeid:node.id, style:{"font-size": texth}};
-			drawInstruct.nodeText.push([x2+6, y+(texth/2)-1, labeltxt, labelattr]); //tree node label
+			if(x2+(2*texth)+4>canvasWidth){ var labelx = x2-9; labelattr.style["text-anchor"] = "end"; } else { var labelx = x2+6; }
+			drawInstruct.nodeText.push([labelx, y+(texth/2)-1, labeltxt, labelattr]); //tree node label
 		} else { //draw leaflines and leaflabels
 			if(node.hidden){ if(node.type!='ancestral') leafnodes[node.name] = node; return []; }
 			else leafnodes[node.name] = node;
@@ -965,7 +980,8 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 				var labely = y+(rowh*0.3);
 				// leaf label
 				var leafattr = {style:node.style||{}, nodeid:node.id};
-				if(node.color) leafattr.style.fill = node.color;
+				var ncolor = node.color || node.bcolor || '';
+				if(ncolor) leafattr.style.fill = ncolor;
 				if(node.description) leafattr.title = node.description;
 				node.count = namecounter;
 				var leafname = node.nodeinfo[node.nodelabel||leaflabel] || node.name;
@@ -1054,7 +1070,6 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 		var y = 2;
 		svg.svg3.line(svg.percX(x1), y, svg.percX(x1+unitlen), y);
 		svg.svg3.text(svg.percX(canvasWidth/2), y+17, unit);
-		$("#scalebar").css('opacity',1);
 	};			
 		
 	//reset counts
