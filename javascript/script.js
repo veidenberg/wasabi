@@ -181,7 +181,7 @@ var koSettings = function(){
 	self.toggle = function(obs){ if(typeof(obs)=='function') obs(!obs()); }
 	self.btntxt = function(obs){ return obs()?'ON':'OFF'; }
 	
-	self.preflist = {tooltipclass:'', undolength:'', autosaveint:'autosave', onlaunch:'', userid:'keepuser', zoomlevel:'keepzoom', colorscheme:'', maskcolor:'', maskletter:'', anccolor:'', ancletter:'', boxborder:'', font:'', windowanim:'', allanim:'', hidebar:'', minlib:'', ladderlib:'', skipversion:'', checkupdates:'local', bundlestart:'local'};
+	self.preflist = {tooltipclass:'', undolength:'', autosaveint:'autosave', onlaunch:'', userid:'keepuser', zoomlevel:'keepzoom', colorscheme:'', maskcolor:'', maskletter:'', anccolor:'', ancletter:'', boxborder:'', font:'', windowanim:'', allanim:'', hidebar:'', minlib:'', ladderlib:'', skipversion:'', checkupdates:'local', bundlestart:'local', scalebar:''};
 	
 	self.saveprefs = function(){ //store preferences to harddisk
 		$.each(self.preflist,function(pref,checkpref){

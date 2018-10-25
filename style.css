@@ -96,6 +96,7 @@ body.notop #top{ display:none; }
 body.notop #namesborderDragline{ top: 15px; }
 body.notop #left{ top: 25px; }
 body.notop #right{ top: 5px; }
+body.mintop #scalebar{ bottom: 0; }
 
 .toptext{
 	position: absolute;

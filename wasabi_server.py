@@ -825,7 +825,9 @@ class WasabiServer(BaseHTTPRequestHandler):
 
         for dname in os.listdir(exportdir): #cleanup old files (>24h)
             dpath = os.path.join(exportdir, dname)
-            if((time.time() - os.stat(dpath).st_mtime) > 86400): shutil.rmtree(dpath)
+            if((time.time() - os.stat(dpath).st_mtime) > 86400):
+                try: shutil.rmtree(dpath)
+                except OSError: pass
 
     #save a client-sent errorlog
     def post_errorlog(self, form, userid=''):
