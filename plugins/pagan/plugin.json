@@ -1,6 +1,7 @@
 {
   "program": "pagan",
   "name": "PAGAN aligner",
+  "version": "0.56",
   "icon": ["pagan", "icon_pagan.png"],
   "desc": "Currently open sequence data will be aligned with <a href=\"http://wasabiapp.org/software/pagan\" target=\"_blank\">Pagan</a>.",
   "menudesc": "Realign or place sequences using Pagan graph aligner",
@@ -9,9 +10,11 @@
   "translate_names": true,
   "submit": [{"queryfile": "Start placement"}, "Start alignment"],
   "prefix": "--",
+  "valuesep": "=",
+  "enable": "sequence",
   "options": [
-	{"output": "out", "option": "outfile"},
-	{"hidden": "", "option": "xml-nhx"}, {"hidden": "", "option": "events"}, {"hidden": "", "option": "output-ancestors"},
+	{"hidden": "out", "option": "outfile"},
+	{"type": "hidden", "option": "xml-nhx"}, {"type": "hidden", "option": "events"}, {"type": "hidden", "option": "output-ancestors"},
 	{"section": "Alignment extension", "options": [
 		{"file": "filedrop fileselect", "option": "queryfile", "title": "Drop query file here", "desc": "Extend with", "check": {"queryfile and sequence and queryfile is not sequence": "Query sequence type is different from the reference"}}
     ]},
@@ -103,7 +106,7 @@
 	  ]},
       {"bool": "Prune alignment", "option": "prune-extended-alignment", "desc": "Prune extended alignment"},
       {"line": "", "enable": "prune-extended-alignment", "options": [
-        {"hidden": "", "option": "prune-keep-closest", "default": true},
+        {"hidden": true, "option": "prune-keep-closest"},
         {"int": "and keep", "option": "prune-keep-number", "desc": "Keep # of closest reference sequences", "default": 0},
         "reference sequences"
       ]}

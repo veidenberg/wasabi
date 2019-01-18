@@ -75,5 +75,6 @@ function svgicon(type,options){
 	var shadowdef = '<filter id="dropshadow" width="140%" height="140%" x="-20%" y="-20%"><feGaussianBlur in="SourceAlpha" stdDeviation="'+sh.blur+'" /><feColorMatrix type="matrix" value="1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0.6,0"/><feOffset dx="'+sh.x+'" dy="'+sh.y+'" /><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
 	var iconstr = '<svg class="icon" preserveAspectRatio="none" viewBox="'+vbox+'" '+transform+'>'+(shadow?shadowdef:'')+'<path d="'+(svgpaths[type]||'')+'" '+(fill||stroke?' style="'+fill+stroke+'"':'')+' '+shadow+'></path></svg>';
 	var title = options.title? 'title="'+options.title+'"' : '';
-	return options.span? '<span class="svgicon" '+title+'>'+iconstr+'</span>' : iconstr;
+	var attr = typeof(options.attr)=='string'? ' '+options.attr : '';
+	return options.span? '<span class="svgicon" '+title+attr+'>'+iconstr+'</span>' : iconstr;
 }

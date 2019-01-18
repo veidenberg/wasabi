@@ -156,7 +156,7 @@ svg.icon path{
 span.svgicon{
 	display: inline-block;
     padding-right: 5px;
-    vertical-align: text-bottom;
+    vertical-align: -5px;
     width: 18px;
     height: 18px;
 }
@@ -1383,13 +1383,22 @@ div.tooltip ul{
 }
 div.tooltip.bulletmenu ul{ margin: 0 5px; }
 
-div.tooltip ul li{
+div.tooltip ul li{ /* pop-up menus */
 	list-style-type:none;
 	margin: 0;
 	padding: 2px;
 	cursor: pointer;
 }
+div.tooltip ul li.inactive{
+	cursor: default;
+	opacity: 0.2;
+}
+
 div.tooltip.nomenu ul li{ list-style: disc inside; }
+
+div.tooltip ul li hr{
+	margin: 0;
+}
 
 div.tooltip ul li:first-child{
 	border-top-left-radius: 2px;
@@ -1419,9 +1428,16 @@ div.tooltip.white ul li:hover{
 	background: -webkit-linear-gradient(#88b2ff,#3e5dff);
 	background: linear-gradient(#88b2ff,#3e5dff);
 }
+div.tooltip ul li.inactive:hover{
+	color: #999;
+	text-shadow: none;
+	background: none;
+}
 div.tooltip ul li:hover div{ text-shadow: none; }
 div.tooltip ul li:hover svg.icon path, div.tooltip.white ul li div ul li:hover svg.icon path{ fill: white }
+div.tooltip ul li.inactive:hover svg.icon path, div.tooltip.white ul li.inactive div ul li:hover svg.icon path{ fill: #999 }
 div.tooltip.white ul li:hover div svg.icon path{ fill: #444 } /*submenu*/
+
 div.tooltip ul>li.active>span.svgicon>svg.icon>path{ fill: orange }
 div.tooltip ul a{ color: orange }
 div.tooltip.topmenu li {

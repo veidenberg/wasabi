@@ -1090,7 +1090,7 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 	var canvasWidth = $('#treewrap').width()-$('#names').width(); //update tree canvas dimensions
 	var canvasHeight = seqcount*rowh;
 	svg.canvasSize = [canvasWidth, canvasHeight];
-	var scaleX = (canvasWidth - sParams.paddingL - sParams.paddingR)/data.maxLenFromRoot;
+	var scaleX = (canvasWidth - sParams.paddingL - sParams.paddingR)/(data.maxLenFromRoot||0.1);
 	var xLim = canvasWidth - sParams.paddingR;
 	
 	//build tree elements

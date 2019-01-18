@@ -70,7 +70,7 @@ ko.extenders.format = function(obsitem, format){ //format an observable value in
     var formatted = ko.pureComputed({
         read: obsitem,
         write: function(newval){
-			obsitem(newval);
+			//obsitem(newval);
 			if(format=='trim' && typeof(newval)=='string') newval = newval.trim();
 			else if(format=='nospace') newval = newval.replace(/\s/g,'_');
 			else if(format=='alphanum') newval = newval.replace(/\s/g,'_').replace(/[^\w\.]/g,'');
@@ -156,16 +156,20 @@ ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
 	});
     }
 };
-ko.bindingHandlers.default = {  //set a default value for input element (plugin API)
+
+ko.bindingHandlers.default = {  //set a default value for plugin input element
 	update: function(element, accessor, allBindings, viewModel, bindingContext){
 		var defaultval = unwrap(accessor);
 		var trackname = unwrap(allBindings.get('name')); //data-bind:"name"
-		if(!trackname || !defaultval) return;
-		if(element.type=='text'){
+		if(!trackname || typeof(defaultval)=='undefined') return;
+		bindingContext.$data[trackname].defaultval = defaultval;
+		if(element.type=='text'){ //text inputs
+			var inputval = unwrap(allBindings.get('value'));
+			var required = unwrap(allBindings.get('required'));
 			element.setAttribute('placeholder', defaultval);
-			if(unwrap(allBindings.get('required')) && !unwrap(allBindings.get('value')).length) element.value = defaultval;
-		}
-		else bindingContext.$data[trackname](defaultval);
+			if(required && !inputval.length) element.value = defaultval;
+			else if(!required && inputval==defaultval) element.value = '';
+		} else { bindingContext.$data[trackname](defaultval); }
 	}
 };
 
@@ -635,7 +639,7 @@ var koLibrary = function(){
 		  communicate('getdir',{id:item.id},{success: function(data){
 			var files = JSON.parse(data);
 			var str = '';
-			var outfile = item.outfile?item.outfile():''; //mark the results file in filelist
+			var outfile = item.outfile?item.outfile().split(','):''; //mark the results file in filelist
 			$.each(files,function(fname,fsize){ //build filelist html
 				if(isNaN(fsize)) return true; //skip folders
 				str += '<div class="row">';
@@ -644,10 +648,11 @@ var koLibrary = function(){
 				}
 				else str += fname;
 				str += '<span class="note">'+numbertosize(fsize,'byte')+'</span>'+self.shareicon(item,fname);
-				if(~fname.indexOf('.xml')||~fname.indexOf('.fas')){
-					str += '<a class="button" style="right:60px" title="Load to browser (and set as default)" '+
-					'onclick="communicate(\'writemeta\',{id:\''+item.id+'\',key:\'outfile\',value:\''+
-					fname+'\'});getfile({id:\''+item.id+'\',file:\''+fname+'\',btn:this})">Open</a>';
+				if(~fname.indexOf('.xml')||~fname.indexOf('.fa')||~fname.indexOf('.tree')||~fname.indexOf('.nwk')){
+					var setmeta = !~outfile.indexOf(fname)? 'communicate(\'writemeta\',{id:\''+item.id+'\',key:\'outfile\',value:\''+
+					fname+'\'});' : '';
+					str += '<a class="button" style="right:60px" title="Open this file'+(setmeta?' (and make it the default output file)':'')+
+					'" onclick="'+setmeta+'getfile({id:\''+item.id+'\',file:\''+fname+'\',btn:this})">Open</a>';
 				}
 				str += '<a class="button" onclick="dialog(\'export\',{exporturl:\''+settingsmodel.userid()+
 				'?type=text&getanalysis='+item.id+'&file='+fname+'\'})" title="View file content">View</a></div>';
@@ -934,10 +939,11 @@ var koModel = function(){
 	self.seqsource = settingsmodel.seq;
 	self.sourcetype = ko.observable('');
 	self.ensinfo = ko.observable({});
-	//button menus
+	//MSA selection modes
 	self.selmodes = ['default','columns','rows'];
 	self.selmode = ko.observable(self.selmodes[0]);
 	self.setmode = function(mode){ self.selmode(mode); toggleselection(mode); };
+	//content for top toolbar menus. Consumed by topmenu()
 	self.filemenu = [{txt:'Library',act:'library',icn:'files',inf:'Browse library of past analyses',req:['online']},
 		{txt:'Import',act:'import',icn:'file_add',inf:'Open a dataset in Wasabi'},
 		{txt:'Export',act:'export',icn:'file_export',inf:'Convert current dataset to a file',req:['data']},
@@ -949,8 +955,9 @@ var koModel = function(){
 		{txt:'Prune tree',act:'treetool',icn:'prune',inf:'Prune/hide tree leafs',req:['tree']},
 		{txt:'Translate',act:'translate',icn:'book_open',inf:'Translate sequence data',req:['seq']},
 		{txt:'Settings',act:'settings',icn:'settings',inf:'Adjust Wasabi behaviour'}];
-	//notifications
-	self.errors = ko.observable('').extend({enable: self.helsinki}); //error reporting only for public wasabi
+	self.pluginsmenu = []; //placeholder for plugin tools
+	//notifications state
+	self.errors = ko.observable('').extend({enable: self.helsinki}); //error reporting (for public Wasabi server)
 	self.treealtered = ko.observable(false); //tree strcture has been modified
 	self.noanc = ko.observable(false); //tree has missing ancestral nodes
 	self.update = ko.pureComputed(function(){ //wasabi update available 
@@ -1119,9 +1126,9 @@ var koExport = function(){
 	self.savetargets = ko.computed(function(){
 		var openitem = librarymodel.openitem();
 		if(openitem && !openitem.shared){
-			var targets = [{name:'next step of input', type:'child'}];
-			if(!unwrap(openitem.children)) targets.push({name:'overwrite of input', type:'overwrite'});
-			if(unwrap(openitem.parentid)) targets.push({name:'alternative version of input', type:'sibling'});
+			var targets = [{name:'next step of current', type:'child'}];
+			if(!unwrap(openitem.children)) targets.push({name:'overwrite of current', type:'overwrite'});
+			if(unwrap(openitem.parentid)) targets.push({name:'alternative version of current', type:'sibling'});
 			targets.push({name:'new root level', type:'new'});
 		} else { var targets = [{name:'new root', type:'new'}]; }
 		self.savetarget(targets[0]);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
@@ -1324,7 +1331,7 @@ function communicate(action, senddata, options){
 	
 	var formdata = options.form? new FormData(options.form) : new FormData();
 	formdata.append('action', action);
-	$.each(senddata,function(key,val){ //convert all sent data to formdata
+	$.each(senddata, function(key,val){ //convert all sent data to formdata
 		if(typeof(val)=='object') val = JSON.stringify(val);
 		if(typeof(val)!='undefined' && val) formdata.append(key,val);
 	});
@@ -1333,34 +1340,6 @@ function communicate(action, senddata, options){
 		if(options.btn.jquery) options.btn = options.btn[0];
 		if(!options.btntxt) options.btntxt = options.btn.innerHTML;
 		if(!options.btntitle) options.btntitle = options.btn.getAttribute('title');
-	}
-	
-	if(options.plugin){ //add input files from plugin container
-		var idnames = {}, nIDs = {}, endid = '', inch = exportmodel.includehidden();
-		var makeids = plugins[options.plugin]._makeids;
-		$.each(plugins[options.plugin],function(poname, po){ //make seq. files & idnames
-			if(po.usename){ //parseexport => filestr || {file:filestr, nameids:{name:id}, endid:idstr}
-				if(~po().indexOf('tree')) return true;
-				var cont = po.container? po.container()[0].imported : false;
-				var exported = parseexport(po.fileformat, {makeids:makeids, nameids:nIDs, includehidden:inch, startid:endid, container:cont});
-				if(cont) po.container([]);
-				if(makeids){ nIDs = exported.nameids; endid = exported.endid; }
-				formdata.append(po.usename, exported.file||exported);
-			}
-		});
-		$.each(plugins[options.plugin],function(poname, po){ //make tree files
-			if(po.usename){
-				if(!~po().indexOf('tree')) return true;
-				var cont = po.container? po.container()[0].imported : false;
-				var exported = parseexport(po.fileformat, {nameids:nIDs, container:cont});
-				if(cont) po.container([]);
-				formdata.append(po.usename, exported.file||exported);
-			}
-		});
-		if(makeids){
-			$.each(nIDs, function(name,id){ idnames[id] = name; }); //remap
-			formdata.append('idnames', JSON.stringify(idnames));
-		}
 	}
 	
 	var retryfunc = function(){ communicate(action,senddata,options) }; //resend request
@@ -1602,9 +1581,10 @@ function savefile(btn){
 	return false;
 }
 
-//submit an alignment job
+//submit a background job to Wasabi server (Prank aligner + plugins)
 function sendjob(options){
 	var datalimit = settingsmodel.datalimit, joblimit = settingsmodel.joblimit;
+	//check quotas
 	if(datalimit){
 		var bplimit = datalimit*100000;
 		if(model.totalseqlen()>bplimit){
@@ -1623,14 +1603,12 @@ function sendjob(options){
 		'<br>Terminate or wait for a job to finish before launching a new one.');
 		return false;
 	}
-
+	
+	//construct payload to server
 	var senddata = {};
 	senddata.name = options.name||exportmodel.savename()||'Remote job';
 	senddata.writemode = exportmodel.savetarget().type;
-	if(librarymodel.openitem()){
-		if(librarymodel.openid()) senddata.id = librarymodel.openid();
-		if(librarymodel.openparent()) senddata.parentid = librarymodel.openparent();
-	}
+	if(librarymodel.openid()) senddata.id = librarymodel.openid();
 	
 	var nodeinfo = {};
 	$.each(leafnodes, function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
@@ -1642,31 +1620,80 @@ function sendjob(options){
 	alignbtn.click(closewindow);
 	alignbtn.attr('title','Click to close the window');
 	
+	var action = 'startalign'
 	var optdata = {btn:alignbtn[0]};
 	
-	if(options.plugin){ //plugin input options cleanup
-		var optform = $(options.form).clone(), useopenseq = false;
-		optform.find('select, input:not([name]), input[type=file], input[type=checkbox]:not(:checked)').remove();
-		optform.find('input[type=checkbox]').val('true');
-		optform.find('input').filter(function(){ return this.value=="false"||!this.value.trim().length; }).remove();
-		optform.find('input[fileformat]').each(function(){ //prepare file input options
-			var oname = this.getAttribute('name'), fformat = this.getAttribute('fileformat'), tname = this.getAttribute('trackname');
-			var popt = plugins[options.plugin][tname];
-			if(!popt.container && !~popt().indexOf('tree')) useopenseq = true;
-			if(fformat == 'original') fformat = popt.container? (popt.container()[0].imported.ftype.split(':')[1].trim()||'text'):'text';
-			var fname = 'input'+oname.replace(/\W+/g,'_')+(exportmodel.fileexts[fformat]||'.txt');
-			popt.usename = fname;
-			this.setAttribute('value', fname);
-		});
-		if(!useopenseq){ delete senddata.nodeinfo; delete senddata.ensinfo; } //drop unused metadata
+	if(options.plugin){ //process plugin interface input form
+		var optform = $(options.form).clone();
+		var plugin = plugins[options.plugin];
+		var useopenseq = false;
+		var params = [];
 		
-		options.form = optform[0];
-		optdata.plugin = options.plugin;
-		senddata.program = plugins[options.plugin]._program;
-		senddata.folder = plugins[options.plugin]._folder;
-		senddata.outfile = unwrap(plugins[options.plugin]._outfile);
-		senddata.prefix = plugins[options.plugin]._prefix;
-		senddata.name = unwrap(plugins[options.plugin]._libraryname);
+		//input elements cleanup
+		optform.find('select, input:not([name]), input[type=file], input[type=checkbox]:not(:checked)').remove(); //remove dummy inputs
+		optform.find('input').filter(function(){ return this.value=="false"||!this.value.trim().length; }).remove(); //remove empty inputs
+		optform.find('input[type=checkbox]').val('true'); //normalize checkbox input values
+		
+		//process inputs
+		var makeIDs = plugin._makeids; //convert taxanames to IDs (if enabled)
+		var nameIDs = {}, endID = '', IDnames = {}, filenames = {}; //file converter helpers
+		optform.find('input').each(function(){
+			var optname = this.name.replace(/^\W+/,'');
+			var tname = this.getAttribute('trackname');
+			var fformat = this.getAttribute('fileformat');
+			var popt = plugin[tname||optname]; //option in the datamodel
+			if(!popt){ console.log(tname); console.log(this); return true; }
+			
+			if(fformat){ //input file parameter: add filecontent
+				var fformat = popt.fileformat;
+				var fcont = popt.container? popt.container()[0].imported : false; //user-supplied file
+				
+				//add input file content from plugin container
+				if(~popt().indexOf('tree')){ //make tree file
+					var exportopt = {nameids:nameIDs, container:fcont};
+				} else {
+					var exportopt = {makeids:makeIDs, nameids:nameIDs, includehidden:exportmodel.includehidden(), startid:endID, container:fcont};
+					if(!fcont) useopenseq = true; //option uses currently imported sequence
+				}
+				
+				var exported = parseexport(fformat, exportopt); //generate file
+				if(fcont) popt.container([]); //clear file input
+				if(makeIDs){ nameIDs = exported.nameids; endID = exported.endid; } //keep track of generated taxa IDs
+				
+				if(fformat == 'original') fformat = fcont? (fcont.ftype.split(':')[1].trim()||'text'):'text';
+				var fname = 'input_'+(tname&&!/trackName/.test(tname)? tname : popt()); //filename: predefined or from data type
+				if(!filenames[fname]) filenames[fname] = 1;
+				else fname += ++filenames[fname]; //avoid filename clash
+				if(!~fname.indexOf('.')) fname += exportmodel.fileexts[fformat]||'.txt'; //file extension
+				senddata[fname] = exported.file||exported; //add filecontent to payload ("filename" = filecontent)
+				this.value = fname; //option value = "filename"
+			}
+			
+			var valuesep = optname.length?plugin._valuesep:'';
+			if(~this.value.indexOf(' ')) this.value = '"'+this.value+'"'; //space in value
+			if(this.value.length){ //add parameter to the list
+				var param = (optname.length?this.name:'')+(this.value=='true'?'':valuesep+this.value);
+				params.push(param); //param = paramname (flag) | paramvalue (positional) | paramname=paramvalue
+			}
+		});
+		
+		if(makeIDs){ //keep track of generated taxaIDs
+			$.each(nameIDs, function(name,id){ IDnames[id] = name; });
+			senddata.idnames = IDnames;
+		}
+		if(!useopenseq){ delete senddata.nodeinfo; delete senddata.ensinfo; } //sequence metadata not needed
+		
+		plugin._log('Parsed command: '+plugin._program+' '+params.join(' '));
+		
+		//add plugin parameters to senddata
+		senddata.params = params.join('|'); //send parameters as "param1|param2 val2|..."
+		options.form = false;
+		//options.form = optform[0]; //send parameters as key/value form data
+		//senddata.valuesep = valuesep;
+		senddata.program = plugin._program;
+		senddata.path = plugin._path;
+		senddata.outfile = unwrap(plugin._outfile);
+		senddata.name = unwrap(plugin._libraryname);
 	}
 	else{ //(manual or auto) prank alignment
 		var exportdata = parseexport('fasta',{makeids:true,includehidden:exportmodel.includehidden()}); //{file:fastafile,nameids:{name:id}}
@@ -1704,8 +1731,8 @@ function sendjob(options){
 	};
 	optdata.timeout = 4000;
 	
-	communicate('startalign', senddata, optdata);
-	_paq.push(['trackEvent', 'align', options.plugin?'pagan':'prank']); //record event
+	communicate(action, senddata, optdata); //send payload to server
+	_paq.push(['trackEvent', 'align', options.plugin||'prank']); //record event
 	return false;
 }
 
@@ -1894,7 +1921,7 @@ function getfile(opt){
 		var importmetaerror = function(){ //no importmeta. continue with import
 			download();
 		};
-		download({file:'importmeta.txt', success:importmetasuccess, error:importmetaerror});
+		download({file:'importmeta.txt', success:importmetasuccess, error:importmetaerror}); //first download importmeta
 	}
 	
 	if(opt.id && !opt.noimport){ getmeta(); } //import analysis (meta>(show library)>importmeta>import)
@@ -1930,7 +1957,7 @@ function checkfiles(filearr, options){
 	var list = $('<ul>');
 	$.each(filearr,function(i,file){
 		file.i = i;
-		if(typeof file=='string'){ if(~file.search(/https?\:\/\//)){ file = {url:file} } else { file = {}; } }
+		if(typeof file=='string'){ if(file.match(/^https?\:\/\//)){ file = {url:file} } else { file = {}; } }
 		if(!file.name){
 			if(file.url){ var furl = file.url.split('?')[0]; file.name = furl.substring(furl.lastIndexOf('/')+1)||'faulty URL!'; }
 			else file.name = file.id? 'Wasabi analysis' : 'File '+(i+1);
@@ -1983,8 +2010,8 @@ function checkfiles(filearr, options){
 			seticon(i,'spinner');
 			
 			if(file.id){ //wasabi sharing ID
-				getfile({id:file.id, file:file.file, i:file.i, error:showerror, noimport:options.noimport});
-				return false; //skip datacheck, straight to import
+				getfile({id:file.id, file:file.file, i:file.i, error:showerror, noimport:options.noimport, btn:seticon(i)});
+				return false; //skip filecheck, import dataset in getfile()
 			}
 			else if(file.url){ //external url
 				if(settingsmodel.urldomain && !file.url.includes(settingsmodel.urldomain)){
@@ -2000,7 +2027,7 @@ function checkfiles(filearr, options){
 			else if(file.text){ //plain text
 				loadfile(file.text);
 			}
-			else{ //local file?
+			else{ //local file
 				var reader = new FileReader(); 
 				reader.onload = function(evt){
 					loadfile(evt.target.result);
@@ -2038,6 +2065,7 @@ function checkfiles(filearr, options){
 		}
 		else if(options.noimport) closewindow(infowindow);
 		else if(container().length){
+			console.log(JSON.parse(container()));
 			errorspan.append('Importing data...<br>');
 			var source = options.source||(options.importurl?'download':'localread');
 			setTimeout(function(){
@@ -2095,6 +2123,8 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		if(options.mode=='check') return;
 		var prefilled = !$.isEmptyObject(Tsequences);
 		Tsequences = {};
+		if(!opt) opt = {};
+		if(opt.starti) seqtxt = seqtxt.substr(opt.starti);
 		
 		if(format=='json'){
 			var gotsource = false;
@@ -2138,7 +2168,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				seqtxt = seqtxt.replace(/^[ \:\.\*]+$/mg,'');
 			}
 			else if(format=='nexus'){
-				seqtxt = seqtxt.substring(opt.starti, seqtxt.indexOf(';', opt.starti));
+				seqtxt = seqtxt.substring(0, seqtxt.indexOf(';'));
 				seqtxt = seqtxt.replace(/\[.+\]/g,''); //remove nexus comments
 				if(opt.gap && opt.gap!='-') seqtxt = seqtxt.replace(new RegExp(opt.gap,'g'),'-'); //custom gap char  
 			}
@@ -2353,7 +2383,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				}
 			}
 		}
-		else if(/^\s*\(+['"]?[\w]+.*\;\s*$/.test(file)){ //newick tree
+		else if(/^\s*\(+[\s\S]+\;\s*$/.test(file)){ //newick tree
 			parsetree(file, filename);
 		}
 		else{
@@ -3328,7 +3358,7 @@ function titlemenu(e){
 }
 
 //titlebar menus
-function topmenu(e,btn,menuid){
+function topmenu(e, btn, menuid){
 	var $btn = $(btn);
 	e.preventDefault();
 	e.stopPropagation();
@@ -3341,11 +3371,17 @@ function topmenu(e,btn,menuid){
 		data: model.seqsource()||model.treesource(),
 		sharing: settingsmodel.sharelinks()
 	};
+	has.sequence = has.seq;
 	
-	var modeldata = unwrap(model[menuid]) || {};
-	$.each(modeldata, function(i,rdata){
+	var modeldata = unwrap(model[menuid]) || [];
+	if(menuid == 'toolsmenu' && model.pluginsmenu.length) modeldata = model.pluginsmenu.concat("<hr>", modeldata);
+	$.each(modeldata, function(i, rdata){
 		var row = {};
-		if(menuid == 'undostack'){
+		if (typeof(rdata)=='string'){
+			menudata[rdata] = {};
+			return true;
+		}
+		else if(menuid == 'undostack'){
 			rdata.txt = i;
 			row.txt = rdata.name;
 			row.icon = rdata.type;
@@ -3358,16 +3394,18 @@ function topmenu(e,btn,menuid){
 			row.click = typeof(rdata.act)=='function'? rdata.act : function(){ dialog(rdata.act) };
 			row.css = rdata.css||'';
 			if(rdata.req){ //conditional menu items
-				$.each(rdata.req,function(r,req){
-					if(!has[req]){
+				$.each(rdata.req, function(r,req){
+					if(!has[req]){ //requirement missing => make inactive
 						row.click = req=='online'? function(){dialog('jobstatus')} : '';
-						row.css = {'opacity':'0.2'}; return false;
-			}});}
+						return false;
+					}
+			});}
 		}
-		if(!row.click) return true;
-		else menudata[rdata.txt] = row;
+		if(!row.click && !rdata.keep) return true; //remove inactive items
+		menudata[rdata.txt] = row;
 	});
 	if(!Object.keys(menudata).length) title = 'No items';
+	//build the menu
 	tooltip('',title,{clear:true, target:btn, arrow:'top', data:menudata, style:'white topmenu greytitle', id:menuid});
 }
 
@@ -3453,7 +3491,7 @@ function treemenu(node){
 
 //make tooltips & pop-up menus 
 //args: (event,'title',{target:elem,style:'white',css,arrow:'top'/'bottom',data:{menudata},clear,hoverhide/nohide/clickhide,ko:koModel)
-function tooltip(evt,title,options){
+function tooltip(evt, title, options){
 	if(!options) options = {};
 	var tipdiv = options.id? $('#'+options.id) : [];
 	if(tipdiv.length){ //use existing tooltip
@@ -3567,7 +3605,7 @@ function tooltip(evt,title,options){
       else{ //list-type menu: {click/over/out:func(), icon:'svgicn', txt:'txt', t:'title', css/class:'css', add:'html', submenu:[items]}
 		menutooltip = true;
     	var ul = $('<ul>');
-		$.each(options.data,function(txt,obj){  //{item}||[items]: 'txt'||'txt':func()||'txt':item||'txt':[items]
+		$.each(options.data, function(txt, obj){  //{item}||[items]: 'txt'||'txt':func()||'txt':item||'txt':[items]
 			if(typeof(obj)=='undefined') return true;
 			var li = $('<li>');
 			if(!obj) obj = {};
@@ -3593,7 +3631,7 @@ function tooltip(evt,title,options){
 			if(typeof(obj.click)=='function'){
 				li.click(function(e){ e.stopPropagation(); hidetooltip(); obj.click(); });
 				if(treetip && !obj.noref) li.click(refresh); //treemenu click followup
-			}
+			} else if(!obj.submenu){ obj.class = obj.class||'inactive'; } //plain text menu item
 			if(obj.over) li.mouseenter(obj.over);
 			if(obj.out) li.mouseleave(obj.out);
 			if(obj.add) li.append(obj.add);
@@ -3705,7 +3743,7 @@ function expandtitle(options){
 	return titlediv;
 }
 
-/* Generate pop-up windows */
+//Generate pop-up dialog windows
 function makewindow(title,content,options){ //(string,array(,obj{flipside:'front'|'back',backfade,btn:string|jQObj|array,id:string},jQObj))
 	if(!options) options = {};
 	if(!$.isArray(content)) content = [content];
@@ -3758,9 +3796,13 @@ function makewindow(title,content,options){ //(string,array(,obj{flipside:'front
 	var headerdiv = $('<div class="windowheader"></div>');
 	if(options.header){ $.each(options.header,function(i,val){ headerdiv.append(val) }); }
 	if(options.icn){
-		var imgdir = options.plugin? 'plugins/'+options.plugin : 'images';
-		if(options.icn.indexOf('.')==-1) options.icn+='.png';
-		title = '<img class="windowicn" src="'+imgdir+'/'+options.icn+'"> '+title;
+		if(options.plugin){ var imgsrc = '?plugin='+options.plugin+'&file='+options.icn; }
+		else{
+			var imgsrc = options.icn;
+			if(imgsrc.charAt(imgsrc.length-4)!='.') imgsrc += '.png';
+			if(imgsrc.substr(0,6)!='images/') imgsrc = 'images/'+imgsrc;
+		}
+		title = '<img class="windowicn" src="'+imgsrc+'"> '+title;
 	}
 	titlediv.html(title);
 	$.each(content,function(i,item){ contentdiv.append(item); });
@@ -3808,505 +3850,14 @@ function closewindow(elem, addfunc){
 	else elem = $(elem);
 	elem.each(function(){ //click the close button of associated window(s)
 		var el = $(this);
-		var windiv = el.hasClass('popupwindow')? el : el.hasClass('popupwrap')? $(el[0]) : el.closest('div.popupwindow');
+		if(el.hasClass('popupwrap')) el = el.children().first();
+		var windiv = el.closest('div.popupwindow');
 		if(typeof(addfunc)=='function') windiv.find('.closebtn').click(addfunc);
 		else windiv.find('.closebtn').click();
 	});
 }
 
-//constructor for creating Wasabi plugin interfaces
-var plugins = {}; //plugins container
-
-pluginModel = function(pdata, pname){
-	//initial tracked values
-	this.sequence = model.seqtype;
-	this.tree = model.treesource;
-	//plugin state
-	this._errors = [];
-	this._submitted = ko.observable(false);
-	this._program = '';
-	this._folder = pname;
-	this._prefix = '-';
-	this._libraryname = ko.observable('my analysis');
-	this._makeids = false;
-	this._title = pname || 'Wasabi plugin';
-	this._icon = {};
-	this._outfile = '';
-	this._json = pdata;
-	this.registerPlugin();
-};
-
-pluginModel.prototype = {
-	//API error feedback
-	apierr: function(errtxt, iswarning){
-		var addtxt = iswarning?'warning':'error';
-		if(this._curopt){ addtxt += ' when parsing "'+this._curopt+'"'; }
-		var errtxt = this._title+' Wasabi plugin '+addtxt+': '+errtxt+'!';
-		if(!iswarning) this._errors.push(errtxt);
-		console.log(errtxt);
-		return '';
-	},
-	
-	//find option-bound observables
-	getOption: function(option){
-		if(option in this) return this[option];
-		for(var n in this){ if(this[n].optionname && this[n].optionname == option) return this[n]; }
-		return false;
-	},
-	
-	//translate API words to Javascript (observables/logic/quoted text)
-	processValue: function(expr){
-		var obsname = function(name){ //detect and format observable name
-			return typeof(this[name])=='function'? (~name.indexOf(' ')||~name.indexOf('-')? "$data['"+name+"']()" : name+"()") : false;
-		}.bind(this);
-		var quote  = function(exp){ try{ JSON.parse(exp) }catch(e){ return "'"+exp+"'" }; return exp; } //quote strings
-		var api = {'is':'==', 'is equal to':'==', 'equals':'==', 'contains':'.indexOf(', 'is not':'!=', 'is less than':'<', 
-			'is more than':'>', 'not ':'!', 'no ':'!', 'invert ':'!', 'no':'false', 'off':'false', 'disable':'false', 
-			'yes':'true', 'on':'true', 'ticked':'true', 'checked':'true', 'selected':'true', 'and':'&&', 'or':'||', 'imported':''};
-
-		if(typeof(expr)=='string'){
-			expr = expr.trim();
-			if(obsname(expr)){ expr = obsname(expr); }
-			else{  //translate the logic API words and detect observables
-			  expr = expr.replace(/'.+'|is equal to|is not|is less than|is more than|no |not |invert |[\w\-]+/g, function(match, index){
-			  	if(match.indexOf("'")==0){
-			  		var unq = match.replace(/'/g,"");
-			  		return obsname(unq) || match;
-			  	}
-			  	else if(match=="invert" && index>(expr.length-7) && this._curopt){
-			  		return "!"+obsname(this._curopt);  //_curopt = tracking name of currently parsed option
-			  	}
-			  	else{ return obsname(match) || api[match] || quote(match); }
-			  });
-			}
-			expr = expr.replace(/' '/g, " ");
-			return expr;
-		} else { return typeof(expr)=='undefined'? "" : JSON.stringify(expr); } //stringify numbers etc.
-	},
-
-	//Translate API conditional rules to Javascript ('yes/no/is not/{...}','result of rule',['upperLevelObsName'])
-	processRule: function(rule, result, rootvar){
-		if(typeof(result)=='undefined') result = "true";
-		var str = "";
-		
-		if($.isArray(rule)){ //[rule1,rule2,...] => apply sequentially
-			for(var i=0, tmp=''; i<rule.length; i++){
-				tmp = this.processRule(rule[i], result, rootvar);
-				if(i<rule.length-1) tmp = tmp.split(":")[0]+":";
-				str += tmp;
-			}
-		}
-		else if(typeof(rule)=='object'){ //unpack rule objects
-			if(Object.keys(rule).length>1){ //{rule1:res1,rule2:res2} => [{rule1:res1},{rule2:res2}]
-				var rulearr = [];
-				$.each(rule,function(subrule,subresult){ var ruleobj={}; ruleobj[subrule] = subresult; rulearr.push(ruleobj); });
-				str = this.processRule(rulearr, result, rootvar);
-			} else {  //{'rule':result}
-				varname = Object.keys(rule)[0];
-				varresult = rule[varname];  //if {"varname":{varval:result}} else {"varname":result}
-				if(typeof(varresult)=='object') str = this.processRule(varresult, result, varname);
-				else str = this.processRule(varname, varresult, rootvar);
-			}
-		}
-		else{  //translate preprocessed rule
-			if(!isNaN(rule)){ return JSON.parse(rule); }
-			else if(typeof(rule)!='string'){ return JSON.stringify(rule); }
-			
-			rule = this.processValue(rule);
-			result = this.processValue(result);
-			rootvar = this.processValue(rootvar);
-							
-			var compare = function(rule){ //add '==' if needed (rule is rootvarValue)
-				return ~["!","=","<",">","~","."].indexOf(rule.charAt(0))? rule: "=="+rule;
-			}
-			str = rootvar? rootvar+compare(rule) : rule;
-			if(rootvar && ~str.indexOf(".indexOf")) str = "~"+str+")";
-			var negresult = (!result||result=="true")?"false":result=="false"?"true":"\'\'";
-			if(result!=="true" || rootvar) str += "?"+result+":"+negresult;
-		}
-		return str;
-	},
-	
-	//processRule string => function
-	ruleFunc: function(rule, appendstr){
-		var funcstr = this.processRule(rule).replace(/\$data/g,"this").replace(/\w+\(\)/g,"this.$&")+(appendstr||'');
-		try{ var rfunc = new Function("return "+funcstr); }catch(e){ return this.apierr("Faulty rule function ("+e+"): "+rule+" => "+funcstr); }
-		return rfunc.bind(this);		
-	},
-
-	//Create a plugin interface (input) element
-	processOption: function(data, prefix){
-		if(typeof(data)=='string'){ //string => user interface text
-			data = data.replace(urlregex, makeurl);
-			var box = $('<span>'+data+'</span>');
-			$("a", box).each(function(i,el){ if(this.hasAttribute("href")) this.setAttribute("target","_blank"); });
-			return box;
-		} else if (typeof(data)!='object') return '';
-		if(!prefix) prefix = data.prefix||this._prefix;
-		
-		var types = {"text":"", "string":"text", "textbox":"text", "number":"text", "int":"text", "float":"text", "bool":"checkbox", 
-			"tickbox":"checkbox", "switch":"checkbox", "checkbox":"", "hidden":"", "output":"hidden", "select":"", "file":""};
-		var t = data.type && (data.type in types)? data.type : "text", classname = ""; //option type
-		
-		for(var k in data){ if(k in types){ t = k; if(data[k] && !data.title) data.title = data[k]; }} //shorthand "title" 
-		if(!data.name) data.name = data.option||"trackName"+Object.keys(this).length; //register tracking/reference name
-		var trackname = this._curopt = data.name;
-		var firstrun = !(trackname in this); //first occurrence in JSON
-		if(~["number","float","int"].indexOf(t)){
-			if(firstrun) this[trackname] = ko.observable('').extend({format: t});
-			else this[trackname].extend({format: t});
-			classname = "num";
-		}
-		else if(firstrun) this[trackname] = ko.observable('');
-		var kovar = "$data['"+trackname+"']";
-		
-		if(firstrun && t=="output"){ //register output file
-			var outfilename = data.default||data.output||"";
-			if(outfilename && !this._outfile) this._outfile = outfilename;
-			data.default = "'$path$"+outfilename+"'";
-		}
-		if(types[t]) t = types[t]; //t="text"/"checkbox"/"hidden"/"select"/"file"
-		
-		var el = $("<"+(t=="select"?"select":"input")+">").attr("type", t); //create input element
-		if(classname) el.addClass(classname);
-		if("option" in data){
-			if(/^\W/.test(data.option)) prefix = "";  //prefix already in argname
-			el.attr("name", prefix+data.option); //program command-line flag
-			this[trackname].optionname = data.option;
-		}
-		kobind = (t=="checkbox"?"checked":"value")+":"+kovar+", name:'"+trackname+"'"; //bind interface input to tracked value
-		if(data.fixed) kobind += ", disable:"+this.processRule(data.fixed);
-		var elems = [];
-		
-		if(t=="select"){ //build selectable list of options/values
-			if(!$.isArray(data.selection)){ this.apierr('"select" option needs the "selection" array'); data.selection = []; }
-			var selarr = trackname+"_selection";
-			var defsel = false;
-			var firstrunsel = !(selarr in this); //option first time defined as selection
-			if(firstrunsel) this[selarr] = [];
-			for(var sindex in data.selection||[]){ //parse selection list items
-				var sel = data.selection[sindex];
-				var selitem = {t:'', v:'', d:'', opt:{}};
-				if(typeof(sel)=='string' || typeof(sel)=='number'){ selitem.t = selitem.v = sel; } //string item
-				else if(typeof(sel)=='object'){ //parse object item
-					if(!("value" in sel) && typeof(sel.default)=='string' && sel.default!="yes") sel.value = sel.default;
-					else if(typeof(sel.value)=='object'){ this.apierr('selection item "value" needs to be a string (object instead)'); continue; }
-					if(!("title" in sel)){ //fill missing title/value
-						selitem.t = typeof(sel.option)=='string'? sel.option : ("value" in sel)? sel.value : '';
-					} else if(typeof(sel.title)=='object'){ this.apierr('selection item "title" needs to be a string (object instead)'); continue; }
-					else selitem.t = sel.title;
-					selitem.v = ("value" in sel)? sel.value : selitem.t;
-					if(typeof(sel.desc)=='string') selitem.d = sel.desc;
-					if("default" in sel || selitem.v===''){ defsel = true; if(selitem.v) this[trackname](selitem.v); } //initial selection
-					
-					//if(typeof(sel.desc)=='string'){ //add description of selected item
-					//	if(firstrunsel) this[selarr][this[selarr].length-1].d = sel.desc;
-					//	if(!this[trackname].desc){
-					//		this[trackname].desc = ko.pureComputed(function(){
-					//			var val = this[trackname]();
-					//			return val?(ko.utils.arrayFirst(this[selarr], function(o){ return o.v == val; }).d||''):'';
-					//		}, this);
-							//elems.push('<pre data-bind="text: ko.toJSON('+kovar+'.desc, null, 2)"></pre>') //debug
-					//		elems.push('<div class="inputdesc" data-bind="text:'+kovar+'.desc">');
-					//	}
-					//}
-					
-					if(sel.option){ //register other options set by the selection
-						if(!$.isArray(sel.option)) sel.option = [sel.option];
-						for(var optindex in sel.option){
-							var selopt = sel.option[optindex];
-							if(typeof(selopt)=='string'){ selitem.opt[selopt] = true; }
-							else if(typeof(selopt)=='object'){ $.extend(selitem.opt, selopt); }
-							else{ this.apierr('selection item "option" attribute needs to be string or object'); continue; }
-						}
-					}	
-				}else{ this.apierr('selection item needs to be string, number or object'); }
-				if(firstrunsel){ this[selarr].push(selitem); }//add selection item
-			} //foreach selection item
-			
-			if(firstrunsel){ //add selection list description/option trackers
-				this[trackname].sindex = ko.pureComputed(function(){ //track index of selected opt
-					return indexOfObj(this[selarr], 'v', this[trackname]());
-				}, this);
-			}
-			
-			var dstr = "option";
-			if(data.extendable){ //editable select list
-			  if(firstrunsel){
-				this[trackname].edit = ko.observable(false);
-				this[trackname].editSave = function(){
-					var editindex = this[trackname].edit();
-					if(editindex===false){ //enable edit mode
-						this[trackname].edit(this[trackname].sindex());
-					} else { //save edits
-						if(editindex==-1){ //add new
-							var newv = this[trackname]();
-							this[selarr].push({t:newv, v:newv});
-						} else { this[selarr][editindex].v = newv; }
-						this[trackname].edit(false);
-					}
-				};
-				this[trackname].rem = function(){
-					var editindex = this[trackname].edit();
-					if(editindex==-1){ this[trackname](this[selarr][sindex].t); }
-					else{ this[selarr].splice(editindex, 1); }
-					this[selarr].edit(false);
-				};
-			  }	
-			  if(data.extendable=="configurations"){ dstr = 'preset'; data.title = "Saved options:"; }
-			  
-			  elems.unshift('<input data-bind="fadevisible:!isNaN('+kovar+'.edit()),value:'+kovar+'" style="width:180px" placeholder="Type new '+dstr+'"></input>'+
-			  '<a class="button small square" data-bind="click:'+kovar+'.editSave,text:isNaN('+
-				kovar+'.edit())?\'Edit\':\'Save\',attr:{title:isNaN('+kovar+'.edit())?\'Edit this '+dstr+'\':\'Save changes\'"></a> '+
-				'<a class="button small square" data-bind="visible:'+kovar+'.edit()>0,click:function(){'+kovar+'(\'\');'+kovar+'.edit(-1)}" title="Add new '+dstr+'">New</a>'+
-				'<a class="button small square red" data-bind="visible:!isNaN('+kovar+'.edit()),click:'+kovar+'.rem"  title="Remove this '+dstr+'">Remove</a>');	
-			}//if extendable
-			if(firstrunsel && !defsel) this[selarr].unshift({t:"Choose "+dstr, v:""}); //no selection by default
-			kobind += ", options:"+selarr+", optionsValue:'v', optionsText:'t'";
-		}//if select
-		else if(t=="hidden" && !data.default) data.default = data.hidden||true;
-		
-		if("default" in data){ kobind += ", default:"+this.processRule(data.default); } //'default' is a custom binding
-		el.attr("data-bind", kobind);
-		
-		if(t=="file"){
-		  var format = data.fileformat||"fasta";
-		  el.attr({"type":"hidden", "fileformat":format, "trackname":trackname});
-		  var source = data.file || data.source || "current sequence";
-		  
-		  if(source.substr(0,7) != "current"){ //data source: external data
-		   if(![trackname].fileformat){
-			this[trackname].fileformat = format;
-			this[trackname].container = ko.observableArray([]);
-			this[trackname].filename = ko.observable('');
-			this[trackname].container.subscribe(function(newarr){
-			if(newarr.length && ('imported' in newarr[0]) && ('type' in newarr[0].imported)){
-				this[trackname](newarr[0].imported.type);
-				this[trackname].filename(newarr[0].name||'imported data');
-			} else this[trackname]('');
-			}, this);
-			this[trackname].container.get = function(name){ return ko.utils.arrayFirst(container(), function(item){ return item.name==name; }); };
-		   }
-		    var container = this[trackname].container;
-		  
-			if(~source.indexOf("filedrop")){ //filedrop area
-				var filedrag = $('<div class="filedrag">'+(data.title||'Drop file here')+'</div>');
-				filedrag.bind('dragover',function(evt){ //file drag area
-					filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-					evt.originalEvent.dataTransfer.dropEffect = 'copy';
-				}).bind('dragleave',function(evt){
-					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-				}).bind('drop',function(evt){
-					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-					var origtxt = filedrag.text(), filehandle = evt.originalEvent.dataTransfer.files;
-					filedrag.text('Importing...');
-					setTimeout(function(){
-						checkfiles(filehandle, {onefile:true, silent:true, nocheck:format=="original", container:container});
-						setTimeout(function(){ filedrag.text(origtxt); }, 1000);
-					},100);
-				});
-			} else var filedrag = ''; 
-			if(~source.indexOf("import") || ~source.indexOf("fileselect")){ //import/select button
-				var impbtn = ~source.indexOf("import");
-				var or = $('<span style="display:inline-block;font-size:18px;">'+(filedrag?' or ':'')+'</span>');
-				var importbtn = $('<a class="button" style="vertical-align:0">'+(impbtn?'Import':'Select')+'</a>');
-				if(impbtn){
-					importbtn.click(function(e){ return dialog('import', {onefile:true, silent:true, nocheck:format=="original", container:container}); });
-				} else {
-					var fileinput = $('<input type="file" multiple style="display:none" name="upfile">');
-					fileinput.change(function(){ checkfiles(this.files, {onefile:true, silent:true, nocheck:format=="original", container:container}); });
-					or.append(fileinput);
-					importbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
-				}
-			} else { var or = '', importbtn = ''; }
-			
-			var importdiv = $('<div data-bind="visible:!'+kovar+'()">').append(filedrag, or, importbtn);
-				
-			var filelist = $('<div data-bind="if:'+kovar+'">'+(data.desc||'Use file')+': <img class="icn" src="images/file.png"> <span data-bind="text:'+kovar+'.filename"></span></div>');
-			var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;" data-bind="click:function(){'+kovar+'.container([])}">'+svgicon('close')+'</span>');
-			var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{exportdata:'+kovar+'.container()[0]})}">View</a>');
-			filelist.append(filedel, fileview);
-			elems.push(importdiv,filelist);
-		  } else { //data source: loaded data
-			el.attr("source", source);
-			if(![trackname].fileformat){
-			  this[trackname] = ko.pureComputed(function(){ //foption()=> 'seqtype'||'tree'||'seqtype tree'
-				var dtype = source.split(' ')[1]||'data', seq = this.sequence(), tree = this.tree()?'tree':'';
-				return dtype=='sequence'? seq : dtype=='tree'? tree : (seq||tree)?seq+' '+tree : '';
-			  }, this);
-			  this[trackname].fileformat = format;
-			}
-		  }
-		}
-		
-		if(data.required || data.check){ //input validation
-			var rqch = data.required || data.check;
-			if(!this[trackname].errmsg){
-			  if(typeof(rqch)=="string"){ //show message when input value missing
-				this[trackname].errmsg = ko.pureComputed(function(){ return !this[trackname]()?rqch:""; }, this);
-			  } else {
-				if(typeof(rqch)=='object'){ //rule obj: evaluate key as rule, display the value as string
-					var rqchrule = Object.keys(rqch)[0];
-					var retfunc = this.ruleFunc(rqchrule, "?'"+rqch[rqchrule]+"':''");
-				} else { var retfunc = this.ruleFunc(rqch); }
-				this[trackname].errmsg = ko.pureComputed(retfunc);
-			  }
-			}
-			elems.push('<!-- ko if:'+(data.required?'$data._submitted()&&':'')+kovar+'.errmsg() --><p class="'+(data.required?'err':'note')+'msg" data-bind="text:'+kovar+'.errmsg"></p><!-- /ko -->');
-			kobind += ', style:{borderColor:'+kovar+'.errmsg()?\'red\':\'\'}';
-		}
-			
-		if(el.attr("type")!="hidden"){ //text next to input
-			var title = data.title? $('<span>'+data.title+'</span>') : ''; //add text
-			if(data.desc){ if(title) title.addClass('label'); (title||el).attr('title',data.desc); }
-			if(title){ el = t=='checkbox'? el.add(title) : title.add(el); }
-		}
-		
-		var box = $("<div>"); //wrap up
-		box.append(el);
-		$.each(elems,function(i,elem){ box.append(elem) }); //add any extra html
-		var existrule = data.enable||data.disable;
-		if(existrule) box.attr("data-bind","if"+(data.disable?"not":"")+":"+this.processRule(existrule));
-		if("line" in data) box.css("display","inline-block");
-		this._curopt = '';
-		return box;
-	},
-	
-	//iterate through options data, convert to HTML
-	buildOptions: function(data, prefix){
-		var UI = $('<div>');
-		if(!data) return this.apierr('empty option','warning');
-		if($.isArray(data.options)){ //group of options
-			if(data.prefix) prefix = data.prefix;
-			for(var o in data.options){ UI.append(this.buildOptions(data.options[o], prefix)); }
-			if("group" in data){
-				UI.addClass("insidediv numinput").css({"display":"none","margin-bottom":0});
-				UI = $('<div>').append(expandtitle({title:data.group||'Options', desc:'Click to toggle options', info:data.desc||'', inline:true, css:{'margin-top':'5px'}}), UI);
-			}
-			else if("section" in data){
-				UI.prepend('<div class="sectiontitle small">'+(data.section?'<span>'+data.section+'</span>':'')+'</div>');
-			}
-			else if("line" in data){
-				if(typeof(data.line)=='string') UI.prepend('<span>'+data.line.trim()+' <span>');
-				$('div',UI).css('display','inline-block');
-			}
-			var existrule = data.enable||data.disable;
-			if(existrule) UI.attr("data-bind","if"+(data.disable?"not":"")+":"+this.processRule(existrule));
-		} else { UI = this.processOption(data, prefix); } //single option
-		return UI;
-	},
-	
-	//build the window and menu entry
-	buildUI: function(data){
-		if(!data) data = this._json;
-		var desc = data.desc? this.processOption(data.desc):''; delete data.desc;
-		var nameinput = $('<input type="text" class="hidden" data-bind="value:_libraryname" title="Click to edit">');
-		var namespan = $('<span class="note">Name the results: </span>').append(nameinput);
-		var writetarget = '<br><!-- ko if:exportmodel.savetargets().length>1 --><span class="label" title="Choose a library slot '+
-		'for the new analysis, relative the to the input (currently open) dataset">Save as</span> '+
-		'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select><!-- /ko -->'+
-		'<!-- ko if:exportmodel.savetargets().length==1 -->The result will be stored as new root<!-- /ko -->'+
-		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
-		exportmodel.savetarget(exportmodel.savetargets()[0]);
-		var inclhidden = '<!-- ko if:model.hiddenlen --><br><input name="includehidden" type="checkbox" data-bind="checked: exportmodel.includehidden">'+
-		'<span class="label" data-bind="attr:{title:\'Include \'+model.hiddenlen()+\' collapsed alignment columns in analysis\'}">'+
-		'include hidden alignment columns</span><!-- /ko -->';
-		var header = $('<div class="insidediv incontent">').append(namespan, writetarget, inclhidden);
-		
-		var optformUI = this.buildOptions(data);
-		if(this.selectoptions){
-			$.each(this.selectoptions, function(soptname, sopt){
-				if(!this[soptname]){ //add unregistered options from selection lists
-					this[soptname] = ko.pureComputed();
-					optformUI.append('<input type="hidden" name="'+sopt.prefix+soptname+'" data-bind="value:$data[\''+soptname+'\']">');
-				}
-			});
-		}
-		
-		var optform = $('<form id="'+this._title+'form" onsubmit="return false"></form>').append(optformUI);
-		var submitbtn = $('<a class="button orange" title="Launch '+this._program+'" data-bind="text:'+(data.submit?this.processRule(data.submit):'\'Send job\'')+'"></a>');
-		submitbtn.click($.proxy(function(){
-			this._submitted(true);
-			var errors = $("p.errmsg",optform);
-			if(errors.length){ //got form errors
-				var origtxt = submitbtn.text();
-				submitbtn.text("Check form errors!");
-				setTimeout(function(){ errors.filter(':hidden').parents('.insidediv').slideDown(); },1000);
-				setTimeout(function(){ submitbtn.text(origtxt); }, 2000);
-				return;
-			}
-			sendjob({form:optform[0], btn:submitbtn, name:nameinput.val(), plugin:this._title}); //send job
-		}, this));
-		
-		return {header: desc, content:[header,optform], btn:submitbtn}; //DOM elements
-	},
-	
-	//prepare plugin
-	checkPlugin: function(){
-		//parse input
-		data = this._json;
-		if(!data) return this.apierr('input JSON missing');
-		if(typeof(data)=='string'){ //JSON or native JS
-			try{ data = JSON.parse(data); }
-			catch(err1){
-				try{ eval("data = "+data); }
-				catch(err2){
-					this.apierr('failed to parse plugin file as JSON: '+err1, 'warning');
-					return this.apierr('failed to parse plugin file as javascript object: '+err2);
-				}
-			}
-		}
-		if($.isArray(data)) data = {options:data};
-		else if(typeof(data)!='object') return this.apierr('plugin file in wrong format: '+typeof(data)+' (JSON/object/array expected)');
-		this._json = data;
-		
-		if(!data.program) return this.apierr('program name missing');
-		this._program = data.program;
-		if(data.prefix) this._prefix = data.prefix;
-		if(data.translate_names) this._makeids = true;
-		if(data.libraryname) this._libraryname(data.libraryname);
-		this._title = data.name || data.program;
-		this._outfile = data.outfile || '';
-		if(typeof(data.outfile)=='object'){ //dynamic output file naming
-			this._outfile = ko.pureComputed(this.ruleFunc(data.outfile));
-		}
-		//make icon file
-		var svgicon = "gear", icon = "../../images/gear.png", imgarr = [];
-		if(typeof(data.icon)=='string') imgarr = [data.icon];
-		else if($.isArray(data.icon)) imgarr = data.icon;
-		$.each(imgarr,function(i,imgstr){
-			if(typeof(imgstr)!='string') return true;
-			if(imgstr.substr(0,10)=='data:image'||~['.png','.jpg','.gif'].indexOf(imgstr.substr(-4))) icon = imgstr;
-			else svgicon = imgstr;
-		});
-		if(svgicon.length>10){ svgpaths[this._title] = svgicon; svgicon = this._title; } //add new svgicon
-		else if(!svgpaths[svgicon]) svgicon = "gear";
-		this._icon = {img:icon, svg:svgicon};
-		
-		if(!data.options) return this.apierr('no options found');
-		return true;
-	},
-	
-	//wire up
-	registerPlugin: function(){
-		this.checkPlugin();
-		if(this._errors.length){  //add error dialog to tools menu
-			console.log("Plugin datamodel dump:"); console.log(this);
-			this._icon.svg = 'error';
-			var errmsg = "<b>Plugin interface building failed for "+this._title+":</b><br><ul><li>"+this._errors.join("</li><li>")+"</li></ul>";
-			var menuclick = dialog.bind(this, "error", errmsg);
-			var menudesc = "This plugin failed to load. Click to see the errors.";
-		} else {  //add plugin to tools menu
-			var menuclick = this._title;
-			var menudesc = data.menudesc||"Launch plugin for "+this._program;
-			plugins[this._title] = this;
-			this.buildUI();
-		}
-		model.toolsmenu.unshift({txt:this._title, act:menuclick, icn:this._icon.svg, inf:menudesc, req:['online']});
-	}
-};
-
-//Generate content for pop-up windows
+//Generate content for dialog windows
 function dialog(type,options){
 	//if(typeof(type.act)!='undefined') type = type.act;
 	if(!options) options = {};
@@ -4319,8 +3870,8 @@ function dialog(type,options){
 		var winid = options.windowid = 'import'+(alt?'_alt':''); var fade = !alt;
 		if(fade) $('div.popupwindow').remove(); //close other windows
 		
-		var localhelp = 'Select file(s) that contain aligned or unaligned sequence (and tree) data. Supported filetypes: fasta(q), (extended)newick, HSAML, NEXUS, phylip, ClustalW, phyloXML etc.';
-		var localheader = '<div class="sectiontitle"><img src="images/hdd.png"><span>Import local files</span><span class="svg" title="'+localhelp+'">'+svgicon('info')+'</span></div><br>';
+		var filehelp = 'Select file(s) that contain aligned or unaligned sequence (and tree) data. Supported filetypes: fasta(q), (extended)newick, HSAML, NEXUS, phylip, ClustalW, phyloXML etc.';
+		var fileheader = '<div class="sectiontitle"><img src="images/hdd.png"><span>Import local files</span><span class="svg" title="'+filehelp+'">'+svgicon('info')+'</span></div>';
 		
 		var filedrag = $('<div class="filedrag">Drag files here</div>');
 		filedrag.bind('dragover',function(evt){ //file drag area
@@ -4345,15 +3896,55 @@ function dialog(type,options){
 		form.append(fileinput);
 		filedrag.append(form);
 		fileinput.change(function(){ checkfiles(this.files, options) });
-		
 		var selectbtn = $('<a class="button" style="vertical-align:0">Select files</a>');
 		selectbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
 		var or = $('<div style="display:inline-block;font-size:18px;"> or </div>');
+		var filecontent = $('<div style="padding-bottom:10px">').append(filedrag, or, selectbtn);
+		
+		var idheader = '<div class="sectiontitle"><img src="images/icon.png"><span>Open Wasabi dataset</span><span class="svg" title="Open a shared Wasabi dataset or analysis collection using dataset ID">'+svgicon('info')+'</span></div>';
+		var idinput = $('<input style="width:100px; margin:5px 5px 0 0" placeholder="Wasabi ID">');
+		var idbtn = $('<a class="button">Open</a>');
+		idbtn.click(function(){
+			var val = idinput.val();
+			if(!val || ~val.indexOf(' ') || val.length<6 || val.length>20) return true;
+			options.source = 'download';
+			checkfiles([{name:'Wasabi analysis', id:val}], options);
+		});
+		var idcontent = $('<div style="padding:0 10px 10px 10px">').append(idinput, idbtn);
+		
+		
+		var ensheader = '<div class="sectiontitle"><img src="images/ensembl.png"><span>Import from <a href="http://www.ensembl.org" target="_blank">Ensembl</a></span>'+
+		'<span class="svg" title="Retrieve a set of homologous sequences corresponding to Ensembl Gene ID, GeneTree ID or a region from an alignment block. Click for more info.">'+
+		'<a href="http://www.ensembl.org/info/website/tutorials/compara.html" target="_blank">'+svgicon('info')+'</a></span></div>';
+		
+		var enscontent = $('<div style="padding:0 10px 10px 10px">');
+		enscontent.append('<select data-bind="options:idformats, optionsText:\'name\', value:idformat"></select>',
+		'<input style="width:210px" type="text" data-bind="attr:{placeholder:idformat().example},value:ensid">');
+		
+		var ensopt = $('<div style="padding:5px">').css({"display":"none"});
+		ensopt.append('Use <select data-bind="options:comparas, value:compara, disable:isblock"></select> genomes database<br>'+
+		'<div data-bind="slidevisible:!isblock()"><span style="color:#888">Search for Ensembl gene ID:</span><br>'+
+		'species <input type="text" data-bind="value:idspecies"/> gene name <input type="text" data-bind="value:idname" style="width:80px"/> '+
+		'<a id="ensidbtn" class="button square"  style="margin:0" onclick="ensemblid()">Get ID</a></div>'+
+		'<div data-bind="slidevisible:isblock()&&!genomes()"><span class="cell">Pipeline type<hr><select data-bind="options:alignblocks,optionsText:\'type\',value:blocktype"></select></span>'+
+		'<span class="cell" data-bind="with:blocktype">Species set<hr><select data-bind="options:set,optionsText:\'name\',value:$parent.blockset"></select></span>'+
+		'<span class="cell" data-bind="with:blockset">Reference species<hr><select data-bind="options:species,optionsText:function(itm){return itm.capitalize().replace(\'_\',\' \')},value:$parent.blockref"></select></div>'+
+		'<span style="color:#888">Options:</span><br>'+
+		'<ul><li>Import '+
+			'<select data-bind="value:aligned"><option value="true">aligned</option><option value="">unaligned</option></select>'+
+			' <select data-bind="disable:isblock, value:seqtype"><option value="cdna">cDNA</option><option value="protein">protein</option></select> sequences</li>'+
+		'<li data-bind="slidevisible:ishomol"><span class="label" title="Select type of homology. Projections are orthology calls defined between alternative assemblies and the genes shared between them">Include</span> <select data-bind="value:homtype" style="margin-top:5px"><option value="all">all homologous</option>'+
+			'<option value="orthologues">orthologous</option><option value="paralogues">paralogous</option><option value="projections">projected</option></select> genes</li>'+
+		'<li data-bind="slidevisible:ishomol">Restrict to a target species <input type="text" data-bind="value:target" style="width:100px"/></li>'+
+		'<li data-bind="slidevisible:isblock"><select data-bind="value:mask"><option value="">Unmask</option><option value="hard">Hard-mask</option><option value="soft">Soft-mask</option></select> repeat sequences</li></ul>');
+		
+		enscontent.append(expandtitle({title:'Import options', desc:'Click to toggle options', target:ensopt}));
+		enscontent.append(ensopt, '<div><a id="ensbtn" class="button" onclick="ensemblimport()">Import</a> <span id="enserror" class="note" style="color:red"></span></div>');
 		
 		var otherhelp = 'Type a web address of a remote data file or Wasabi share link/ID, or paste a raw text of sequence/tree data';
-		var remoteheader = '<br><br><div class="sectiontitle"><img src="images/web.png"><span>Import from other sources</span><span class="svg" title="'+otherhelp+'">'+svgicon('info')+'</span></div><br>';
+		var otherheader = '<div class="sectiontitle"><img src="images/web.png"><span>Import from other sources</span><span class="svg" title="'+otherhelp+'">'+svgicon('info')+'</span></div>';
 		var urladd = $('<a title="Add another input field" class="button urladd">+</a>'); //url inputs+buttons
-		var urlinput = $('<textarea type="url" class="url" placeholder="Type a web address, Wasabi ID or raw data">');
+		var urlinput = $('<textarea type="url" class="url" placeholder="Type a web address or paste raw data">');
 		var expbtn = $('<span class="action icon" style="margin-left:-4px;vertical-align:7px" title="Expand/collapse the input field">&#x25BC;</span>');
 		expbtn.click(function(){
 			var self = $(this), field = self.prev("textarea");
@@ -4371,55 +3962,25 @@ function dialog(type,options){
 			lastel.after("<br>",rmvbtn,urlinput.clone().css('height','').val(''),expbtn.clone(true).html('\u25BC'));
 		});
 		
-		var dwnlbtn = $('<a class="button">Import</a>');
+		var dwnlbtn = $('<div><a class="button">Import</a></div>');
 		dwnlbtn.click(function(){
 			var urlarr = [];
 			$('#'+winid+' .front .windowcontent textarea.url').each(function(i,input){
 				var val = $(input).val();
-				if(!val) return true;
-				if(val.length==6){ //urlbox: analysis ID
-					urlarr.push({name: 'Wasabi analysis', id:val});
-				}
-				else if(~val.search(/https?\:\/\//)){
+				if(val.length<15) return true;
+				if(val.match(/^https?\:\/\//)){
 					if(~val.indexOf(window.location.host) && ~val.indexOf('id=')){ //wasabi shareurl
 						urlarr.push(parseurl(val));
 					} else { urlarr.push({url:val}); } //external url
-				}
-				else if(val.length>20){ urlarr.push({name:'Text input', text:val}); } //raw data	
+				} else { urlarr.push({name:'Text input', text:val}); } //raw data	
 			});
 			options.source = 'download';
 			if(urlarr.length) checkfiles(urlarr, options); 
 		});
+		var othercontent = $('<div style="padding:0 10px">').append(urladd, urlinput, expbtn, dwnlbtn);
 		
-		var ensheader = '<br><br><div class="sectiontitle"><img src="images/ensembl.png"><span>Import from <a href="http://www.ensembl.org" target="_blank">Ensembl</a></span>'+
-		'<span class="svg" title="Retrieve a set of homologous sequences corresponding to Ensembl Gene ID, GeneTree ID or a region from an alignment block. Click for more info.">'+
-		'<a href="http://www.ensembl.org/info/website/tutorials/compara.html" target="_blank">'+svgicon('info')+'</a></span></div><br>';
-		
-		var enscontent = '<div style="padding:0 10px"><select data-bind="options:idformats, optionsText:\'name\', value:idformat"></select>'+
-		' <input style="width:210px" type="text" data-bind="attr:{placeholder:idformat().example},value:ensid"><br>'+
-		'Use <select data-bind="options:comparas, value:compara, disable:isblock"></select> genomes database<br>'+
-		
-		'<div data-bind="slidevisible:!isblock()"><span style="color:#888">Search for Ensembl gene ID:</span><br>'+
-		'species <input type="text" data-bind="value:idspecies"/> gene name <input type="text" data-bind="value:idname" style="width:80px"/> '+
-		'<a id="ensidbtn" class="button square"  style="margin:0" onclick="ensemblid()">Get ID</a></div>'+
-		'<div data-bind="slidevisible:isblock()&&!genomes()"><span class="cell">Pipeline type<hr><select data-bind="options:alignblocks,optionsText:\'type\',value:blocktype"></select></span>'+
-		'<span class="cell" data-bind="with:blocktype">Species set<hr><select data-bind="options:set,optionsText:\'name\',value:$parent.blockset"></select></span>'+
-		'<span class="cell" data-bind="with:blockset">Reference species<hr><select data-bind="options:species,optionsText:function(itm){return itm.capitalize().replace(\'_\',\' \')},value:$parent.blockref"></select></div>'+
-		
-		'<span style="color:#888">Options:</span><br>'+
-		'<ul>'+
-		'<li>Import '+
-			'<select data-bind="value:aligned"><option value="true">aligned</option><option value="">unaligned</option></select>'+
-			' <select data-bind="disable:isblock, value:seqtype"><option value="cdna">cDNA</option><option value="protein">protein</option></select> sequences</li>'+
-		'<li data-bind="slidevisible:ishomol"><span class="label" title="Select type of homology. Projections are orthology calls defined between alternative assemblies and the genes shared between them">Include</span> <select data-bind="value:homtype" style="margin-top:5px"><option value="all">all homologous</option>'+
-			'<option value="orthologues">orthologous</option><option value="paralogues">paralogous</option><option value="projections">projected</option></select> genes</li>'+
-		'<li data-bind="slidevisible:ishomol">Restrict to a target species <input type="text" data-bind="value:target" style="width:100px"/></li>'+
-		'<li data-bind="slidevisible:isblock"><select data-bind="value:mask"><option value="">Unmask</option><option value="hard">Hard-mask</option><option value="soft">Soft-mask</option></select> repeat sequences</li>'+
-		'</ul></div>'+
-		'<a id="ensbtn" class="button" onclick="ensemblimport()">Import</a> <span id="enserror" class="note" style="color:red"></span>';
-		
-		var dialogwindow = makewindow("Import data",[localheader,filedrag,or,selectbtn,ensheader,enscontent,remoteheader,urladd,urlinput,expbtn,'<br>',dwnlbtn],{backfade:fade,flipside:'front',icn:'import.png',nowrap:true,id:winid});
-		ko.applyBindings(ensemblmodel,dialogwindow[0]);
+		var dialogwindow = makewindow("Import data", [fileheader,filecontent, idheader,idcontent, ensheader,enscontent, otherheader,othercontent], {backfade:fade, flipside:'front', icn:'import.png', nowrap:true, id:winid});
+		ko.applyBindings(ensemblmodel, dialogwindow[0]);
 		
 		setTimeout(function(){
 			makewindow("Import data",[],{backfade:false,flipside:'back',icn:'import.png',id:winid});
@@ -4679,13 +4240,13 @@ function dialog(type,options){
 		'<span class="note">Name:</span> <span class="logline" data-bind="text:name"></span><br>'+
 		'<span class="note">Status:</span> <span data-bind="text:st().str, css:{red:st().str==\'Failed\',label:st().inf},'+
 		'attr:{title:st().inf}"></span><br>'+
-		'<span class="note">Job type:</span> <span data-bind="text:$data.type?type():\'Realignment\'"></span>'+
+		'<span class="note">Program:</span> <span class="label" data-bind="text:program,attr:{title:parameters}"></span>'+
 		'<a class="button itembtn" data-bind="text:[\'Cancel\',\'Kill\',\'Open\',\'Delete\'][st().nr], css:{red:st().nr!=2},'+
 		  'attr:{title:[\'Cancel job\',\'Terminate job\',\'Import and open the results\',\'Delete files\'][st().nr]},'+
 		  'click:st().nr==2?$parent.importitem:$parent.removeitem"></a>'+
 		'<a class="button itembtn round gear" title="Click for more options" style="right:0" data-bind="visible:!running(),'+
 		  'click:$parent.jobmenu"><span class="svgicon" style="padding:4px">'+svgicon('gear')+'</span></a><br>'+
-		'<span class="note">Created:</span> <span data-bind="text:msectodate(unwrap(created))"></span><br>'+
+		'<span class="note">Started:</span> <span data-bind="text:msectodate(unwrap(created))"></span><br>'+
 		'<span class="note">Job ID:</span> <span data-bind="text:id"></span><br>'+
 		'<span class="note">Feedback:</span> <span class="logline action" '+
 		  'data-bind="click:function(itm,evt){ $parent.showfile(itm,evt,itm.logfile) },'+
@@ -4733,12 +4294,12 @@ function dialog(type,options){
     }
 // shortcut for error dialogs
 	else if(type=='error'||type=='warning'||type=='notice'){
-		if(typeof(options)=='string') options = { msg: options };
+		if(options && !("msg" in options)) options = {msg: options};
 		if($('div.popupwindow').length>5 || (options.id && $('#'+options.id).length)){
 			console.log('Skipped notice window: '+options.msg); return;
 		}
-		if(options.msg) makewindow(type.charAt(0).toUpperCase()+type.slice(1), options.msg ,{btn:'OK',icn:'warning',id:options.id});
-		else{ console.log('Empty error dialog'); console.trace(); }
+		if(options.msg) makewindow(type.charAt(0).toUpperCase()+type.slice(1), options.msg, {btn:'OK',icn:'warning',id:options.id});
+		else{ console.log('Empty error dialog:'); console.log(options); console.trace(); }
 	}
 // batch filter/collapse for sequence area
 	else if(type=='seqtool'){
@@ -5049,7 +4610,7 @@ function dialog(type,options){
 		var pmodel = plugins[type];
 		pmodel._submitted(false);
 		var html = pmodel.buildUI();
-		var pwindow = makewindow(pmodel._title, html.content, {id:type, btn:html.btn, icn:pmodel._icon.img, header:html.header, plugin:pmodel._folder});
+		var pwindow = makewindow(pmodel._title, html.content, {id:type, btn:html.btn, icn:pmodel._icon.img, header:html.header, plugin:pmodel._path});
 		try{ ko.applyBindings(pmodel, pwindow[0]); }catch(e){
 			console.log('Wasabi plugin error when binding datamodel to HTML: '+e);
 			console.log("Plugin datamodel dump:"); console.log(pmodel);
@@ -5057,6 +4618,724 @@ function dialog(type,options){
 	}
 	return false;
 }
+
+//=== Wasabi plugins === //
+//plugins container
+var plugins = {};
+
+//datamodel for holding plugin state
+pluginModel = function(pdata, pname){
+	//builtin tracked values
+	this.sequence = model.seqtype;
+	this.tree = model.treesource;
+	//plugin state
+	this._errors = [];
+	this._submitted = ko.observable(false);
+	this._program = '';
+	this._version = '';
+	this._path = pname; //plugin json filepath
+	this._prefix = '-'; //parameter prefix
+	this._valuesep = ' '; //parameter/value separator
+	this._libraryname = ko.observable('my analysis');
+	this._makeids = false;
+	this._title = pname || 'Wasabi plugin';
+	this._icon = {};
+	this._outfile = '';
+	this._json = pdata;
+	this._debug = false;
+	this._selopt = {};
+	this._ready = false;
+	this.registerPlugin();
+};
+
+//construcor for creating plugin interface
+pluginModel.prototype = {
+	//API error feedback
+	_error: function(errtxt, iswarning){
+		var addtxt = iswarning?'warning':'error';
+		if(this._curopt){ addtxt += ' when parsing "'+this._curopt+'"'; }
+		var errtxt = this._title+' Wasabi plugin '+addtxt+': '+errtxt+'!';
+		if(!iswarning) this._errors.push(errtxt);
+		console.log(errtxt);
+		return '';
+	},
+	
+	//log debug messages
+	_log: function(logtxt, optname){
+		if(!this._debug) return;
+		if(!optname) optname = this._curopt||'';
+		if(typeof(this._debug)=='string' && this._debug!=optname) return;
+		console.log(this._title+' plugin'+(optname?' => option "'+optname+'"' : '')+': '+logtxt);
+	},
+	
+	//find option-bound observables
+	getOption: function(optname){
+		if(optname in this) return this[optname];
+		for(var trackname in this){ if(this[trackname].option && this[trackname].option == optname) return this[trackname]; }
+		this._log('getOption: option "'+optname+'" not found');
+		return false;
+	},
+	
+	//parse API keywords to Javascript (observables/logic/quoted text)
+	processValue: function(expr){
+		var self = this;
+		var inputexpr = expr;
+		var obsStr = function(name){ //detect a tracked option name (observable) => format for HTML
+			var html_str = typeof(self[name])=='function'? "$data['"+name+"']()" : false;
+			if(html_str){
+				if(!self._ready) self._log('condition/value is using tracked '+(self[name].option?'option':'name')+' "'+name+'"');
+				if(self[name].default) html_str = "("+html_str+"||$data['"+name+"'].default)"; //consider also the default value
+			}
+			return html_str;
+		};
+		var quote  = function(exp){ try{ JSON.parse(exp) }catch(e){ return "'"+exp+"'" }; return exp; } //quote strings
+		var api = {'is':'==', 'is equal to':'==', ' is disabled':'.disabled', ' is enabled':'.disabled==false', 'equals':'==', ' contains':'.indexOf(', 'is not':'!=', 'is less than':'<', 
+			'is more than':'>', 'not ':'!', 'no ':'!', 'invert ':'!', 'no':'false', 'off':'false', 'disable':'false', 
+			'yes':'true', 'on':'true', 'ticked':'true', 'checked':'true', 'selected':'true', 'and':'&&', 'or':'||', 'imported':''};
+
+		if(typeof(expr)=='string'){
+			expr = expr.trim();
+			var addtail = false, tail = '';
+			if(obsStr(expr)){ //input string is a tracked option name
+				expr = obsStr(expr);
+			}
+			else{  //find and parse quotes, API logic expressions, tracked names
+			  expr = expr.replace(/".+"|'.+'| is disabled| is enabled| contains|is equal to|is not|is less than|is more than|no |not |invert |[\w\-\.]+/g, 
+			  function(str_token, token_index){
+				if(str_token == ' contains') addtail = true; //add indexOf() closing bracket (to the next token)
+				else if(addtail){ tail = ')'; addtail = false; }
+				else tail = '';
+				
+				if(str_token.indexOf('"')==0){ //escaped double quotes => literal string (skip tracked name check)
+			  		return quote(str_token.replace(/"/g,""))+tail;
+			  	}
+			  	else if(str_token.indexOf("'")==0){ //single-quoted tracked name (may contain spaces)
+			  		var unquoted = str_token.replace(/'/g,"");
+			  		return (obsStr(unquoted) || str_token)+tail;
+			  	}
+			  	else if(str_token=="invert" && token_index>(expr.length-7) && self._curopt){ //invert the option's value
+			  		return "!"+obsStr(self._curopt)+tail;
+			  	}
+			  	else{ return (obsStr(str_token) || api[str_token] || quote(str_token))+tail; }
+			  });
+			}
+			expr = expr.replace(/' '/g, " ");
+			//if(!self._ready && inputexpr!=expr) self._log('processValue: '+inputexpr+' => '+expr);
+			return expr;
+		} else { return typeof(expr)=='undefined'? "" : JSON.stringify(expr); } //stringify numbers etc.
+	},
+
+	//Translate API conditional rules to Javascript ('yes/no/is not/{...}','result of rule',['upperLevelObsName'])
+	processRule: function(rule, result, rootvar){
+		if(typeof(result)=='undefined') result = "true";
+		var str = "";
+		
+		if($.isArray(rule)){ //[rule1,rule2,...] => apply sequentially
+			for(var i=0, tmp=''; i<rule.length; i++){
+				tmp = this.processRule(rule[i], result, rootvar);
+				if(i<rule.length-1) tmp = tmp.split(":")[0]+":";
+				str += tmp;
+			}
+		}
+		else if(typeof(rule)=='object'){ //unpack rule objects
+			if(Object.keys(rule).length>1){ //{rule1:res1,rule2:res2} => [{rule1:res1},{rule2:res2}]
+				var rulearr = [];
+				$.each(rule,function(subrule,subresult){ var ruleobj={}; ruleobj[subrule] = subresult; rulearr.push(ruleobj); });
+				str = this.processRule(rulearr, result, rootvar);
+			} else {  //{'rule':result}
+				varname = Object.keys(rule)[0];
+				varresult = rule[varname];  //if {"varname":{varval:result}} else {"varname":result}
+				if(typeof(varresult)=='object') str = this.processRule(varresult, result, varname);
+				else str = this.processRule(varname, varresult, rootvar);
+			}
+		}
+		else{  //translate preprocessed rule
+			if(typeof(rule)=='number'){ try{ return JSON.parse(rule); }catch(e){ self._error('processRule("'+rule+'") => '+e); return ""; }}
+			else if(typeof(rule)!='string'){ return JSON.stringify(rule); }
+			
+			rule = this.processValue(rule);
+			result = this.processValue(result);
+			rootvar = this.processValue(rootvar);
+							
+			var compare = function(rule){ //add '==' if needed (rule is rootvarValue)
+				return ~["!","=","<",">","~","."].indexOf(rule.charAt(0))? rule: "=="+rule;
+			}
+			str = rootvar? rootvar+compare(rule) : rule;
+			if(rootvar && ~str.indexOf(".indexOf")) str = "~"+str+")";
+			var negresult = (!result||result=="true")?"false":result=="false"?"true":"\'\'";
+			if(result!=="true" || rootvar) str += "?"+result+":"+negresult;
+		}
+		//if(rule && !rootvar && !this._ready) this._log(str);
+		return str;
+	},
+	
+	//rule string => processRule string => function
+	ruleFunc: function(rule, appendstr){
+		var funcstr = this.processRule(rule).replace(/\$data/g,"this").replace(/\w+\(\)/g,"this.$&")+(appendstr||'');
+		this._log(funcstr);
+		try{ var rfunc = new Function("return "+funcstr); }catch(e){ return this._error("Faulty rule function ("+e+"): "+rule+" => "+funcstr); }
+		//this._log('parsed rule function: '+funcstr);
+		return rfunc.bind(this);		
+	},
+
+	//Create a plugin interface (input) element
+	processOption: function(data, prefix, disable){
+		var self = this;
+		var firstrun = !self._ready; //first JSON parsing pass (datamodel setup)
+		var elems = []; //additional html elements
+		
+		if(self._selopt && !firstrun){ //second pass: add unregistered options
+			$.each(self._selopt, function(optname, optval){
+				if(!self[optname]){ //add as hidden options
+					self._log('New option "'+optname+'" = '+optval+' added from a selection list.');
+					self[optname] = ko.observable(optval);
+					elems.push('<input type="hidden" name="'+prefix+optname+'" data-bind="value:$data[\''+optname+'\']">');
+					self._json.options.push({"hidden":self._selopt[optname], "option":optname}); //add to input json for future passes
+				} else {
+					self._log('Option "'+optname+'" value was changed by a selection: \''+self[optname]()+'\' => '+optval);
+					self[optname](optval);
+				}
+			});
+			self._selopt = false;
+		}
+		
+		if(typeof(data)=='string'){ //string => user interface text
+			data = data.replace(urlregex, makeurl);
+			var box = $('<span>'+data+'</span>');
+			$("a", box).each(function(i,el){ if(this.hasAttribute("href")) this.setAttribute("target","_blank"); });
+			return box;
+		} else if (typeof(data)!='object') return '';
+		prefix = data.prefix||prefix||self._prefix; //(local|parent|global) prefix for the command-line arg
+		
+		var types = {"text":"", "string":"text", "textbox":"text", "number":"text", "int":"text", "float":"text", "bool":"checkbox", 
+			"tickbox":"checkbox", "switch":"checkbox", "checkbox":"", "hidden":"", "dirpath":"hidden", "select":"", "file":""};
+		var otype = data.type && (data.type in types)? data.type : "text"; //option input type
+		var classname = "";
+		
+		for(var k in data){
+			if(k in types){ //found {type:string} shorthand syntax
+				if(data.type) self._error('Duplicate attribute: "type":'+data.type+' overriden with shorthand type: "'+k+'"', 'warn');
+				else if(otype!="text") self._error('Duplicate attribute: shorthand type: "'+otype+'" overriden with another type: "'+k+'"', 'warn');
+				otype = k;
+				if(k=="file" && !data.source) data.source = data[k]; //fill in "source" attribute
+				else if((k=="hidden"||k=="output") && !("default" in data)) data.default = data[k]; //fill in "default"
+				else{
+					if(!("title" in data)) data.title = data[k]; //fill in "title"
+					if(!("option" in data) && !data.name && k!="select"){ //fill in "option"
+						if(data[k].match(/[^a-zA-Z0-9_-]/)) self._log('Cannot set "'+data[k]+'" as program argument name. Forgot to set "name" attribute?');
+						else data.option = data[k];
+		}}}} //for type
+		
+		if(!data.name){
+			data.name = data.option||"trackName"+Object.keys(self).length; //register tracking variable name (and store for future passes)
+		}
+		
+		//track option input value changes
+		var trackname = self._curopt = data.name;
+		if(!(trackname in self)){
+			self[trackname] = ko.observable('');
+			if(!firstrun) self._log('Trackname "'+data.name+'" has been created (again?) after the initial plugin setup.');
+		} else if(firstrun){ //repeating option/tracking name in JSON
+			self._log('Repeating option/name "'+data.name+'". Reusing the trackingvar.');
+		}
+		var trackvar = self[trackname];
+		var kovar = "$data['"+trackname+"']"; //tracker reference for html
+		
+		//auto-format numerical input
+		if(~["number","float","int"].indexOf(otype)){
+			trackvar.extend({format: otype});
+			classname = "num";
+		}
+		
+		//option value=dirpath+filename (full path in server)
+		if(firstrun && otype=="dirpath") data.default = "'./"+(data.default||data.value||'')+"'";
+		
+		//option type => html input type (text|checkbox|hidden|select|file)
+		if(types[otype]) otype = types[otype];
+		trackvar.otype = otype;
+		
+		//create input element
+		var el = $("<"+(otype=="select"?"select":"input")+">").attr("type", otype);
+		if(classname) el.addClass(classname);
+		
+		//format hidden options
+		if(otype=="hidden"){
+			if(!("default" in data)) data.default = data.value || true; //hidden option needs a value to be included
+			if(prefix=='>'){ //output filename
+				if(firstrun){
+					if(typeof(data.default)=='string' && data.default.length){
+						if(!self._outfile) self._outfile = data.default; //set as default output file
+						data.option = prefix+data.default; //change to positional param
+						data.default = true;
+					} else self._error('Add filename (as "default" attribute) for writing output stream to file (>filename).');
+				}
+				el.attr("trackname", trackname);
+			}
+		}
+		
+		//register named program parameter
+		if("option" in data){
+			if(!("option" in trackvar)){
+				if(~data.option.indexOf(' ')) self._error('Space found in option name: "'+data.option+'"');
+				if(/^\W/.test(data.option)) prefix = "";  //prefix already in the option name
+				trackvar.option = data.option;
+				trackvar.argname = prefix+data.option;
+			}
+			el.attr("name", trackvar.argname);
+		}
+		
+		//bind interface input to the tracked option value
+		kobind = (otype=="checkbox"?"checked":"value")+":"+kovar+", name:'"+trackname+"'";
+		if(data.fixed) kobind += ", disable:"+self.processRule(data.fixed); //fixed option value (disabled input)
+		
+		//log input value changes
+		if(self._debug){ trackvar.subscribe(function(newval){
+			self._log((data.option?'option "'+data.option:'input "'+trackname)+'" value changed to '+JSON.stringify(newval), trackname);
+		});}
+		
+		//build a selection list of options/values
+		if(otype=="select"){
+			if(!$.isArray(data.selection)){ self._error('"select" option needs the "selection" array'); data.selection = []; }
+			var selarr = trackname+"_selection";
+			if(!(selarr in self)){ //first pass: parse selection items from JSON
+				self[selarr] = []; //list of selection items
+				trackvar.syncopts = {};
+				self._log('parsing selection list with '+data.selection.length+' items');
+
+				for(var sindex in data.selection){ //parse selection list items
+					var seldata = data.selection[sindex]; //input: data for the list item
+					var selitem = {t:'', v:'', d:'', opt:{}}; //output: parsed list item
+					if(typeof(seldata)=='string' || typeof(seldata)=='number'){ selitem.t = selitem.v = seldata; } //item is string/number
+					else if(typeof(seldata)=='object'){ //parse item object
+						//fill in missing item attributes: "default"/"option"=>"title"=>"value"
+						var optval = typeof(seldata.option)=="string"? seldata.option : '';
+						var defval = typeof(seldata.default)=="number" || (typeof(seldata.default)=="string" && seldata.default!="yes")? seldata.default : '';
+						if(!("title" in seldata)) seldata.title = defval || optval || '';
+						else if(typeof(seldata.title)=='object'){ self._error('selection item "title" needs to be a string (not object)'); continue; }
+						if(!("value" in seldata)) seldata.value = seldata.title;
+						else if(typeof(seldata.value)=='object'){ self._error('selection item "value" needs to be a string (not object)'); continue; }
+						selitem.t = seldata.title; selitem.v = seldata.value; 
+						if(typeof(seldata.desc)=='string') selitem.d = seldata.desc; //list item description
+						if("default" in seldata && selitem.v){ trackvar.defaultval = selitem.v; trackvar(selitem.v); } //initially selected item
+						else if(selitem.v==='' && !("defaultval" in trackvar)) trackvar.defaultval = '';
+						
+						if(seldata.option){ //register other options set by the selection item
+							if(!$.isArray(seldata.option)) seldata.option = [seldata.option];
+							for(var optindex in seldata.option){
+								var selopt = seldata.option[optindex];
+								if(typeof(selopt)=='string'){ selitem.opt[selopt] = true; }
+								else if(typeof(selopt)=='object'){ $.extend(selitem.opt, selopt); }
+								else{ self._error('options in the selection item "option" attribute need to be either string or object'); continue; }
+							}
+							for(optname in selitem.opt){
+								trackvar.syncopts[optname] = ''; //store a linked option for value tracking
+								if(!(optname in self._selopt)) self._selopt[optname] = ''; //register all options from selection lists
+							}
+						}	
+					}else{ self._error('selection item needs to be string, number or object'); }
+					//add the selection item to the selection list
+					self[selarr].push(selitem);
+					self._log('added selection item: '+JSON.stringify(selitem));
+				} //foreach selection item
+				
+				if(!("defaultval" in trackvar)) self[selarr].unshift({t:"Choose option", v:""}); //unselected by default
+				if(Object.keys(trackvar.syncopts).length) self._log('Found linked options: '+Object.keys(trackvar.syncopts));
+				else trackvar.syncopts = false;
+				
+				//track the selected list item => change any linked options/description
+				trackvar.desc = ko.observable('');
+				trackvar.sindex = ko.computed(function(){
+					var selectedval = trackvar();
+					//self._log('selection "'+trackname+'" was changed to "'+selectedval+'"');
+					var selectedind = indexOfObj(self[selarr], 'v', selectedval);
+					if(selectedind<0) return selectedind; //setup run
+					var selecteditem = self[selarr][selectedind];
+					trackvar.desc(selecteditem.d); //set item description
+					if(trackvar.select_inprogress) return selectedind; //being changed by linked options
+					//push new values to linked options
+					trackvar.select_inprogress = true; //prevent selection=>options=>selection loop 
+					if(trackvar.restoreopt){ //restore the option values set by the previous selection
+						$.each(trackvar.restoreopt, function(optname,optv){ self.getOption(optname)(optv); });
+					}
+					trackvar.restoreopt = {};
+					$.each(selecteditem.opt, function(optname, newval){ //set option values linked to the selected item
+						self._log('selection "'+selectedval+'" is setting option: "'+optname+'" = '+newval);
+						var optobs = self.getOption(optname);
+						if(!optobs){ //missing option (first parsing run). postpone to second pass.
+							self._selopt[optname] = newval;
+							self._log('postponing for second pass: "'+optname+'" = '+self._selopt[optname]);
+						} else {
+							trackvar.restoreopt[optname] = optobs();  //store option original value
+							optobs(newval); //change linked option value
+						}
+					});
+					trackvar.select_inprogress = false;
+					return selectedind; //index of the selected item
+				});
+				
+				//set up user-extendable selection list
+				if(data.extendable){
+					trackvar.edit = ko.observable(false); //track edit state
+					trackvar.editSave = function(){
+						var editindex = trackvar.edit();
+						if(editindex===false){ //enable edit mode
+							trackvar.edit(trackvar.sindex());
+						} else { //save edits
+							if(editindex==-1){ //add new selection item
+								var newv = trackvar();
+								self[selarr].push({t:newv, v:newv});
+							} else { self[selarr][editindex].v = newv; }
+							trackvar.edit(false);
+						}
+					};
+					trackvar.rem = function(){ //remove a selection item
+						var editindex = trackvar.edit();
+						if(editindex==-1){ trackvar(self[selarr][sindex].t); }
+						else{ self[selarr].splice(editindex, 1); }
+						self[selarr].edit(false);
+					};
+				}	
+			} //selection items first pass
+			else if(trackvar.syncopts && !("syncfunc" in trackvar)){ //second pass: set up linked options=>selection items feedback
+				trackvar.syncfunc = ko.computed(function(){ //track value change in any of the linked options
+					for(var optname in trackvar.syncopts){ //check current option values
+						trackvar.syncopts[optname] = self[optname]();
+						if(trackvar.syncopts[optname]=='' && self[optname].otype=='text' && ("defaultval" in self[optname])){
+							trackvar.syncopts[optname] = self[optname].defaultval; //use default value for empty text inputs
+						}
+					}
+					if(trackvar.select_inprogress) return false;
+					//self._log('Checking selection list "'+trackname+'" for match to linked options: '+JSON.stringify(trackvar.syncopts));
+					var match = false;
+					var defaultsel = '';
+					$.each(self[selarr], function(sind, selitem){ //select an item if it matches its {option:value} set
+						if(!selitem.opt || !Object.keys(selitem.opt).length){
+							if("defaultval" in trackvar && trackvar.defaultval==selitem.v) defaultsel = selitem.v;
+							return true; //skip non-option items
+						}
+						match = true; //reset flag
+						$.each(selitem.opt, function(optname, optval){
+							if(!(optname in trackvar.syncopts)){
+								self._log('Unexpected linked option "'+optname+'" in selection "'+trackname+'"');
+								match = false; return false;
+							}
+							if(trackvar.syncopts[optname] != optval){ match = false; return false; }
+						});
+						if(match){ //selection item passed the filter
+							match = selitem;
+							return false;
+						}
+					});
+					if(match){ //set the selection to the matching list item
+						self._log('Found match to linked options '+JSON.stringify(match.opt)+'. Changing selection to '+match.v, trackname);
+						if(trackvar() != match.v){
+							trackvar.restoreopt = false;
+							trackvar.select_inprogress = true; //prevent selection=>option=>selection loop
+							trackvar(match.v);
+							trackvar.select_inprogress = false;
+						}
+					} else { //option values don't match any of the list items.
+						var cursel = self[selarr][trackvar.sindex()];
+						if(cursel.opt && Object.keys(cursel.opt).length){
+							self._log('No match to linked options: clearing selection', trackname);
+							trackvar(defaultsel);
+						} else self._log('No match to linked options: keeping current selection', trackname); //selected item has no linked options
+					}
+					return true;
+				});
+			} //selection items second pass (linked options feedback)
+			
+			elems.push(svgicon('info',{span:true, attr:'data-bind="visible:'+kovar+'.desc, attr:{title:'+kovar+'.desc}"'}));
+			
+			var dstr = "option";
+			if(data.extendable){ //editable selection list
+			  if(data.extendable=="configurations"){ dstr = 'preset'; data.title = "Saved options:"; }
+			  elems.unshift('<input data-bind="fadevisible:!isNaN('+kovar+'.edit()),value:'+kovar+'" style="width:180px" placeholder="Type new '+dstr+'"></input>'+
+			  '<a class="button small square" data-bind="click:'+kovar+'.editSave,text:isNaN('+
+				kovar+'.edit())?\'Edit\':\'Save\',attr:{title:isNaN('+kovar+'.edit())?\'Edit this '+dstr+'\':\'Save changes\'"></a> '+
+				'<a class="button small square" data-bind="visible:'+kovar+'.edit()>0,click:function(){'+kovar+'(\'\');'+kovar+'.edit(-1)}" title="Add new '+dstr+'">New</a>'+
+				'<a class="button small square red" data-bind="visible:!isNaN('+kovar+'.edit()),click:'+kovar+'.rem"  title="Remove this '+dstr+'">Remove</a>');	
+			}//if extendable
+			
+			kobind += ", options:"+selarr+", optionsValue:'v', optionsText:'t', valueAllowUnset:true";
+		}//if select
+		
+		if("default" in data){ kobind += ", default:"+self.processRule(data.default); } //set conditional default value (via custom binding)
+		
+		var existrule = data.enable||data.disable||disable;
+		if(existrule && !firstrun && !trackvar.disabled){ //second pass: (conditionally) enable/disable option
+			var rulefunction = self.ruleFunc(existrule);
+			trackvar.disabled = ko.computed(function(){
+				var isdisabled = rulefunction();
+				if(data.enable) isdisabled = !(isdisabled);
+				if(isdisabled) trackvar(otype!='hidden'&&("defaultval" in trackvar)?trackvar.defaultval:""); //reset disabled option's input value
+				return isdisabled;
+			});
+		}
+		
+		if(otype=="file"){
+		  var format = data.fileformat||"fasta";
+		  el.attr({"type":"hidden", "fileformat":format, "trackname":trackname});
+		  var source = data.source || "current sequence";
+		  
+		  if(source.substr(0,7)=="current"){ //data source: currently imported dataset
+			self._log('fileinput source: imported data');
+			el.attr("source", source);
+			if(!firstrun && !trackvar.fileformat){ //second pass: set up fileinput value
+			  trackvar.filetype = ko.computed(function(){ //file option value => 'seqtype'||'tree'||'seqtype tree'||false
+				var sourcetype = source.split(' ')[1]||'data', seq = self.sequence(), tree = self.tree()?'tree':'';
+				var fdatatype = sourcetype=='sequence'? seq : sourcetype=='tree'? tree : (seq||tree)?seq+' '+tree : '';
+				var isdisabled = trackvar.disabled&&trackvar.disabled();
+				var optvalue = isdisabled? false : fdatatype;
+				trackvar(optvalue); //change option value to imported filetype (or false if disabled)
+				return optvalue;
+			  });
+			  trackvar.fileformat = format;
+			}
+		  } else { //data source: user-supplied file
+			if(!trackvar.fileformat){
+				trackvar.fileformat = format;
+				trackvar.container = ko.observableArray([]);
+				trackvar.filename = ko.observable('');
+				trackvar.container.subscribe(function(newarr){
+				if(newarr.length && ('imported' in newarr[0]) && ('type' in newarr[0].imported)){
+					trackvar(newarr[0].imported.type);
+					trackvar.filename(newarr[0].name||'imported data');
+				} else trackvar('');
+				});
+				trackvar.container.get = function(name){ return ko.utils.arrayFirst(container(), function(item){ return item.name==name; }); };
+			}
+		    var container = trackvar.container;
+			
+			//option gets its value (data type) after file is supplied (from checkfiles())
+			if(~source.indexOf("filedrop")){ //filedrop area
+				var filedrag = $('<div class="filedrag">'+(data.title||'Drop file here')+'</div>');
+				filedrag.bind('dragover',function(evt){ //file drag area
+					filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+					evt.originalEvent.dataTransfer.dropEffect = 'copy';
+				}).bind('dragleave',function(evt){
+					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+				}).bind('drop',function(evt){
+					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
+					var origtxt = filedrag.text(), filehandle = evt.originalEvent.dataTransfer.files;
+					filedrag.text('Importing...');
+					setTimeout(function(){
+						checkfiles(filehandle, {onefile:true, silent:true, nocheck:format=="original", container:container});
+						setTimeout(function(){ filedrag.text(origtxt); }, 1000);
+					},100);
+				});
+			} else var filedrag = ''; 
+			if(~source.indexOf("import") || ~source.indexOf("fileselect")){ //import/select button
+				var impbtn = ~source.indexOf("import");
+				var or = $('<span style="display:inline-block;font-size:18px;">'+(filedrag?' or ':'')+'</span>');
+				var importbtn = $('<a class="button" style="vertical-align:0">'+(impbtn?'Import':'Select')+'</a>');
+				if(impbtn){
+					importbtn.click(function(e){ return dialog('import', {onefile:true, silent:true, nocheck:format=="original", container:container}); });
+				} else {
+					var fileinput = $('<input type="file" multiple style="display:none" name="upfile">');
+					fileinput.change(function(){ checkfiles(self.files, {onefile:true, silent:true, nocheck:format=="original", container:container}); });
+					or.append(fileinput);
+					importbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
+				}
+			} else { var or = '', importbtn = ''; }
+			
+			var importdiv = $('<div data-bind="visible:!'+kovar+'()">').append(filedrag, or, importbtn);
+				
+			var filelist = $('<div data-bind="if:'+kovar+'">'+(data.desc||'Use file')+': <img class="icn" src="images/file.png"> <span data-bind="text:'+kovar+'.filename"></span></div>');
+			var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;" data-bind="click:function(){'+kovar+'.container([])}">'+svgicon('close')+'</span>');
+			var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{exportdata:'+kovar+'.container()[0]})}">View</a>');
+			filelist.append(filedel, fileview);
+			elems.push(importdiv,filelist);
+		  }
+		}
+		
+		if(data.required || data.check){ //input validation
+			var rqch = data.required || data.check;
+			if(!firstrun && !trackvar.errmsg){ //second pass: add validator
+			  if(typeof(rqch)=='string'){ //string as message: show the message when no input value
+				trackvar.errmsg = ko.pureComputed(function(){
+					var defval = otype=='text'&&('defaultval' in trackvar)? trackvar.defaultval:'';
+					return trackvar()==='' && defval===''? rqch : '';
+				});
+			  } else {
+				if(typeof(rqch)=='object'){ //rule obj: evaluate key (rule), display the value (message)
+					var rqchrule = Object.keys(rqch)[0];
+					var retfunc = self.ruleFunc(rqchrule, "?'"+rqch[rqchrule]+"':''");
+				} else { var retfunc = self.ruleFunc(rqch); }
+				trackvar.errmsg = ko.pureComputed(retfunc);
+			  }
+			}
+			elems.push('<!-- ko if:'+(data.required?'$data._submitted()&&':'')+kovar+'.errmsg() --><p class="'+(data.required?'err':'note')+'msg" data-bind="text:'+kovar+'.errmsg"></p><!-- /ko -->');
+			kobind += ', style:{borderColor:'+kovar+'.errmsg()?\'red\':\'\'}';
+		}
+
+		el.attr("data-bind", kobind); //bind input element to option attributes and tracked values
+		
+		if(el.attr("type")!="hidden"){ //text label next to input element (except hidden/file inputs)
+			if(trackvar.argname) el.attr("title", trackvar.argname); //show command-line argument on input hover
+			var tspan = data.title? $('<span>'+data.title+'</span>') : ''; //add input label
+			if(data.desc){ if(tspan) tspan.addClass("label"); (tspan||el).attr("title", data.desc); } //show description on mouseover
+			if(tspan){ el = otype=='checkbox'? el.add(tspan) : tspan.add(el); }
+		}
+		
+		var box = $("<div>"); //wrap up the html
+		box.append(el); //include the input element
+		$.each(elems, function(i,elem){ box.append(elem) }); //include any additional html
+		if(data.enable||data.disable){ //option has enable/disable rule
+			var rulestr = self.processRule(data.enable||data.disable);
+			box.attr("data-bind","if"+(data.disable?"not":"")+":"+rulestr); //remove disabled input element
+		}
+		if("line" in data) box.css("display","inline-block");
+		if(firstrun) self._log('parsed option data: '+JSON.stringify(data));
+		self._curopt = '';
+		return box;
+	},
+	
+	//iterate through options data, convert to HTML
+	buildOptions: function(data, prefix, disable){
+		var self = this;
+		var UI = $('<div>');
+		if(!data) return self._error('empty option','warning');
+		if($.isArray(data.options)){ //(sub)group of options
+			if(data.prefix) prefix = data.prefix;
+			if(data.disable) disable = data.disable; //disable/enable group of options
+			else if(data.enable) disable = '!('+data.enable+')';
+			data.options.forEach(function(optdata){ UI.append(self.buildOptions(optdata, prefix, disable)); });
+			
+			//add interface container for options group
+			if("group" in data){
+				UI.addClass("insidediv numinput").css({"display":"none","margin-bottom":0});
+				UI = $('<div>').append(expandtitle({title:data.group||'Options', desc:'Click to toggle options', info:data.desc||'', inline:true, css:{'margin-top':'5px'}}), UI);
+			}
+			else if("section" in data){
+				UI.prepend('<div class="sectiontitle small">'+(data.section?'<span>'+data.section+'</span>':'')+'</div>');
+			}
+			else if("line" in data){
+				if(typeof(data.line)=='string') UI.prepend('<span>'+data.line.trim()+' <span>');
+				$('div',UI).css('display','inline-block');
+			}
+			
+			//hide/show group of options
+			if(data.enable||data.disable) UI.attr("data-bind","if"+(data.disable?"not":"")+":"+self.processRule(data.enable||data.disable));
+		} else { UI = self.processOption(data, prefix, disable); } //parse each option
+		return UI;
+	},
+	
+	//build the plugin window content (on menu item click)
+	buildUI: function(data){
+		if(!data) data = this._json;
+		var desc = data.desc? this.processOption(data.desc):''; delete data.desc;
+		var nameinput = $('<input type="text" class="hidden" data-bind="value:_libraryname" title="Click to edit">');
+		var namespan = $('<span class="note">Name the results: </span>').append(nameinput);
+		var writetarget = '<br><!-- ko if:exportmodel.savetargets().length>1 --><span class="label" title="Choose a library slot '+
+		'for the new analysis, relative the to the input (currently open) dataset">Save as</span> '+
+		'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select><!-- /ko -->'+
+		'<!-- ko if:exportmodel.savetargets().length==1 -->The result will be stored as new root<!-- /ko -->'+
+		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
+		exportmodel.savetarget(exportmodel.savetargets()[0]);
+		var inclhidden = '<!-- ko if:model.hiddenlen --><br><input name="includehidden" type="checkbox" data-bind="checked: exportmodel.includehidden">'+
+		'<span class="label" data-bind="attr:{title:\'Include \'+model.hiddenlen()+\' collapsed alignment columns in analysis\'}">'+
+		'include hidden alignment columns</span><!-- /ko -->';
+		var header = $('<div class="insidediv incontent" style="white-space:nowrap">').append(namespan, writetarget, inclhidden);
+		
+		var optformUI = this.buildOptions(data);
+		var optform = $('<form id="'+this._title+'form" onsubmit="return false"></form>').append(optformUI);
+		var submitbtn = $('<a class="button orange" title="Launch '+this._program+'" data-bind="text:'+(data.submit?this.processRule(data.submit):'\'Send job\'')+'"></a>');
+		submitbtn.click($.proxy(function(){
+			this._submitted(true);
+			var errors = $("p.errmsg", optform);
+			if(errors.length){ //got form errors
+				var origtxt = submitbtn.text();
+				submitbtn.text("Check form errors!");
+				setTimeout(function(){ errors.filter(':hidden').parents('.insidediv').slideDown(); },1000);
+				setTimeout(function(){ submitbtn.text(origtxt); }, 2000);
+				return;
+			}
+			sendjob({form:optform[0], btn:submitbtn, name:nameinput.val(), plugin:this._title}); //send job
+		}, this));
+
+		return {header: desc, content:[header,optform], btn:submitbtn}; //DOM elements
+	},
+	
+	//prepare plugin
+	checkPlugin: function(){
+		//parse input
+		data = this._json;
+		if(!data) return this._error('input JSON missing');
+		if(typeof(data)=='string'){ //JSON or native JS
+			try{ data = JSON.parse(data); }
+			catch(err1){
+				try{ eval("data = "+data); }
+				catch(err2){
+					this._error('failed to parse plugin file as JSON (ignore if it\'s Javascript object): '+err1, 'warning');
+					return this._error('failed to parse plugin file as javascript object (giving up): '+err2);
+				}
+			}
+		}
+		if($.isArray(data)) data = {options:data};
+		else if(typeof(data)!='object') return this._error('plugin file in wrong format: '+typeof(data)+' (JSON/object/array expected)');
+		this._json = data;
+		
+		if(!data.program) return this._error('program name missing from JSON');
+		this._program = data.program;
+		if(data.debug) this._debug = data.debug;
+		if(data.version) this._version = data.version;
+		if(data.prefix) this._prefix = data.prefix;
+		if(data.translate_names) this._makeids = true;
+		if(data.libraryname) this._libraryname(data.libraryname);
+		if(data.disable){ data.pdisable = data.disable; delete data.disable; }
+		if(data.enable){ data.penable = data.enable; delete data.enable; }
+		this._title = data.name || data.program;
+		this._outfile = data.outfile || '';
+		//svg/image icons
+		var svgicon = "gear", icon = "../../images/gear.png", imgarr = [];
+		if(typeof(data.icon)=='string') imgarr = [data.icon];
+		else if($.isArray(data.icon)) imgarr = data.icon;
+		$.each(imgarr, function(i,imgstr){ //resolve image type (image/svg from dataURL/fileURL/svgname/svgpath)
+			if(typeof(imgstr)!='string') return true;
+			if(imgstr.substr(0,10)=='data:image'||~['.png','.jpg','.gif'].indexOf(imgstr.substr(-4))) icon = imgstr;
+			else svgicon = imgstr;
+		});
+		if(svgicon.length>10){ svgpaths[this._title] = svgicon; svgicon = this._title; } //long string. use as svgpath
+		else if(!svgpaths[svgicon]) svgicon = "gear"; //not a registered svgname. revert to default svg icon
+		this._icon = {img:icon, svg:svgicon};
+		
+		if(!data.options) return this._error('no options found');
+		return true;
+	},
+	
+	//wire up
+	registerPlugin: function(){
+		this.checkPlugin();
+		if(this._errors.length){  //add error dialog to tools menu
+			console.log("Plugin datamodel dump:"); console.log(this);
+			this._icon.svg = 'error';
+			var errmsg = "<b>Plugin interface building failed for "+this._title+":</b><br><ul><li>"+this._errors.join("</li><li>")+"</li></ul>";
+			var menuclick = dialog.bind(this, "error", errmsg);
+			var menudesc = "This plugin failed to load. Click to see the errors.";
+			if(data.pdisable) data.pdisable = false;
+			data.reqarr = [];
+		} else {  //add plugin to tools menu
+			var menuclick = this._title;
+			var menudesc = data.menudesc||"Launch plugin for "+this._program;
+			plugins[this._title] = this;
+			this.buildUI();
+			
+			if(typeof(this._outfile)=='object'){ //conditional default output filename
+				this._outfile = ko.pureComputed(this.ruleFunc(data.outfile));
+			}
+			var reqarr = ['online'];
+			if("penable" in data){ if(data.penable) reqarr.push(data.penable); else data.pdisable = true; }
+		}
+		this._ready = true;
+		
+		if(!data.pdisable){ //add plugin launcher to tools menu (and order by plugin name)
+			model.pluginsmenu.push({txt:this._title, act:menuclick, icn:this._icon.svg, inf:menudesc, req:reqarr, keep:true});
+			model.pluginsmenu.sort(function(a,b){return a.txt>b.txt?-1:a.txt<b.txt?1:0; });
+		}
+		if(this._debug) console.log('=== '+this._program+' plugin ready ===');
+	}
+};
 
 //== functions for sequence manipulation ==//
 //make or resize a sequence selection box
