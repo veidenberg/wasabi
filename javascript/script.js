@@ -2178,7 +2178,6 @@ function checkfiles(filearr, options){
 		}
 		else if(options.noimport) closewindow(infowindow);
 		else if(container().length){
-			console.log(JSON.parse(container()));
 			errorspan.append('Importing data...<br>');
 			var source = options.source||(options.importurl?'download':'localread');
 			setTimeout(function(){
