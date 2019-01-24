@@ -9,7 +9,7 @@ if(!String.prototype.trim){ String.prototype.trim = function(){ return this.repl
 if(!String.prototype.capitalize){ String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); }; }
 
 //== Globals ==//
-var currentversion = 180530; //local version (timestamp) of Wasabi
+var currentversion = 190124; //local version (timestamp) of Wasabi
 var sequences = {}; //seq. data {name : [s,e,q]}
 var treesvg = {}; //phylogenetic nodetree
 var leafnodes = {}; //all leafnodes+visible ancestral leafnodes
@@ -66,29 +66,32 @@ function indexOfObj(objarr, key, val){
 }
 
 //extenders to KO viewmodel items
-ko.extenders.format = function(obsitem, format){ //format an observable value in-place
+//format observable value in-place
+ko.extenders.format = function(obsitem, format){
     var formatted = ko.pureComputed({
         read: obsitem,
-        write: function(newval){
-			//obsitem(newval);
-			if(format=='trim' && typeof(newval)=='string') newval = newval.trim();
-			else if(format=='nospace') newval = newval.replace(/\s/g,'_');
-			else if(format=='alphanum') newval = newval.replace(/\s/g,'_').replace(/[^\w\.]/g,'');
+        write: function(input){
+			var newval = input;
+			if(format=='trim' && typeof(input)=='string') newval = input.trim();
+			else if(format=='nospace') newval = input.replace(/\s/g,'_');
+			else if(format=='alphanum') newval = input.replace(/\s/g,'_').replace(/[^\w\.]/g,'');
 			else if(~['number', 'float', 'int', 'posit'].indexOf(format)){
-	        	if(newval=="") return;
-	        	var vtype = typeof(newval);
-				newval = format=='int'? parseInt(newval) : parseFloat(newval);
-				if(isNaN(newval) || (format=='posit' && newval<0)) newval = 0;
-				if(vtype=='string') newval = newval.toString();
-				
+	        	if(input!=""){
+		        	if(isNaN(input)) newval = 0;
+					newval = format=='int'? parseInt(newval) : parseFloat(newval);
+					if(isNaN(newval)||(format=='posit' && newval<0)) newval = 0;
+					if(typeof(input)=='string') newval = newval.toString(); //from input element
+				}
 			}
-			obsitem(newval);
+			if(obsitem()!==newval) obsitem(newval);
+			else if(input!==newval) obsitem.notifySubscribers(newval);
         }
-    });
-	formatted(obsitem());
+    }).extend({notify: 'always'});;
+	formatted(obsitem()); //format initial value
 	return formatted;
 };
-ko.extenders.enable = function(obsitem, bool){ //add filter to enable/disable an observable
+//add filter to enable/disable an observable
+ko.extenders.enable = function(obsitem, bool){
     var filtered = ko.computed({
         read: obsitem,
         write: function(incoming){
@@ -156,8 +159,8 @@ ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
 	});
     }
 };
-
-ko.bindingHandlers.default = {  //set a default value for plugin input element
+//set a default value for plugin input element
+ko.bindingHandlers.default = {
 	update: function(element, accessor, allBindings, viewModel, bindingContext){
 		var defaultval = unwrap(accessor);
 		var trackname = unwrap(allBindings.get('name')); //data-bind:"name"
@@ -182,10 +185,10 @@ var waitremove = function(el){ setTimeout(function(){ $(el).remove() },500) };
 //datamodel for Wasabi settings
 var koSettings = function(){
 	var self = this;
-	self.toggle = function(obs){ if(typeof(obs)=='function') obs(!obs()); }
+	self.toggle = function(obs, store){ if(typeof(obs)=='function') obs(!obs()); if(store) self.saveprefs(); }
 	self.btntxt = function(obs){ return obs()?'ON':'OFF'; }
 	
-	self.preflist = {tooltipclass:'', undolength:'', autosaveint:'autosave', onlaunch:'', userid:'keepuser', zoomlevel:'keepzoom', colorscheme:'', maskcolor:'', maskletter:'', anccolor:'', ancletter:'', boxborder:'', font:'', windowanim:'', allanim:'', hidebar:'', minlib:'', ladderlib:'', skipversion:'', checkupdates:'local', bundlestart:'local', scalebar:''};
+	self.preflist = {tooltipclass:'', undolength:'', autosaveint:'autosave', onlaunch:'', userid:'keepuser', zoomlevel:'keepzoom', colorscheme:'', maskcolor:'', maskletter:'', anccolor:'', ancletter:'', boxborder:'', font:'', windowanim:'', allanim:'', mintop:'', hidetop:'mintop', minlib:'', ladderlib:'', skipversion:'', checkupdates:'local', bundlestart:'local', scalebar:''};
 	
 	self.saveprefs = function(){ //store preferences to harddisk
 		$.each(self.preflist,function(pref,checkpref){
@@ -373,8 +376,10 @@ var koSettings = function(){
 	});
 	self.windowanim = ko.observable(true);
 	self.windowanim.subscribe(function(val){ if(val) self.allanim(val); });
-	self.hidebar = ko.observable(false); //hidden top menubar
-	self.minlib = ko.observable(false); //compact library view
+	self.mintop = ko.observable(true); //compact top menubar
+	self.toggletop = function(){ self.toggle(self.mintop, 'store'); $(window).trigger('resize'); };
+	self.hidetop = ko.observable(false); //hidden top menubar
+	self.minlib = ko.observable(true); //compact library view
 	self.ladderlib = ko.observable(true); //ladderized (path) library view
 	self.sharelinks = self.sharing = ko.observable(true);
 	self.sharedir = ko.observable(false);
@@ -952,7 +957,7 @@ var koModel = function(){
 		{txt:'Info',act:'info',icn:'file_info',inf:'View summary info about current dataset',req:['data']}];
 	self.toolsmenu = [{txt:'PRANK aligner',act:'align',icn:'prank',inf:'Realign current sequences using Prank',req:['seq','online']},
 		{txt:'Hide gaps',act:'seqtool',icn:'seq',inf:'Collapse sequence alignment columns',req:['seq']},
-		{txt:'Prune tree',act:'treetool',icn:'prune',inf:'Prune/hide tree leafs',req:['tree']},
+		{txt:'Edit tree',act:'treetool',icn:'prune',inf:'Edit, annotate or prune current tree',req:['tree']},
 		{txt:'Translate',act:'translate',icn:'book_open',inf:'Translate sequence data',req:['seq']},
 		{txt:'Settings',act:'settings',icn:'settings',inf:'Adjust Wasabi behaviour'}];
 	self.pluginsmenu = []; //placeholder for plugin tools
@@ -1141,6 +1146,7 @@ var exportmodel = new koExport();
 //Datamodel for seq. tools (hiding cols)
 var koTools = function(){
 	var self = this;
+	//alignment editing tool
 	self.hideaction = ko.observable();
 	self.hideconserved = ko.observable(false);
 	self.hidelimit = ko.observable(10);
@@ -1215,37 +1221,144 @@ var koTools = function(){
 	}).extend({throttle:500});
 	self.hidecolperc = ko.computed(function(){ return parseInt(self.hidecolcount()/self.gapcount.length*100) });
 	
-	self.prunemode = false;
-	self.leafaction = ko.observable();
-	self.leafsel = ko.observable();
-	self.markLeafs = function(unmark){
-		if(unmark){ $.each(leafnodes,function(n,node){ if(node.active) node.highlight(false); }); return; }
+	//tree editing tool
+	self.prunemode = false; //treetool open
+	self.treeactions = ['hide','reveal','prune','annotate','flag'];
+	self.act = ko.observable();
+	self.actnote = {'hide': 'Collapses the tree nodes.', 'reveal': 'Expands the tree nodes.', 'prune': 'Removes the nodes from the tree.', 
+		'annotate': 'Show/hide tree annotation tags in <a onclick="dialog(\'settings\')">Settings</a> → tree labels.',
+		'flag': 'Adds a group number to tree nodes for <a onclick="dialog(\'CodeML\')">CodeML analysis</a>.<br>Leave the input field empty to remove group labels.'
+	};
+	self.seltypes = ['marked','unmarked'];
+	self.seltype = ko.observable();
+	self.nodetypes = ['nodes','clades'];
+	self.nodetype = ko.observable();
+	self.nodetype.subscribe(function(ntype){
+		if(ntype=='clades'){ //propagate node marks to clades
+			treesvg.data.root.traverse(function(node){
+				if(node.active){ node.highlight(true); return 'stop'; }
+			});
+		}
+	});
+	self.tags = ['accession ID','bootstrap','branch color','branch length','gene','name','node color','species','taxonomy ID','custom'];
+	self.tagdict = {'accession ID':'accession', 'branch color':'bcolor', 'node color':'color', 'name':'label', 'branch length':'branchlength', 'taxonomy ID':'taxonomy'};
+	self.tag = ko.observable();
+	self.tag.subscribe(function(){ self.tagval(''); });
+	self.ctag = ko.observable();
+	self.tagnote = { 
+		'branch color': 'Use a color name (red), hex value (#f00) or rgb value (255,0,0).',
+		'node color': 'Use a color name (red), hex value (#f00) or rgb value (255,0,0).',
+		'custom': 'Add or edit a custom annotation tag.'
+	};
+	self.tagval = ko.observable('');
+	self.showtag = ko.computed({ //toggle tree nodelabel setting (display/hide) for the selected tag
+		read: function(){
+			var tag = self.tag()=='custom'?self.ctag():(self.tagdict[self.tag()]||self.tag());
+			if(!tag) return false;
+			if(settingsmodel.nodelabel()==tag) return true;
+			return false;
+		},
+		write: function(checked){
+			var tag = self.tag()=='custom'?self.ctag():(self.tagdict[self.tag()]||self.tag());
+			if(!tag) return false;
+			if(checked && ~settingsmodel.nodelabels.indexOf(tag)) settingsmodel.nodelabel(tag);
+			else if(!checked && settingsmodel.nodelabel()==tag) settingsmodel.nodelabel('none');
+		}
+	});
+	self.notag = ko.computed(function(){ //check selected tag
+		var tag = self.tag()=='custom'?self.ctag():(self.tagdict[self.tag()]||self.tag());
+		return !tag||!~settingsmodel.nodelabels.indexOf(tag);
+	});
+	self.groupnr = ko.observable(1).extend({format:'int'});
+	self.showlabels = ko.computed({ //show/hide tree node names
+		read: function(){
+			return settingsmodel.nodelabel()=='label';
+		},
+		write: function(checked){
+			if(checked) settingsmodel.nodelabel('label');
+			else settingsmodel.nodelabel('none');
+		}
+	});
+	self.statustxt = ko.observable('');
+	self.statustxt.subscribe(function(e){ if(e) setTimeout(function(){self.statustxt('')}, 5000); }); //self-clear
+	
+	//tree editing functions
+	self.clearTree = function(){ //clear tree flags
+		treesvg.data.root.traverse(function(node){ node.highlight(false); });
+	}
+	self.markLeafs = function(){ //mark tree leafs from sequence rows selection
 		registerselections();
-		$.each(model.visiblerows(),function(r,name){ if(rowflags[r]&&leafnodes[name]) leafnodes[name].highlight(true); });
-	};
-	self.processLeafs = function(func,affected){ //hide/remove all marked/unmarked leafs
-		if(typeof(func)!='string'){
-			var markedcount = $('#names text[fill=orange]').length;
-			var target = self.leafsel()=='unmarked'? false : true;
-			var affected = target? markedcount : model.visiblerows().length-markedcount;
-			var func = self.leafaction()=='prune'? 'remove':'hideToggle';
-			if(!affected || model.visiblerows().length-affected<4){
-				var errtxt = func=='remove'? 'Can\'t prune: ':'Can\'t hide: ';
-				errtxt += !affected? 'nothing to '+self.leafaction()+'.' : 'less than 4 leafs would remain.';
-				$('#treetoolerror').text(errtxt);
-				setTimeout(function(){$('#treetoolerror').empty()},3000); return;
+		var flag = undefined;
+		var ntype = self.nodetype();
+		$.each(model.visiblerows(), function(r,name){ //toggle flags for selected seq. rows
+			if(rowflags[r]&&leafnodes[name]){
+				if(self.ntype=='clades'&&typeof(flag)=='undefined') flag = !(leafnodes[name].active); //fist row sets mark type
+				leafnodes[name].highlight(flag);
 			}
-		} else var target = true; //process premarked leafs
-		//if(!model.treebackup) model.treebackup = treesvg.data.root.removeAnc().write('tags');
-		$.each(leafnodes,function(n,node){ if(node.active==target) node[func]('hide','nocount'); });
-		treesvg.refresh();
-		var actdesc = func=='remove'? 'removed' : 'hidden', actname = func=='remove'? 'Remove' : 'Hide';
-		if(settingsmodel.undo()){ setTimeout(function(){
-			model.addundo({name:actname+' leafs',type:'tree',data:treesvg.data.root.removeAnc().write('undo'),info:affected+' leafs were '+actdesc+'.'});
-		},100)}
-		closewindow('treetool');
+		});
 	};
-};
+	//apply selected edit to selected tree nodes (root=>leafs)
+	self.processTree = function(){
+		var act = self.act(), marktype = self.seltype()=='marked'?true:false, ntags = {}, ncount = 0;
+		var tag = self.tag()=='custom'?self.ctag():(self.tagdict[self.tag()]||self.tag());
+		var tagval = self.tagval(), rgx = / #\d+$/, gnr = self.groupnr()? ' #'+self.groupnr():'';
+		if(act=='annotate'){ //format/check annotation input
+			if(!tag) self.statustxt('Empty annotation tag!');
+			else if(tag=='branchlength'){
+				tagval = parseFloat(tagval);
+				if(isNaN(tagval)) self.statustxt('Invalid value for branch length!');
+			}
+			else if(~tag.indexOf('color')&&~tagval.indexOf(',')&&!~tagval.indexOf('rgb')){
+				tagval = 'rgb('+tagval+')';
+			}
+			if(self.statustxt()) return;
+		}
+		//traverse tree to edit nodes
+		treesvg.data.root.traverse(function(node){
+			if(node.active==marktype){
+				ncount++;
+				if(act=='hide'){
+					node.hideToggle('hide','skipcount');
+					return 'stop';
+				}
+				else if(act=='reveal'){
+					node.showSubtree();
+					return 'stop';
+				}
+				else if(act=='remove'){
+					node.remove('skipundo','skipcount'); return 'stop';
+				}
+				else if(act=='annotate'){
+					if(tag=='color'||tag=='bcolor') node[tag] = tagval;
+					else{
+						if(tag=='branchlength') node.len = tagval;
+						node.nodeinfo[tag] = tagval;
+						ntags[node.type] = tag;
+					}
+				}
+				else if(act=='flag'){
+					if(rgx.test(node.nodeinfo.label)) node.nodeinfo.label = node.nodeinfo.label.replace(rgx, gnr);
+					else node.nodeinfo.label += gnr;
+				}
+			}
+		});
+		self.clearTree();
+		treesvg.refresh();
+		var actdict = {'hide':'hidden', 'reveal':'revealed', 'prune':'removed', 'annotate':'annotated', 'flag':'flagged'};
+		var infotxt = ncount+' tree node'+(ncount==1?' was ':'s were ')+actdict[act]+'.';
+		if(ncount){ //register changes
+			if((act=='hide'||act=='reveal'||act=='remove') && settingsmodel.undo()){ setTimeout(function(){ //add to undo stack
+				model.addundo({name:act+' nodes', type:'tree', data:treesvg.data.root.removeAnc().write('undo'), info:infotxt});
+			},500)}
+			else if(act=='annotate'){ //register a new tag
+				if(ntags.stem && !~settingsmodel.nodelabels.indexOf(ntags.stem)) settingsmodel.nodelabels.push(ntags.stem);
+				if(ntags.leaf && !~settingsmodel.leaflabels.indexOf(ntags.leaf)) settingsmodel.leaflabels.push(ntags.leaf);
+				self.tag.valueHasMutated(); //refresh self.notag
+			}
+		}
+		self.statustxt(infotxt);
+	}; //processTree
+}; //koTools
 var toolsmodel = new koTools();
 
 
@@ -2557,10 +2670,9 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		
 		if(treesvg.data && seqnames.length){ //check tree<=>seq data match
 			if(treesvg.data.root.children.length<3) model.noanc(true);
-			var emptyleaves = [];
-			$.each(leafnodes,function(name,node){
-				if(!sequences[name]){ emptyleaves.push(name); node.active = true; }
-				else node.active = false;
+			var emptyleaves = [], emptynodes = [];
+			$.each(leafnodes, function(name,node){
+				if(!sequences[name]){ emptyleaves.push(name); emptynodes.push(node); }
 			});
 			if(emptyleaves.length){
 				var leafsnote = emptyleaves.length+' out of '+Object.keys(leafnodes).length+' tree leaves have no sequence';
@@ -2568,7 +2680,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				
 				if(Object.keys(leafnodes).length-emptyleaves.length>3){
 					leafsnote += 'Empty leaves were pruned from the tree';
-					setTimeout(function(){toolsmodel.processLeafs('remove', emptyleaves.length);}, 1000);
+					setTimeout(function(){ $.each(emptynodes, function(i,n){ n.remove(true); }); treesvg.refresh(); }, 1000);
 				} else {
 					leafsnote += 'Tree and sequence names do not match. Imported just the tree.';
 					librarymodel.openid(''); sequences = {}; redraw();
@@ -3422,34 +3534,6 @@ function librarymenu(itm,e){
 	tooltip('','',{target:btn, shiftx: '3px', shifty: '5px', arrow:'top', data:menudata, style:'white', id:'librarymenu'});
 }
 
-//hide/expand toolbar
-function toggletop(collapse){
-	if(typeof(collapse)=='undefined') collapse = !$('body').hasClass('mintop');
-	else if(collapse==$('body').hasClass('mintop')) return;
-	var arrows = $('#topcollapse>span');
-	if(collapse){
-		localStorage.collapse = "collapse";
-		$('body').addClass('mintop');
-		setTimeout(function(){
-			arrows.html('&#x25BC;<br>&#x25BC;');
-			$('#top .toptext, #top .title, #bottom').css('display','none');
-			$('#top').addClass('hidden');
-			$(window).trigger('resize');
-		},800);
-	} else {
-		localStorage.collapse = "";
-		$('#top .toptext, #bottom').css('display','');
-		if(!model.offline()) $('#top .title').css('display','');
-		setTimeout(function(){ $('body').removeClass('mintop') },100);
-		setTimeout(function(){
-			arrows.html('&#x25B2;<br>&#x25B2');
-			$(window).trigger('resize');
-			$('#top').removeClass('hidden');
-		},800);
-	}
-	
-}
-
 //generate contents for tree node menu
 function treemenu(node){
 	var hidemenu = node.parent?{'Hide this node':{icon:'hide', t:'Collapse node and its children', click:function(){node.hideToggle()}}}:{};
@@ -3697,7 +3781,9 @@ var activenode = ''; //id of selected treenode
 //Hide/remove a tooltip/pop-up menu
 function hidetooltip(include,exclude,nodeid){
 	if(activenode && (!nodeid || activenode!=nodeid)){
-		try{ treesvg.data.root.getById(activenode).highlight(false); }catch(e){}
+		if(!toolsmodel.prunemode){
+			try{ treesvg.data.root.getById(activenode).highlight(false); }catch(e){}
+		}
 		activenode = '';
 	}
 	if(!include) model.activeid(''); //model.activeid = seq. selection id
@@ -3902,8 +3988,8 @@ function dialog(type,options){
 		var filecontent = $('<div style="padding-bottom:10px">').append(filedrag, or, selectbtn);
 		
 		var idheader = '<div class="sectiontitle"><img src="images/icon.png"><span>Open Wasabi dataset</span><span class="svg" title="Open a shared Wasabi dataset or analysis collection using dataset ID">'+svgicon('info')+'</span></div>';
-		var idinput = $('<input style="width:100px; margin:5px 5px 0 0" placeholder="Wasabi ID">');
-		var idbtn = $('<a class="button">Open</a>');
+		var idinput = $('<input style="width:100px; margin:5px" placeholder="Wasabi ID">');
+		var idbtn = $('<a class="button" style="margin:5px">Open</a>');
 		idbtn.click(function(){
 			var val = idinput.val();
 			if(!val || ~val.indexOf(' ') || val.length<6 || val.length>20) return true;
@@ -4294,7 +4380,7 @@ function dialog(type,options){
     }
 // shortcut for error dialogs
 	else if(type=='error'||type=='warning'||type=='notice'){
-		if(options && !("msg" in options)) options = {msg: options};
+		if(typeof(options)!='object'||!options.msg) options = {msg: options};
 		if($('div.popupwindow').length>5 || (options.id && $('#'+options.id).length)){
 			console.log('Skipped notice window: '+options.msg); return;
 		}
@@ -4341,34 +4427,31 @@ function dialog(type,options){
 	}
 //batch edit/hide for tree area
 	else if(type=='treetool'){
-		var title = $('<div class="sectiontitle"><span>Prune tree leafs</span></div>');
-		var content = $('<div class="sectiontext">You can mark/unmark tree leafs by clicking on a leaf name<br>or by dragging in the sequence area.<br><br></div>');
-		_paq.push(['trackEvent','tools','tree_pruning']); //record event
+		_paq.push(['trackEvent','tools','tree_editing']); //record event
 		
-		var emptyleaves = [];
-		$.each(leafnodes,function(name,node){ if(!sequences[name]) emptyleaves.push(name); });
-		if(emptyleaves.length){
-			var markbtn = $('<a class="button square small">Mark empty leafs</a>');
-			markbtn.click(function(){
-				$.each(leafnodes,function(name,node){ 
-					if(!sequences[name]) node.highlight(true); else node.highlight(false);
-			});});
-			var s = emptyleaves.length>1? ['s','ve'] : ['','s'];
-			content.append(emptyleaves.length+' leaf'+s[0]+' ha'+s[1]+' no sequence data.',markbtn,'<br><br>');
-		}
-		
-		content.append('Then click "Apply" to <select data-bind="options:[\'hide\',\'prune\'],value:leafaction"></select> '+
-		'<select data-bind="options:[\'marked\',\'unmarked\'],value:leafsel"></select> tree leafs.<br>'+
-		'<span id="treetoolerror" style="color:red"></span>');
+		var content = $('<div class="sectiontitle"><span class="lefticon">①</span><span>Select tree nodes</span></div>'+
+		'<div class="sectiontext">Click on a tree node/leaf to mark/unmark it, or drag a selection in the sequence alingment area. '+
+		'You can also prune or recraft tree clades with drag-and-drop.</div>'+
+		'<div class="sectiontitle"><span class="lefticon">②</span><span>Select tree edits</span></div>'+
+		'<div class="sectiontext">Do:<select data-bind="options:treeactions,value:act"></select>'+
+		'<select data-bind="options:seltypes,value:seltype"></select> tree<select data-bind="options:nodetypes,value:nodetype"></select><br><br>'+
+		'<span data-bind="visible:act()==\'annotate\'">Set <select data-bind="options:tags,value:tag"></select> '+
+		'<input data-bind="visible:tag()==\'custom\',value:ctag" placeholder="tag" style="width:60px" class="num" type="text"> to '+
+		'<input data-bind="value:tagval" placeholder="value" style="width:70px" class="num" type="text">'+
+		'<span data-bind="css:{note:notag}" style="margin-left:10px"><input type="checkbox" data-bind="checked:showtag, disable:notag">Show this tag on tree</span></span>'+
+		'<span data-bind="visible:act()==\'flag\'">Assign to group <input data-bind="value:groupnr" class="num" type="text">'+
+		'<input type="checkbox" style="margin-left:15px" data-bind="checked:showlabels">Show tree node labels</span>'+
+		'<span class="note" data-bind="visible:act()==\'annotate\',html:tagnote[tag()]?tagnote[tag()]+\'<br>\':\'\'"></span>'+
+		'<span class="note" data-bind="html:actnote[act()]"></span><br><br><b>③</b> Click "Apply" to edit the tree. Click "Cancel" when done with edits.'+
+		'<div style="color:red;height:20px;margin:10px 0 -30px 5px;" data-bind="text:statustxt,fadevisible:statustxt"></div></div>');
 		
 		var applybtn = $('<a class="button orange">Apply</a>');
-		applybtn.click(toolsmodel.processLeafs);
-		var closefunc = function(){ clearselection(); toolsmodel.markLeafs('unmark'); toolsmodel.prunemode = false; };
+		applybtn.click(toolsmodel.processTree);
+		var closefunc = function(){ clearselection(); toolsmodel.clearTree(); toolsmodel.prunemode = false; };
 		
-		var dialogwindow = makewindow('Tree tools',[title,content],{id:type,icn:'tree',btn:['Cancel',applybtn],closefunc:closefunc});
-		clearselection(); toolsmodel.markLeafs('unmark'); toolsmodel.prunemode = true;
-		if(model.selmode()!='rows') model.selmode('rows');
-		ko.applyBindings(toolsmodel,dialogwindow[0]);
+		var dialogwindow = makewindow('Tree tools', content, {id:type, icn:'tree', btn:['Cancel',applybtn], closefunc:closefunc});
+		clearselection(); model.selmode('rows'); toolsmodel.prunemode = true;
+		ko.applyBindings(toolsmodel, dialogwindow[0]);
 	}
 //system preferences
 	else if(type=='settings'){
@@ -4380,7 +4463,7 @@ function dialog(type,options){
 		'<a class="button toggle" data-bind="css:{on:undo},click:toggle.bind($data,undo)"><span class="light"></span><span class="text" data-bind="text:btntxt(undo)"></span></a></div>');
 		
 		var seqwrap = $('<div class="rowwrap" data-bind="visible:model.seqsource()">');
-		var seqrows = $('<div class="row bottombtn">').append(expandtitle({title:'Colour sequences:', desc:'Click for additional settings', target:seqwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		var seqrows = $('<div class="row">').append(expandtitle({title:'Colour sequences:', desc:'Click for additional settings', target:seqwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
 		seqrows.append(' <select data-bind="options:coloropt,value:colorscheme"></select> colour scheme<br>'+
 		//'<span class="note" data-bind="text:colordesc[colorscheme()]"></span><br>'+
 			'<span>Show letters in <select style="margin-top:10px" data-bind="options:fontopt,value:font"></select> with '+
@@ -4392,7 +4475,7 @@ function dialog(type,options){
 		seqwrap.append(seqrows);
 		
 		var treewrap = $('<div class="rowwrap" data-bind="visible:model.treesource()">');
-		var treerows = $('<div class="row bottombtn">').append(expandtitle({title:'Tree leaf labels:', desc:'Click for additional settings', target:treewrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		var treerows = $('<div class="row">').append(expandtitle({title:'Tree leaf labels:', desc:'Click for additional settings', target:treewrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
 		treerows.append(' <select data-bind="options:leaflabels,value:leaflabel"></select><br>'+
 			'<span>Tree node labels <select style="margin-top:10px" data-bind="options:nodelabels,value:nodelabel"></select></span><br>'+
 			'<span>Node spot size <select style="margin-top:10px" data-bind="options:csizes,value:csize"></select></span><br>'+
@@ -4401,46 +4484,50 @@ function dialog(type,options){
 		treewrap.append(treerows);
 			
 		var launchwrap = $('<div class="rowwrap">');
-		var launchrows = $('<div class="row bottombtn">').append(expandtitle({title:'When Wasabi launches:', desc:'Click for additional settings. These settings take effect after reloading the web page'+(settingsmodel.local?' and/or restarting Wasabi server':''), target:launchwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		var launchrows = $('<div class="row">').append(expandtitle({title:'When Wasabi launches:', desc:'Click for additional settings. These settings take effect after reloading the web page'+(settingsmodel.local?' and/or restarting Wasabi server':''), target:launchwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
 		launchrows.append(' open <select style="margin-bottom:10px" data-bind="options:launchopt,value:onlaunch"></select><br>'+
 			'Restore zoom level <a class="button toggle" data-bind="css:{on:keepzoom},click:toggle.bind($data,keepzoom)">'+
 			'<span class="light"></span><span class="text" data-bind="text:btntxt(keepzoom)"></span></a>');
 		launchwrap.append(launchrows);
 		if(settingsmodel.local){
-			launchwrap.append('<div class="row">Check for updates <a class="button square small" style="margin:-5px 20px 0;font-size:14px" onclick="checkversion(this)">check now</a> <a class="button toggle" data-bind="css:{on:checkupdates},click:toggle.bind($data,checkupdates)">'+
+			launchwrap.append('<div class="row">Check for updates <a class="button square small" style="margin:0 20px;font-size:14px" onclick="checkversion(this)">check now</a> <a class="button toggle" data-bind="css:{on:checkupdates},click:toggle.bind($data,checkupdates)">'+
 			'<span class="light"></span><span class="text" data-bind="text:btntxt(checkupdates)"></span></a></div>'+
-			'<div class="row"><span class="label" title="Which browser to use when Wasabi server starts. Chrome usually has the fastest performance">Autolaunch Wasabi in</span> <select data-bind="options:browsers,optionsText:\'n\',optionsValue:\'v\',value:openbrowser"></select> web browser</div>'+
-			'<div class="row"><span class="label" title="This folder will hold the analysis library and other data. Click to edit the folder path">Keep Wasabi data in</span> <input id="datadir" type="text" class="hidden" style="margin:0;width:220px" data-bind="value:datadir" title="Click to edit folder path"></div>');
+			'<div class="row"><span class="label" title="Auto-launch Wasabi in a web browser when Wasabi server is started.">Autolaunch Wasabi in</span> <select data-bind="options:browsers,optionsText:\'n\',optionsValue:\'v\',value:openbrowser"></select> web browser</div>'+
+			'<div class="row"><span class="label" title="This folder stores the analysis library and other Wasabi data.">Keep Wasabi data in</span> <input id="datadir" type="text" class="hidden" style="margin:0;width:220px" data-bind="value:datadir" title="Click to edit the folder path."></div>');
 			if(settingsmodel.local=='osxbundle'){
 				launchwrap.append('<div class="row"><span class="label" title="Wasabi server will use a new window instead of the Console app to show its status">'+
 					'Show server feedback</span> <a class="button toggle" data-bind="css:{on:bundlestart},click:toggle.bind($data,bundlestart)">'+
 					'<span class="light"></span><span class="text" data-bind="text:btntxt(bundlestart)"></span></a></div>');
 			}
 			else if(settingsmodel.local=='linux'){
-				launchwrap.append('<div class="row"><span class="label" title="Places a double-clickable shortcut to desktop for easy launching">'+
+				launchwrap.append('<div class="row"><span class="label" title="Places a shortcut to desktop to launch Wasabi">'+
 					'Create desktop launcher</span> <a class="button toggle" data-bind="css:{on:linuxdesktop},click:toggle.bind($data,linuxdesktop)">'+
 					'<span class="light"></span><span class="text" data-bind="text:btntxt(linuxdesktop)"></span></a></div>');
 			}
 		}
 			
 		var uiwrap = $('<div class="rowwrap">');
-		var uirows = $('<div class="row bottombtn">').append(expandtitle({title:'User interface:', desc:'Click for additional settings', target:uiwrap, minh:'34px', maxh:'171px'}).css('display','inline-block'));
-		uirows.append(' all animations <a class="button toggle" data-bind="css:{on:allanim},click:toggle.bind($data,allanim)"><span class="light"></span><span class="text" data-bind="text:btntxt(allanim)">'+
-			'</span></a><br><span class="label" style="margin-top:10px" title="Disable window animations in case of blurry text">Dialog window animations</span>'+
+		var uirows = $('<div class="row">').append(expandtitle({title:'User interface:', desc:'Click for additional settings', target:uiwrap, minh:'34px', maxh:'171px'}).css('display','inline-block'));
+		uirows.append(' all animations <a class="button toggle" data-bind="css:{on:allanim},click:toggle.bind($data,allanim)">'+
+			'<span class="light"></span><span class="text" data-bind="text:btntxt(allanim)"></span></a><br>'+
+			'<span class="label" style="margin-top:10px" title="Disable window animations in case of blurry text">Dialog window animations</span>'+
 			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:windowanim},click:toggle.bind($data,windowanim)"><span class="light"></span>'+
 			'<span class="text" data-bind="text:btntxt(windowanim)"></span></a>');
-		uiwrap.append(uirows, '<div class="row bottombtn"><span class="label" title="Click on bottom-left edge of menubar to toggle the display mode">Auto-hide menubar in minimized mode</span>'+
-			'<a class="button toggle" data-bind="css:{on:hidebar},click:toggle.bind($data,hidebar)"><span class="light"></span><span class="text" data-bind="text:btntxt(hidebar)"></span></a><br>'+
-			'<span style="display:inline-block;margin-top:10px">Compact viewmode of analysis library</span>'+
-			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:minlib},click:toggle.bind($data,minlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(minlib)"></span></a><br>'+
-			'<span style="display:inline-block;margin-top:10px">Show analysis path in library</span>'+
-			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:ladderlib},click:toggle.bind($data,ladderlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(ladderlib)"></span></a>'+
-			'</div>'+
+		uiwrap.append(uirows, '<div class="row">'+
+		    '<span class="buttonrow"><span class="label" title="Click on bottom-left edge of the top menubar to toggle its display mode">Thinner top menubar</span>'+
+			  '<a class="button toggle" data-bind="css:{on:mintop},click:toggle.bind($data,mintop)"><span class="light"></span><span class="text" data-bind="text:btntxt(mintop)"></span></a></span><br>'+
+			'<span class="buttonrow"><span class="label" title="Hover the pointer on the webpage top edge to reveal a hidden menubar">Auto-hide thin menubar</span>'+
+			  '<a class="button toggle" data-bind="css:{on:hidetop},click:toggle.bind($data,hidetop)"><span class="light"></span><span class="text" data-bind="text:btntxt(hidetop)"></span></a></span><br>'+
+			'<span class="buttonrow">Compact viewmode of analysis library'+
+			  '<a class="button toggle" data-bind="css:{on:minlib},click:toggle.bind($data,minlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(minlib)"></span></a></span><br>'+
+			'<span class="buttonrow">Show analysis path in library'+
+			  '<a class="button toggle" data-bind="css:{on:ladderlib},click:toggle.bind($data,ladderlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(ladderlib)"></span></a></span>'+
+		'</div>'+
 		'<div class="row"><span class="label" title="The analysis sharing links are only useful when Wasabi server is accessible to other computers">Library data sharing links</span>'+
 			'<a class="button toggle" data-bind="css:{on:sharelinks},click:toggle.bind($data,sharelinks)"><span class="light"></span><span class="text" data-bind="text:btntxt(sharelinks)"></span></a></div>');
 		
 		content.append(launchwrap, seqwrap, treewrap, uiwrap);
-		content.append('<div class="row bottombtn" data-bind="visible:userid"><span class="label" data-bind="attr:{title:\'User ID: \'+userid()}">User account</span> <span class="progressline" style="width:150px;margin-left:20px" '+
+		content.append('<div class="row" data-bind="visible:userid"><span class="label" data-bind="attr:{title:\'User ID: \'+userid()}">User account</span> <span class="progressline" style="width:150px;margin-left:20px" '+
 			'data-bind="visible:datalimit, attr:{title:dataperc()+\' of \'+numbertosize(datalimit,\'byte\')+\' server space in use\'}">'+
 			'<span class="bar" data-bind="style:{width:dataperc}"></span><span class="title" data-bind="html:\'Library size: \'+numbertosize(datause(),\'byte\')"></span></span>'+
 			'<a class="button toggle" style="margin-top:-2px;padding-bottom:2px" onclick="dialog(\'account\')">Settings</a><br><br>'+
@@ -4488,7 +4575,7 @@ function dialog(type,options){
 		'Wasabi is a browser-based application for the visualisation and analysis of multiple alignment molecular sequence data.<br>'+
 		'Its multi-platform user interface is built on most recent HTML5 and Javascript standards and it is recommended to use the latest version of '+
 		'<a href="http://www.mozilla.org/firefox" target="_blank">Firefox</a>, <a href="http://www.apple.com/safari" target="_blank">Safari</a> '+
-		'or <a href="http://www.google.com/chrome" target="_blank">Chrome</a> web browser to run Wasabi. <a href="http://wasabi.biocenter.helsinki.fi" target="_blank">Learn more about Wasabi &gt;&gt;</a></div>'+
+		'or <a href="http://www.google.com/chrome" target="_blank">Chrome</a> web browser to run Wasabi. <a href="http://wasabiapp.org" target="_blank">Learn more about Wasabi &gt;&gt;</a></div>'+
 		'<div class="sectiontitle"><span>Support</span></div><div class="sectiontext">'+
 		'<a class="logo" href="http://www.biocenter.fi" target="_blank"><img src="images/logo_bf.png"></a>'+
 		'<a class="logo" href="http://www.biocenter.helsinki.fi/bi" target="_blank"><img src="images/logo_uh.png"></a>'+
@@ -5340,10 +5427,11 @@ pluginModel.prototype = {
 //== functions for sequence manipulation ==//
 //make or resize a sequence selection box
 function selectionsize(e,id,type){
+	var boxw = model.boxw(), boxh = model.boxh(), selmode = model.selmode();
 	if(typeof(type)=='undefined'){ var type = 'rb', start = {}; }
 	else if(typeof(type)=='object'){ //type => mouse startpos{x,y} || columns [start,end]
-		var start = type.length? {x:type[0]*model.boxw(),w:type[1]-type[0]} : type.x&&type.y? {x:type.x,y:type.y} : {x:0,y:0};
-		if(type.length && (type[1]*model.boxw()<Math.abs(dom.wrap.position().left) || type[0]*model.boxw()>Math.abs(dom.wrap.position().left)+dom.seqwindow.innerWidth())) return; //outside of seqwindow
+		var start = type.length? {x:type[0]*boxw,w:type[1]-type[0]} : type.x&&type.y? {x:type.x,y:type.y} : {x:0,y:0};
+		if(type.length && (type[1]*boxw<Math.abs(dom.wrap.position().left) || type[0]*boxw>Math.abs(dom.wrap.position().left)+dom.seqwindow.innerWidth())) return; //outside of seqwindow
 		if(e){
 			var dx = e.pageX-type.x, dy = e.pageY-type.y;
 			if(dx<10||dy<10) return; else type = 'rb';
@@ -5358,19 +5446,20 @@ function selectionsize(e,id,type){
 			<div id="horicross'+id+'" class="selectioncross"><div class="tresize"></div><div class="bresize"></div></div>');
 		if(typeof(type)=='object'){ //coordinates given
 			x = start.x||x;
-			y = start.y||model.boxh()*model.visiblerows().length-model.boxh();
+			y = start.y||boxh*model.visiblerows().length-boxh;
 			w = start.w||w;
 		}else{ //coordinates from mouse
 			x = (start.x||e.pageX)-dom.seq.offset().left-2;
 			y = (start.y||e.pageY)-dom.seq.offset().top;
 			model.activeid(id);
 		}
-		x = x-(x%model.boxw()); y = y-(y%model.boxh()); //snap to grid
+		x = x-(x%boxw); y = y-(y%boxh); //snap to grid
 		if(x<0) x=0; if(y<0) y=0;
-		$("#selection"+id).css({'left':x,'top':y,'width':model.boxw()*w,'height':model.boxh()*h,'display':'block'});
-		$("#vertcross"+id).css({'left':x,'top':'0','width':model.boxw()*w,'height':dom.seq.innerHeight(),'display':model.selmode()=='columns'?'block':'none'});
-		$("#horicross"+id).css({'left':'0','top':y,'width':dom.seq.innerWidth(),'height':model.boxh()*h,'display':model.selmode()=='rows'?'block':'none'});
+		$("#selection"+id).css({'left':x,'top':y,'width':boxw*w,'height':boxh*h,'display':'block'});
+		$("#vertcross"+id).css({'left':x,'top':'0','width':boxw*w,'height':dom.seq.innerHeight(),'display':selmode=='columns'?'block':'none'});
+		$("#horicross"+id).css({'left':'0','top':y,'width':dom.seq.innerWidth(),'height':boxh*h,'display':selmode=='rows'?'block':'none'});
 		dom.seqwindow.mouseup(function(){ //attach resize handles
+			if(toolsmodel.prunemode){ toolsmodel.markLeafs(); clearselection(); return; } //tree marking mode
 			$("#selection"+id).mouseenter(function(){ $("#selection"+id+" div.rbresize, #selection"+id+" div.ltresize").css('opacity','1'); });
 			$("#selection"+id).mouseleave(function(){ $("#selection"+id+" div.rbresize, #selection"+id+" div.ltresize").css('opacity','0'); });
 			$("#vertcross"+id).mouseenter(function(){ $("#vertcross"+id+" div.lresize, #vertcross"+id+" div.rresize").css('opacity','1'); });
@@ -5401,44 +5490,45 @@ function selectionsize(e,id,type){
 		if(over.tagName=='DIV'&&id!=over.id.substr(0-id.toString().length)){ return false; }//avoid overlap
 		var seldiv = $("#selection"+id);
 		if(!seldiv.length) return;
+		var selwidth = seldiv.innerWidth(), selheight = seldiv.innerHeight(); 
 		if(type!='b'&&type!='t'){
 			if(type=='r'||type=='rb'){
 				var w = e.pageX-seldiv.offset().left-5;
-				w = w-(w%model.boxw())+model.boxw();
+				w = w-(w%boxw)+boxw;
 			} else if(type=='l'||type=='lt'){
 				var l = e.pageX-seldiv.parent().offset().left+5;
-				l = l-(l%model.boxw());
-				var redge = seldiv.position().left+seldiv.innerWidth();
-				if(l>redge-model.boxw()){ l=redge-model.boxw(); }
+				l = l-(l%boxw);
+				var redge = seldiv.position().left+selwidth;
+				if(l>redge-boxw){ l=redge-boxw; }
 				var w = redge-l;
 				seldiv.css('left',l);
 				$("#vertcross"+id).css('left',l);
 			}
-			if(w<model.boxw()){ w = model.boxw(); }
+			if(w<boxw){ w = boxw; }
 			seldiv.css('width',w);
 			$("#vertcross"+id).css('width',w);
 		}
 		if(type!='r'&&type!='l'){
 			if(type=='b'||type=='rb'){
 				var h = e.pageY-seldiv.offset().top-5;
-				h = h-(h%model.boxh())+model.boxh();
+				h = h-(h%boxh)+boxh;
 			} else if(type=='t'||type=='lt'){
 				var t = e.pageY-seldiv.parent().offset().top+5;
-				t = t-(t%model.boxh());
-				var bedge = seldiv.position().top+seldiv.innerHeight();
-				if(t>bedge-model.boxh()){ t=bedge-model.boxh(); }
+				t = t-(t%boxh);
+				var bedge = seldiv.position().top+selheight;
+				if(t>bedge-boxh){ t=bedge-boxh; }
 				var h = bedge-t;
 				seldiv.css('top',t);
 				$("#horicross"+id).css('top',t);
 			}
-			if(h<model.boxh()){ h = model.boxh(); }
+			if(h<boxh){ h = boxh; }
 			seldiv.css('height',h);
 			$("#horicross"+id).css('height',h);
 		}
-		if(seldiv.innerHeight()>20 && seldiv.innerWidth()>40){//show selection size
-			if(seldiv.innerWidth()>140){ var r=' rows | ',c=' columns';}else{ var r='x',c=''; }
-			$("#selection"+id+' div.description').css('display','block'); 
-			$("#selection"+id+' div.description').text(parseInt(seldiv.innerHeight()/model.boxh())+r+parseInt(seldiv.innerWidth()/model.boxw())+c);
+		if(selheight>20 && selwidth>40){//show selection size
+			if(selwidth>140){ var r=' rows | ',c=' columns';}else{ var r='x',c=''; }
+			$("#selection"+id+' div.description').css('display','block');
+			$("#selection"+id+' div.description').text(parseInt(selheight/boxh)+r+parseInt(selwidth/boxw)+c);
 		} else { $("#selection"+id+' div.description').css('display','none'); }
 	}
 }
@@ -5882,7 +5972,6 @@ function seqmenu(selectid){
 var startupdone = false;
 function startup(response){
 	if(startupdone){ return false; } else { startupdone = true; }
-	if(typeof(localStorage.collapse)!='undefined') toggletop(localStorage.collapse);
 	var launchact = settingsmodel.onlaunch();
 	if(!launchact){ launchact = 'demo data'; settingsmodel.onlaunch('blank page'); } //first time launch in this browser
 	var urlstr = settingsmodel.urlvars, urlvars = parseurl(settingsmodel.urlvars);
@@ -6032,7 +6121,7 @@ $(function(){
 	 e.preventDefault(); //disable image drag etc.
 	 var startpos = {x:e.pageX,y:e.pageY};
 	 if(e.pageY>dom.seqwindow.offset().top+30){ //in seq area
-	if(e.which==1 && e.target.tagName!='DIV'){ //act on left mouse button, outside of selections
+	 if(e.which==1 && e.target.tagName!='DIV'){ //act on left mouse button, outside of selections
 		model.activeid('');
 		dom.seqwindow.mousemove(function(evt){ selectionsize(evt,'',startpos); });
 		dom.seqwindow.one('mouseup',function(e){
@@ -6051,13 +6140,11 @@ $(function(){
 				}
 			}
 		});
-	}
-	$('html').one('mouseup',function(){
-		dom.seqwindow.unbind('mousemove');
-		if(toolsmodel.prunemode) toolsmodel.markLeafs();
-	});
 	 }
-	});
+	 $('html').one('mouseup',function(){
+		dom.seqwindow.unbind('mousemove');
+	 });
+	}});
 	
 	var icon = function(type,title){
 		title = title? 'title="'+title+'"' : '';

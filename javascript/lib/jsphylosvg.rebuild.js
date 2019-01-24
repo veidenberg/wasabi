@@ -132,7 +132,15 @@ Smits.PhyloCanvas.Node.prototype = {
 		}
 	},
 	
-	countChildren: function(hiddenbranch){
+	traverse: function(func, inclhidden){ //apply a function to this node+subtree
+		if(typeof(func)!='function') return;
+		if(inclhidden||!this.hidden){
+			var s = func(this);
+			if(typeof(s)!='string'||s!='stop'){ for(var i in this.children){ this.children[i].traverse(func, inclhidden); }}
+		}
+	},
+	
+	countChildren: function(hiddenbranch){ //count subtree nodes
 		this.leafCount = 0; this.visibleLeafCount = 0; this.visibleChildCount = 0;
 		this.nodeCount = this.children.length? 1: 0;
 		for(var i in this.children){
@@ -157,9 +165,9 @@ Smits.PhyloCanvas.Node.prototype = {
 		else{ return this.parent.getVisibleParentBranch(); }
 	},
 	
-	hideToggle: function(action){ //hide/show a node
+	hideToggle: function(action, skipcount){ //hide/show a node
 		if(!this.parent) return;
-		var ishidden = action ? action=='hide' ? false: true: this.hidden;
+		var ishidden = action? action=='hide'? false: true: this.hidden;
 		if(!ishidden){
 			if(this.parent.visibleChildCount<2){ //if only 1 visible child
 				this.getVisibleParentBranch().hidden = true;
@@ -167,10 +175,10 @@ Smits.PhyloCanvas.Node.prototype = {
 			else{ this.hidden = true; }
 		}
 		else{ this.hidden = false; }
-		this.getRoot().countChildren(); //recount hidden/visible nodes
+		if(!skipcount) this.getRoot().countChildren(); //recount hidden/visible nodes
 	},
 	
-	showSubtree: function(ancestral,hide){ //show all descendants or show/hide all ancestral leaves
+	showSubtree: function(ancestral, hide){ //show all descendants or show/hide all ancestral leaves
 		for (var i in this.children) {
 			var child = this.children[i];
 			if(child.children && child.children.length) child.showSubtree(ancestral,hide);
@@ -192,12 +200,23 @@ Smits.PhyloCanvas.Node.prototype = {
 		return this.midBranchPosition;
 	},
 	
-	highlight: function(flag){ //toggle svg element highlight color
+	highlight: function(flag, delegated){ //toggle svg element highlight color
 		var node = this;
 		node.active = typeof(flag)!='undefined'?flag:!node.active;
-		var svgel = $((node.type=='stem'?'#tree circle':'#names text')+'[nodeid='+node.id+']');
-		if(node.active) svgel.addClass('highlight');
-		else svgel.removeClass('highlight');
+		var svgel = $((node.type=='stem'?'#tree circle':'#namelabel, #names text')+'[nodeid='+node.id+']');
+		var classact = node.active?'addClass':'removeClass';
+		svgel[classact]('highlight');
+		if(toolsmodel.prunemode && toolsmodel.nodetype()=='clades'){
+			if(node.type=='stem'){
+				if(delegated) $('#tree line[nodeid='+node.id+']')[classact]('highlight');
+				for(i in node.children){ //(un)highlight branches downstream
+					node.children[i].highlight(node.active, 'delegated');
+				}
+			} else {
+				$('#tree line[nodeid='+node.id+']')[classact]('highlight');
+				if(!delegated) node.parent.highlight(node.active);
+			}
+		}
 		return svgel[0];
 	},
 	
@@ -372,7 +391,7 @@ Smits.PhyloCanvas.Node.prototype = {
 		},100)}
 	},
 	
-	remove: function(skipundo,skipcount){ //remove node+descendants from tree
+	remove: function(skipundo, skipcount){ //remove node+descendants from tree
 		var node = this, root = node.getRoot().removeAnc(), pnode = node.parent;
 		if(node == root) return;
 		if(pnode != root){
@@ -402,7 +421,7 @@ Smits.PhyloCanvas.Node.prototype = {
 		//remove node+parent
 		pnode.parent = false; pnode.children = []; node.parent = false; root.parent = false;
 		if(!skipcount) root.countChildren();
-		if(!skipundo && settingsmodel.undo()){ //add undo, unless part of node move or batch remove
+		if(!skipundo && settingsmodel.undo()){ //add undo
 			delete leafnodes[node.name];
 			model.nodecount(root.nodeCount); model.leafcount(root.leafCount);
 		  setTimeout(function(){
@@ -410,10 +429,10 @@ Smits.PhyloCanvas.Node.prototype = {
 		},100)}
 	},
 	
-	prune: function(){ //keep node+subtree, remove the rest
+	prune: function(skipundo){ //keep node+subtree, remove the rest
 		var node = this, nodename = node.name, root = node.getRoot().removeAnc();
 		node.setRoot(node,'norealign');
-		if(settingsmodel.undo()){ setTimeout(function(){
+		if(!skipundo && settingsmodel.undo()){ setTimeout(function(){
 			model.addundo({name:'Prune subtree',type:'tree',data:node.getRoot().write('undo'),info:'Subtree of node \''+nodename+'\' was pruned from main tree.'});
 		},100)}
 	},
@@ -522,7 +541,7 @@ Smits.PhyloCanvas.Node.prototype = {
 		canvas.style.borderRadius = '2px';
 		return canvas;
 	}	
-};//<--Node.prototype functions
+}; //Node.prototype
 
 //tag:name dictionary for displaying nhx metadata
 Smits.PhyloCanvas.NewickMeta = {'S':'species', 'B':'bootstrap', 'T':'taxon_id', 'AC':'accession', 'E':'ec', 'GN':'gene', 'ND':'id', 'N':'id', 'G':'gene_id', 'TR':'transcript_id', 'PR':'protein_id', 'PVAL':'p_value'};
@@ -637,7 +656,7 @@ Smits.PhyloCanvas.NewickParse = function(data){
 	this.leaflabel = {};
 	this.nodelabel = {};
 	this.processNodes(); //process nodetree
-};  //<--NewickParse
+};  //NewickParse
 
 /// Parse PhyloXML text format to a tree data object ///
 Smits.PhyloCanvas.PhyloxmlParse = function(data){
@@ -711,8 +730,9 @@ Smits.PhyloCanvas.PhyloxmlParse = function(data){
 		this.nodeinfo = data.nodeinfo || {};
 		this.processNodes(); //process nodetree
 	}
-};  //<--PhyloxmlParse
+};  //PhyloxmlParse
 
+//default params for SVG elements
 Smits.PhyloCanvas.Render = {
   Parameters: { // Style & mouse event parameters for tree SVG elements
 	Rectangular: {
@@ -720,120 +740,52 @@ Smits.PhyloCanvas.Render = {
 		paddingR: 5,		//Padding on tree right side
 		paddingNames: 2, 		//Tree namelabel left side padding, pixels
 		dotLine: true,		//Right-adjust tree edges with dotted lines
-	},
-	
-	/*  Leaf label mouse events. Params: {svg,node,x,y} */
-	mouseRollOver: function(params){ 
-		var node = params.node;
-		node.edgeCircle = params.svg.draw(new Smits.PhyloCanvas.Render.edgeCircle(params.x, params.y, 5));					
-		var textEl = node.highlight(true); //color red
-		var rowh = model.boxh();
-		var topadj = Boolean(window.webkitRequestAnimationFrame)? -1: 0;//webkit offset adjustment
-		var topy = Math.round($(textEl).offset().top);
-		var seqy = ((topy-$('#seq').offset().top)/rowh)*rowh; //snap to rowgrid
-		rowborder({y:seqy+topadj},'keep'); //highlight seq row
-		node.rolltimer = setTimeout(function(){ //show full name on mouse hover
-			var namelabel = $("#namelabel"), namelabelspan = $("#namelabel span");
-			namelabelspan.text(textEl.textContent);
-			namelabel.css({'font-size': model.fontsize()+'px', 'display':'block', 'opacity':0});
-			namelabel.offset({left:$("#right").offset().left-16, top:topy-1+topadj});
-			namelabelspan.css({'margin-left': 0-$("#names").innerWidth()+6+'px', 'color': node.color||node.bcolor||'red'});
-			if(topy){ namelabel.fadeTo(100,1); }
-		},300);
-	},
-	
-	mouseRollOut: function(params){
-		var node = params.node;
-		clearTimeout(node.rolltimer);
-		if(node.edgeCircle){ node.edgeCircle.remove(); node.edgeCircle = false; }
-		$("#namelabel").fadeOut(100);
-		if(activenode!=node.id) node.highlight(false); //tooltipmenu opened: keep highlight
-	},
-	
-	onClickAction: function(params){
-		var node = params.node;
-		if(node.edgeCircle) node.edgeCircle.hide();		
-		//click on leaf label => popup menu
-		var textEl = node.highlight(true);
-		var menudata = {};
-		var infomenu = {' ':''};
-		var infotitle = 'Metadata';
-		var usedmeta = [];
-		infomenu['<span class="note">Branch length</span> '+(Math.round(node.len*1000)/1000)] = '';
-		if(!$.isEmptyObject(model.ensinfo()) && node.species){ //submenu for leaf metadata
-			infotitle = 'Ensembl';
-			infomenu['<span class="note">Species</span> '+node.species] = '';
-			if(node.nodeinfo.gene_id){
-				infomenu['<span class="note">Gene</span> '+
-				'<a href="http://www.ensemblgenomes.org/id-gene/'+node.nodeinfo.gene_id+
-				'" target="_blank" title="View in Ensembl">'+(node.nodeinfo.gene||node.nodeinfo.gene_id)+'</a>'] = '';
-			}
-			if(node.nodeinfo.accession){
-				var ispr = /ENS\w+P\d+/.test(node.nodeinfo.accession); //accession could be protein or transcript ID
-				var istr = /ENS\w+T\d+/.test(node.nodeinfo.accession);
-				infomenu['<span class="note">'+(ispr?'Protein':istr?'Transcript':'Accession')+'</span> '+
-				'<a href="http://www.ensemblgenomes.org/id/'+node.nodeinfo.accession+
-				'" target="_blank" title="View in Ensembl">'+node.nodeinfo.accession+'</a>'] = '';
-			}
-			usedmeta = ['scientific_name','id','species','gene','accession'];
-		}
-		$.each(node.nodeinfo, function(title,val){ //display all metadata
-			if(!~usedmeta[title]) infomenu['<span class="note">'+title.capitalize().replace('_',' ')+'</span> '+val] = ''; 
-		});
-		menudata['<span class="svgicon" title="View metadata">'+svgicon('info')+'</span>'+infotitle] = {submenu:infomenu};
-		menudata['<span class="svgicon" title="Hide node and its sequence">'+svgicon('hide')+'</span>Hide leaf'] = function(){ node.hideToggle(); refresh(); };
-		menudata['<span class="svgicon" title="Graft this node to another branch in the tree">'+svgicon('move')+'</span>Move leaf'] = function(){ setTimeout(function(){ node.highlight(true) },50); movenode('',node,'tspan'); };
-		menudata['<span class="svgicon" title="Place this node as the tree outgroup">'+svgicon('root')+'</span>Place root here'] = function(){ node.reRoot(); refresh(); };
-		menudata['<span class="svgicon" title="Remove this node from the tree">'+svgicon('trash')+'</span>Remove leaf'] = function(){ node.remove(); refresh(); };
-		setTimeout(function(){ tooltip('','',{clear:true, arrow:'top', data:menudata, style:'none', nodeid:node.id, style:"leafmenu",
-		target:{ x:$("#names").offset().left, y:$(textEl).offset().top, height:model.boxh(), width:$("#names").width() }}) },100);
-	} //onClickAction
-  } //Render.Parameters
-}; //<--obj Render
-
-Smits.PhyloCanvas.Render.Line = function(x1, y1, x2, y2, attr){
+	}
+  },
+  Line: function(x1, y1, x2, y2, attr){
 	this.type = 'line';
 	this.x1 = x1;
 	this.x2 = x2;
 	this.y1 = y1;
 	this.y2 = y2;
 	this.attr = attr || {};
-};
-Smits.PhyloCanvas.Render.horLine = function(x1, y1, x2, y2, attr){
+  },
+  horLine: function(x1, y1, x2, y2, attr){
 	Smits.PhyloCanvas.Render.Line.apply(this, arguments);
 	this.attr.class = 'horizontal';
-};
-Smits.PhyloCanvas.Render.dashLine = function(x1, y1, x2, y2, attr){
+  },
+  dashLine: function(x1, y1, x2, y2, attr){
 	Smits.PhyloCanvas.Render.horLine.apply(this, arguments);
 	this.attr.class += ' dashed';
-};
-Smits.PhyloCanvas.Render.Text = function(x, y, text, attr){
+  },
+  Text: function(x, y, text, attr){
 	this.type = 'text';
 	this.x = x;
 	this.y = y;
 	this.text = text;
 	this.attr = attr || {};
-};
-Smits.PhyloCanvas.Render.nodeText = function(x, y, text, attr){
+},
+  nodeText: function(x, y, text, attr){
 	Smits.PhyloCanvas.Render.Text.apply(this, arguments);
 	this.svg = 'svg1';
-};
-Smits.PhyloCanvas.Render.Path = function(path, attr){
+},
+  Path: function(path, attr){
 	this.type = 'path';
 	this.path = path;
 	this.attr = attr || {};
-};
-Smits.PhyloCanvas.Render.Circle = function(x, y, radius, attr){
+},
+  Circle: function(x, y, radius, attr){
 	this.type = 'circle';
 	this.x = x;
 	this.y = y;
 	this.radius = radius;
 	this.attr = attr || {};
-};
-Smits.PhyloCanvas.Render.edgeCircle = function(x, y, radius, attr){
+},
+  edgeCircle: function(x, y, radius, attr){
 	Smits.PhyloCanvas.Render.Circle.apply(this, arguments);
 	this.attr.class = 'edge';
-};
+}
+}; //Render params
 
 //create SVG canvas elements on first tree render
 Smits.PhyloCanvas.Render.SVG = function(){
@@ -920,11 +872,11 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 			var tipnote = '';
 			var cradius = node.csize || csize;
 			var cattr = {nodeid:node.id, style:{}};
-			if(node.children[1].type=='ancestral') cattr.style.fill = 'white'; //has ancestral seq.
+			if(node.children[1].type=='ancestral') cattr.class = 'white'; //has ancestral seq.
 			var first = node.children[0].hidden;
 			var last = node.children[node.children.length-1].hidden;
 			if(first || last){ //has hidden branch(es)
-				cattr.style.fill = 'white';
+				cattr.class = 'white';
 				var hastree = (first&&node.children[0].type!='label')||(last&&node.children[node.children.length-1].type!='label');
 				if(first && last){ //anc. shown, both branches hidden
 					cattr.style.stroke = 'orange';
@@ -935,16 +887,15 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 				if(hastree) cradius = 4; else cradius = 3;
 			}
 			if(node.altered){
-				cattr.style.fill = 'red';
+				cattr.class = 'red';
 				tipnote = 'Needs realignment';
 			}
 			if(node.duplications){
-				cattr.style.fill = 'lightblue';
-				cattr.style.stroke = 'blue';
+				cattr.class = 'blue';
 				if(!tipnote) tipnote = 'Duplication node';
 			}
-			if(node.color) cattr.style.fill = cattr.style.stroke = node.color;
-			
+			if(node.color) cattr.style.fill = cattr.style.stroke = node.color; //override node color
+			//draw node circle
 			drawInstruct.Circle.push([x2, y, cradius, cattr, {id:node.id, name:node.name, title:tipnote}]);
 			
 			var labeltxt = node.nodeinfo[node.nodelabel||nodelabel] || ' ';
@@ -1016,6 +967,7 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 						var cname = d.name||'no name';
 						
 						svgel.mouseover(function(e){
+							if(toolsmodel.prunemode) d.title = 'Click to (un)mark';
 							if(!$('#treemenu .tooltipcontent').text()){
 								var tipnote = $('#right').hasClass('dragmode')? '': (d.name>5?'<br>':' ')+'<span class="note">'+(d.title||'Click or drag')+'</span>';
 								tooltip(e, cname+tipnote, {target:'circle', id:"treemenu", arrow:'left', style:'black', nodeid:d.id, nohide:true});
@@ -1027,29 +979,84 @@ Smits.PhyloCanvas.Render.Phylogram = function(svg, data, options){
 						});
 						
 						svgel.click(function(e){
-							if(!$('#treemenu .tooltipcontent').text()){
+							if(toolsmodel.prunemode){ data.root.getById(d.id).highlight(); return; } //marking mode
+							else data.root.getById(d.id).highlight(true);
+							if(!$('#treemenu .tooltipcontent').text()){ //open a collapsed menu
 								e.stopPropagation();
 								tooltip(e, cname, {clear:true, target:'circle', id:"treemenu", style:'black', data:{}, nodeid:d.id, nomove:true});
-								e.stopPropagation();
 							}
 						});
 					}
 					else if(eltype=='Text'){ //attach leaf text mouse listeners
-						Smits.Common.addRaphEventHandler(
-							svgel, 'mouseover', Smits.PhyloCanvas.Render.Parameters.mouseRollOver, 
-							{svg:svg, node:d.node, x:d.x2, y:d.y}
-						);
+						
+						svgel.mouseover(function(){
+							var textEl = $(svgel[0]);
+							d.node.edgeCircle = svg.draw(new Smits.PhyloCanvas.Render.edgeCircle(d.x2, d.y, 5));
+							if(toolsmodel.prunemode) return;
+							var rowh = model.boxh();
+							var topadj = Boolean(window.webkitRequestAnimationFrame)? -1: 0;//webkit offset adjustment
+							var topy = Math.round(textEl.offset().top);
+							var seqy = ((topy-$('#seq').offset().top)/rowh)*rowh; //snap to rowgrid
+							rowborder({y:seqy+topadj},'keep'); //highlight seq row
+							d.node.rolltimer = setTimeout(function(){ //show full name on mouse hover
+								var namelabel = $("#namelabel"), namelabelspan = $("#namelabel span");
+								namelabelspan.text(textEl.text());
+								namelabel.css({'font-size': model.fontsize()+'px', 'display':'block', 'opacity':0});
+								namelabel.offset({left:$("#right").offset().left-16, top:topy-1+topadj});
+								namelabelspan.css({'margin-left': 0-$("#names").innerWidth()+6+'px', 'color': textEl.attr('fill')||''});
+								if(topy){ namelabel.fadeTo(100,1); }
+							},300);
+						});
+
 					
-						Smits.Common.addRaphEventHandler(
-							svgel, 'mouseout', Smits.PhyloCanvas.Render.Parameters.mouseRollOut, 
-							{node:d.node, x:d.x2, y:d.y}
-						);
-					
-						Smits.Common.addRaphEventHandler(
-							svgel, 'click', Smits.PhyloCanvas.Render.Parameters.onClickAction, 
-							{svg:svg, node:d.node, x:d.x2, y:d.y}
-						);	
-					}
+						svgel.mouseout(function(){ 
+							if(d.node.edgeCircle){ d.node.edgeCircle.remove(); d.node.edgeCircle = false; }
+							if(toolsmodel.prunemode) return;
+							clearTimeout(d.node.rolltimer);
+							$("#namelabel").fadeOut(100);
+						});
+	
+						svgel.click(function(){
+							if(d.node.edgeCircle) d.node.edgeCircle.hide();	
+							//click on leaf label => popup menu
+							if(toolsmodel.prunemode){ d.node.highlight(); return; } //marking mode
+							else d.node.highlight(true);
+							//construct pop-up menu content
+							var textEl = $(svgel[0]);
+							var menudata = {};
+							var infomenu = {' ':''};
+							var infotitle = 'Metadata';
+							var usedmeta = [];
+							infomenu['<span class="note">Branch length</span> '+(Math.round(d.node.len*1000)/1000)] = '';
+							if(!$.isEmptyObject(model.ensinfo()) && d.node.species){ //submenu for leaf metadata
+								infotitle = 'Ensembl';
+								infomenu['<span class="note">Species</span> '+d.node.species] = '';
+								if(d.node.nodeinfo.gene_id){
+									infomenu['<span class="note">Gene</span> '+
+									'<a href="http://www.ensemblgenomes.org/id-gene/'+d.node.nodeinfo.gene_id+
+									'" target="_blank" title="View in Ensembl">'+(d.node.nodeinfo.gene||d.node.nodeinfo.gene_id)+'</a>'] = '';
+								}
+								if(d.node.nodeinfo.accession){
+									var ispr = /ENS\w+P\d+/.test(d.node.nodeinfo.accession); //accession could be protein or transcript ID
+									var istr = /ENS\w+T\d+/.test(d.node.nodeinfo.accession);
+									infomenu['<span class="note">'+(ispr?'Protein':istr?'Transcript':'Accession')+'</span> '+
+									'<a href="http://www.ensemblgenomes.org/id/'+d.node.nodeinfo.accession+
+									'" target="_blank" title="View in Ensembl">'+d.node.nodeinfo.accession+'</a>'] = '';
+								}
+								usedmeta = ['scientific_name','id','species','gene','accession'];
+							}
+							$.each(d.node.nodeinfo, function(title,val){ //display all metadata
+								if(!~usedmeta[title]) infomenu['<span class="note">'+title.capitalize().replace('_',' ')+'</span> '+val] = ''; 
+							});
+							menudata['<span class="svgicon" title="View metadata">'+svgicon('info')+'</span>'+infotitle] = {submenu:infomenu};
+							menudata['<span class="svgicon" title="Hide node and its sequence">'+svgicon('hide')+'</span>Hide leaf'] = function(){ d.node.hideToggle(); refresh(); };
+							menudata['<span class="svgicon" title="Graft this node to another branch in the tree">'+svgicon('move')+'</span>Move leaf'] = function(){ setTimeout(function(){ d.node.highlight(true) },50); movenode('',d.node,'tspan'); };
+							menudata['<span class="svgicon" title="Place this node as the tree outgroup">'+svgicon('root')+'</span>Place root here'] = function(){ d.node.reRoot(); refresh(); };
+							menudata['<span class="svgicon" title="Remove this node from the tree">'+svgicon('trash')+'</span>Remove leaf'] = function(){ d.node.remove(); refresh(); };
+							setTimeout(function(){ tooltip('','',{clear:true, arrow:'top', data:menudata, style:'none', nodeid:d.node.id, style:"leafmenu",
+							target:{ x:$("#names").offset().left, y:textEl.offset().top, height:model.boxh(), width:$("#names").width() }}) },100);
+						}); //onclick
+					} //leaf text
 					
 					if(last){
 						requestAnimationFrame(function(){

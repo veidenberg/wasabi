@@ -1,5 +1,5 @@
 {
-  program: "mafft.bat",
+  program: "mafft",
   name: "MAFFT aligner",
   version: 7,
   icon: ["seq","../../images/seq.png"],

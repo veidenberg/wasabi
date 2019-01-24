@@ -79,19 +79,19 @@ noscript div img{
 
 /* collapsed/hidden menubar */
 body.mintop #top { height: 50px; }
-body.mintop.hiddentop #top { top: -40px; }
-body.mintop.hiddentop #top.hidden:hover { top: 0; }
-body.mintop #top div.title, body.mintop #top div.toptext, body.mintop #bottom{ opacity: 0; }
+body.mintop.hidetop #top { top: -40px; }
+body.mintop.hidetop #top:hover { top: 0; }
+body.mintop #top div.title, body.mintop #top div.toptext, body.mintop #bottom{ display: none; }
 body.mintop #top div.buttonblock{ top: -3px; }
 body.mintop #top #logo{ top: -6px; }
-body.mintop.hiddentop #top #logo{ top: -11px; }
+body.mintop.hidetop #top #logo{ top: -11px; }
 body.mintop #top div.buttonmenuwrap{ top: 47px; }
 body.mintop #left{ top: 90px; bottom: 28px; }
-body.mintop.hiddentop #left{ top: 46px; }
+body.mintop.hidetop #left{ top: 46px; }
 body.mintop #namesborderDragline{ top: 70px; }
-body.mintop.hiddentop #namesborderDragline{ top: 30px; }
+body.mintop.hidetop #namesborderDragline{ top: 30px; }
 body.mintop #right{ top: 60px; bottom: 10px; }
-body.mintop.hiddentop #right{ top: 20px; }
+body.mintop.hidetop #right{ top: 20px; }
 body.notop #top{ display:none; }
 body.notop #namesborderDragline{ top: 15px; }
 body.notop #left{ top: 25px; }
@@ -640,6 +640,14 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
  #left.dragmode #tree circle, #left.dragmode #names text{
 	cursor: default;
  }
+ 
+  #names text:hover, #namelabel{
+	text-shadow: 0 1px 3px #666;
+  }
+  
+  #names text.highlight{
+	fill: red
+  }
   
   #tree text, #names text, #scalebar text{
 	fill: black;
@@ -658,9 +666,26 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 	stroke-dasharray: 1,4;
   }
   
+  #tree line.highlight{
+	stroke: red;
+  }
+  
   #tree circle{
 	fill: black;
 	stroke: black;
+  }
+  
+  #tree circle.white{
+	fill: white;
+  }
+  
+  #tree circle.red{
+	fill: red;
+  }
+  
+  #tree circle.blue{
+	fill: lightblue;
+	stroke: blue;
   }
   
   #tree circle.edge{
@@ -668,15 +693,14 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 	stroke: red;
   }
   
-  #tree circle:hover{
+  #tree circle.highlight{
 	stroke: red;
 	fill: red;
-	stroke-width: 3;
-	r: 5;
   }
   
-  #tree circle.highlight, #names text.highlight{
-	  fill: red;
+  #tree circle:hover{
+	stroke: red;
+	stroke-width: 3;
   }
   
   
@@ -785,13 +809,15 @@ div.buttonmenuwrap div.buttonmenu.righticn img.icn{
 	border-radius: 0 3px 3px 0;
 	box-shadow: 3px 1px 2px rgba(0,0,0,0.4);
 }
+
 #namelabel span, #draggedlabel{
 	display: inline-block;
 	border-radius: 5px;	
 	background-color: white;
 	padding: 2px;
-	color: red;
 }
+
+#namelabel.highlight span{ color: red; }
 
 #draggedlabel{
 	position: absolute;
@@ -1649,6 +1675,10 @@ div.popupwindow div.sectiontitle>span{
 	padding: 0 10px;
 	font-weight: bold;
 }
+div.popupwindow div.sectiontitle>span.lefticon{
+	position: absolute;
+	left: 0;
+}
 div.popupwindow div.sectiontitle.small>span{
 	font-weight: normal;
 }
@@ -1932,7 +1962,7 @@ a.button.urladd {
     width: 18px;
     color: #444;
     text-align: center;
-    vertical-align: 5px;
+    vertical-align: 10px;
 }
 a.button.urladd:hover {
 	color: black;
@@ -2004,18 +2034,18 @@ div.insidediv div.row{
 	margin-bottom: 5px;
 	white-space: nowrap;
 }
-div.insidediv div.row.bottombtn{ padding-bottom: 10px; }
 div.insidediv>div.row:nth-child(odd), div.insidediv>div.rowwrap:nth-child(odd){ background-color: rgba(255,255,255,0.6); }
 div.insidediv a.button.toggle{
 	position: absolute;
 	right: 3px;
-	margin-top: -5px;
+	margin-top: -3px;
     padding: 2px 6px 1px 6px;
     border-radius: 3px;
     top: auto;
 }
-div.insidediv div.row.bottombtn a.button.toggle{ margin-top: -4px;}
 div.insidediv div.row>span.buttongroup{ margin: -10px 0 0 5px; }
+div.insidediv div.row>span.buttonrow{ display:inline-block; margin-top:10px; }
+
 div.rowwrap{
 	position: relative;
 	height: 34px;

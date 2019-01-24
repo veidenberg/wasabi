@@ -25,7 +25,7 @@
 	<script type="text/javascript" src="javascript/piwik.js"></script>
 	<script type="text/javascript" src="javascript/script.js"></script>
 </head>
-<body data-bind="css:{hiddentop:settingsmodel.hidebar, notop:!settingsmodel.menubar()}">
+<body data-bind="css:{mintop:settingsmodel.mintop, hidetop:settingsmodel.hidetop, notop:!settingsmodel.menubar()}">
   <div id="page" data-bind="style:{minWidth:840+(statusbtn().replace(/<[^>]+>/g,'').length*13)+'px'}">
     <noscript><div><img src="images/warning.png">You have disabled Javascript in your web browser.<br>Please turn on Javascript to use the Wasabi web application.</div></noscript>
     
@@ -36,7 +36,9 @@
 	  	<input type="text" class="static noselect" data-bind="value:exportmodel.savename, valueUpdate:'afterkeydown',style:{width:exportmodel.savename().length*9+'px'}" onmousedown="if(!$(this).hasClass('editable')) event.preventDefault();" onclick="titlemenu(event)" onblur="if(librarymodel.openid()) librarymodel.openname(this.value); $(this).removeClass('editable');" autocomplete="off" title="Analysis name. Click for more options"><span class="note" data-bind="html:unsaved()||librarymodel.shareicon(librarymodel.openitem())"></span>
 	  </div>
 	  
-	  <div id="topcollapse" title="Click to toggle menubar collapse" onclick="toggletop()"><span>&#x25B2;<br>&#x25B2;</span><br>...</div>
+	  <div id="topcollapse" title="Click to toggle compact menubar" onclick="settingsmodel.toggletop()">
+		<span data-bind="html:settingsmodel.mintop()?'&#x25BC;<br>&#x25BC;':'&#x25B2;<br>&#x25B2;'"></span><br>...
+	  </div>
 	  
 	  <div class="buttonblock" style="left:5%" data-bind="visible:settingsmodel.data">
 	  	<a id="file" class="button transparent icon" onclick="topmenu(event,this)" title="Click for data menu"><img src="images/file.png"></a>
