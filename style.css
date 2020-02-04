@@ -423,18 +423,18 @@ span.buttongroup a.button.right{
 	margin-left: 5px;
 }
 
-#statusbtn .nr{
+span.nr{
 	background: #888;
     border-radius: 10px;
     box-shadow: 0 1px 0 white, 0 1px 3px black inset;
     color: white;
     font-weight: normal;
-    padding: 1px 6px;
+    padding: 2px 6px;
     text-shadow: none;
 }
-#statusbtn .nr.green{ background: green; }
-#statusbtn .nr.red{ background: red; }
-#statusbtn .nr.orange{ background: orange; }
+span.nr.green{ background: green; }
+span.nr.red{ background: red; }
+span.nr.orange{ background: orange; }
 
 #top div.buttonblock{
 	position: absolute;
@@ -1796,6 +1796,10 @@ div.windowcontent{
 }
 #jobstatus div.windowcontent{ width: 450px; }
 div.windowcontent option{ padding: 0; }
+#plugins div.windowcontent{
+	margin: 0;
+	padding: 0;
+}
 
 div.windowcontent ul{ margin: 0; padding-left: 30px; }
 div.windowcontent ul li{ margin-top: 5px; white-space: nowrap; }
@@ -1812,6 +1816,12 @@ div.windowcontent div.btndiv a.button{
 	font-weight: normal;
 	letter-spacing: 0.5px;
 }
+div.windowcontent div.btndiv a.button.square{
+	border-radius: 3px;
+	padding: 7px 10px;
+	font-weight: bold;
+	letter-spacing: normal;
+}
 div.windowcontent div.btndiv a.button:active{ top: 0 }
 
 div.windowcontent span.cell{
@@ -1825,7 +1835,7 @@ div.windowcontent span.camelcase{
 div.filedrag{
 	display: inline-block;
 	position: relative;
-	width: 200px;
+	min-width: 80px;
 	height: 20px;
 	margin: 10px;
 	border: 2px dashed #aaa;
@@ -1833,8 +1843,9 @@ div.filedrag{
 	font-size: 18px;
 	font-weight: bold;
 	border-radius: 5px;
-	padding: 5px;
+	padding: 5px 10px;
 	text-align: center;
+	cursor: default;
 }
 
 div.dragover{
@@ -1934,7 +1945,6 @@ input[type="checkbox"]+span{
 }
 
 div.numinput input[type="checkbox"]{ margin-left: 0; }
-div.numinput input[type="text"]{ width: 33px; margin: 2px 5px 5px 5px; }
 div.windowcontent input[type="text"].num{
     padding-left: 0;
     text-align: center;
@@ -2011,10 +2021,18 @@ img.optadd,.rotateable{
 	transform: rotate(90deg);
 }
 
+div.expandtitle{
+	margin: 3px 3px 0;
+}
+
+div.inline, span.inline{
+	display: inline-block;
+}
+
 /* boxes for items inside dialog windows (library etc.) */
 div.insidediv{
 	position: relative;
-	padding: 10px 10px 5px 10px;
+	padding: 7px 5px 5px;
 	margin: 5px 0 -10px;
 	overflow: hidden;
 	border: 1px solid white;
@@ -2030,7 +2048,7 @@ div.insidediv.incontent{
 /* settings list */
 div.insidediv div.row{
 	position: relative;
-	padding: 10px 5px 5px;
+	padding: 5px;
 	margin-bottom: 5px;
 	white-space: nowrap;
 }
@@ -2038,7 +2056,7 @@ div.insidediv>div.row:nth-child(odd), div.insidediv>div.rowwrap:nth-child(odd){ 
 div.insidediv a.button.toggle{
 	position: absolute;
 	right: 3px;
-	margin-top: -3px;
+	margin-top: 0;
     padding: 2px 6px 1px 6px;
     border-radius: 3px;
     top: auto;
@@ -2046,10 +2064,11 @@ div.insidediv a.button.toggle{
 div.insidediv div.row>span.buttongroup{ margin: -10px 0 0 5px; }
 div.insidediv div.row>span.buttonrow{ display:inline-block; margin-top:10px; }
 
+div.insidediv div.row>span.buttonrow a.button.toggle{ margin-top:-5px; }
+
 div.rowwrap{
 	position: relative;
 	height: 34px;
-	margin-top: 3px;
 	overflow: hidden;
 }
 
@@ -2415,13 +2434,5 @@ div.paper{
 	transition: opacity .5s;
 }
 
-
-/* Plugin API interace styles*/
-.errmsg, .notemsg{
-	background: #d33;
-	border-radius: 3px;
-	color: white;
-	padding: 3px;
-	text-align: center;
-	text-shadow: none;
- }
+/* Pline plugins */
+.pline { background-color: transparent; }

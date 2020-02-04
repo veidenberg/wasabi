@@ -4,9 +4,11 @@ Copyright Andres Veidenberg (andres.veidenberg{at}helsinki.fi), University of He
 Distributed under AGPL license (http://www.gnu.org/licenses/agpl)
 */
 
-//string class polyfills
-if(!String.prototype.trim){ String.prototype.trim = function(){ return this.replace(/^\s+|\s+$/g, '');}; }
-if(!String.prototype.capitalize){ String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); }; }
+//string polyfills
+String.prototype.capitalize = function(){ return this.charAt(0).toUpperCase()+this.slice(1); };
+if(!String.prototype.includes) String.prototype.includes = function(search, start){
+	return this.indexOf(search, typeof(start)=='number'?start:0) !== -1;
+};
 
 //== Globals ==//
 var currentversion = 190124; //local version (timestamp) of Wasabi
@@ -31,66 +33,21 @@ importedFiles.get = function(name){ return ko.utils.arrayFirst(importedFiles(), 
 var dom = {}; //global references to DOM elemets
 var _paq = _paq || []; //list of tracked events
 
-//== System state data. Mapping with KnockOut library ==//
-//custom settings to map data from server to local datamodel
-var libraryopt = {
-	key: function(item){ if(!item) console.log('Duplicate library ID!'); else return item.id; },
-	copy: ['id','parameters','program','infile','logfile','source','created','shared','importurl','folder'], //static items
-	name: { create: function(opt){ //requires modified ko.mapping to work on nested data
-		var mapped = ko.observable(opt.data);
-		mapped.subscribe(function(newname){ //auto-sync on name edit
-			communicate('writemeta',{id:opt.parent.id, key:'name', value:newname});
-		});
-		return mapped;
-	}}
-};
-//keep state of server data
-var serverdata = {import: {}, library: ko.mapping.fromJS([],libraryopt), params: ko.mapping.fromJS({},{copy:['params']})};
-serverdata.library.subscribe(function(newdata){
-	var cnt = 0; 
-	$.each(newdata, function(i,itm){ if(!itm){ cnt++; delete serverdata.library()[i]; }});
-	if(cnt){ console.log('Note: '+cnt+' duplicate IDs removed from analysis library.'); }
-});
-
-//KO library helper functions
-function unwrap(v){ if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; } //read from (non)observable
-//update/create (non)observable
+//== KO library extensions and helper functions ==
+ko.options.deferUpdates = true;
+//read from var/observable
+function unwrap(v){
+	if(typeof(v)=='function') v = v(); return typeof(v)=='function'? v() : v; 
+}
+//update/create var/observable
 function wrap(v,newv,create){
 	if(typeof(v)=='function') v(newv); else if(create) v = ko.observable(newv); 
 	else if(create===false) return false; else v = newv; return true;
 }
-//find obj from array by its key value
-function indexOfObj(objarr, key, val){
-	for(var i=0; i<objarr.length; i++){ if(objarr[i][key]==val) return i; }
-	return -1;
-}
+//find obj from array by its key+value
+var indexOfObj = Pline.indexOfObj;
 
-//extenders to KO viewmodel items
-//format observable value in-place
-ko.extenders.format = function(obsitem, format){
-    var formatted = ko.pureComputed({
-        read: obsitem,
-        write: function(input){
-			var newval = input;
-			if(format=='trim' && typeof(input)=='string') newval = input.trim();
-			else if(format=='nospace') newval = input.replace(/\s/g,'_');
-			else if(format=='alphanum') newval = input.replace(/\s/g,'_').replace(/[^\w\.]/g,'');
-			else if(~['number', 'float', 'int', 'posit'].indexOf(format)){
-	        	if(input!=""){
-		        	if(isNaN(input)) newval = 0;
-					newval = format=='int'? parseInt(newval) : parseFloat(newval);
-					if(isNaN(newval)||(format=='posit' && newval<0)) newval = 0;
-					if(typeof(input)=='string') newval = newval.toString(); //from input element
-				}
-			}
-			if(obsitem()!==newval) obsitem(newval);
-			else if(input!==newval) obsitem.notifySubscribers(newval);
-        }
-    }).extend({notify: 'always'});;
-	formatted(obsitem()); //format initial value
-	return formatted;
-};
-//add filter to enable/disable an observable
+//filter to enable/disable an observable
 ko.extenders.enable = function(obsitem, bool){
     var filtered = ko.computed({
         read: obsitem,
@@ -104,19 +61,20 @@ ko.extenders.enable = function(obsitem, bool){
 
 //HTML element transitions for KO viewmodel items
 ko.bindingHandlers.fadevisible = {
-	init: function(element){ $(element).css('display','none') },
+	init: function(element){
+		$(element).css('display','none') },
     update: function(element, accessor){
-	var value = unwrap(accessor);
-        if(value) $(element).fadeIn(); else $(element).hide();
+			var value = unwrap(accessor);
+      if(value) $(element).fadeIn(); else $(element).hide();
     }
 };
 ko.bindingHandlers.tempfade = {
 	init: ko.bindingHandlers.fadevisible.init,
 	update: function(element, accessor){
-	var value = unwrap(accessor);
-        if(value) $(element).fadeIn(); else $(element).hide();
-        setTimeout(function(){ wrap(accessor(),''); },3000); //clear value => rehide
-    }
+		var value = unwrap(accessor);
+  	if(value) $(element).fadeIn(); else $(element).hide();
+    setTimeout(function(){ wrap(accessor(),''); },3000); //clear value => rehide
+  }
 };
 ko.bindingHandlers.slidevisible = {
 	init: function(element){ $(element).css('display','none') },
@@ -128,11 +86,12 @@ ko.bindingHandlers.slidevisible = {
 ko.bindingHandlers.fadeText = {
     update: function(element, accessor){
   		$(element).hide();
-        ko.bindingHandlers.text.update(element, accessor);
-        $(element).fadeIn(200);
+      ko.bindingHandlers.text.update(element, accessor);
+      $(element).fadeIn(200);
     }        
 };
-ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
+//drag&drop for library items
+ko.bindingHandlers.dragdrop = {
 	init: function(element, itemid){
 		$div = $(element);
 		var thisid = unwrap(itemid);
@@ -159,25 +118,31 @@ ko.bindingHandlers.dragdrop = { //enable drag&drop for library items
 	});
     }
 };
-//set a default value for plugin input element
-ko.bindingHandlers.default = {
-	update: function(element, accessor, allBindings, viewModel, bindingContext){
-		var defaultval = unwrap(accessor);
-		var trackname = unwrap(allBindings.get('name')); //data-bind:"name"
-		if(!trackname || typeof(defaultval)=='undefined') return;
-		bindingContext.$data[trackname].defaultval = defaultval;
-		if(element.type=='text'){ //text inputs
-			var inputval = unwrap(allBindings.get('value'));
-			var required = unwrap(allBindings.get('required'));
-			element.setAttribute('placeholder', defaultval);
-			if(required && !inputval.length) element.value = defaultval;
-			else if(!required && inputval==defaultval) element.value = '';
-		} else { bindingContext.$data[trackname](defaultval); }
-	}
-};
+/// Note: the "format" extension and "default" bindingHandler is included in the Pline library ///
 
-var slideadd = function(el){ $(el).css('display','none'); $(el).slideDown() };
-var slideremove = function(el){ $(el).slideUp(400,function(){ $(this).remove() }) };
+//== System state data. Mapping with KnockOut library ==//
+//custom settings to map data from server to local datamodel
+var libraryopt = {
+	key: function(item){ if(!item) console.log('Duplicate library ID!'); else return item.id; },
+	copy: ['id','parameters','program','infile','logfile','source','created','shared','importurl','folder','step','nextstep'], //static items
+	name: { create: function(opt){ //requires modified ko.mapping to work on nested data
+		var mapped = ko.observable(opt.data);
+		mapped.subscribe(function(newname){ //auto-sync on name edit
+			communicate('writemeta',{id:opt.parent.id, key:'name', value:newname});
+		});
+		return mapped;
+	}}
+};
+//keep state of server data
+var serverdata = {import: {}, library: ko.mapping.fromJS([],libraryopt), params: ko.mapping.fromJS({},{copy:['params']})};
+serverdata.library.subscribe(function(newdata){
+	var cnt = 0; 
+	$.each(newdata, function(i,itm){ if(!itm){ cnt++; delete serverdata.library()[i]; }});
+	if(cnt){ console.log('Note: '+cnt+' duplicate IDs removed from analysis library.'); }
+});
+//animations for undomenu items in index.html
+//var slideadd = function(el){ $(el).css('display','none'); $(el).slideDown() };
+//var slideremove = function(el){ $(el).slideUp(400,function(){ $(this).remove() }) };
 var marginadd = function(elarr){ setTimeout(function(){ elarr[0].style.marginTop = 0; },50); };
 var waitremove = function(el){ setTimeout(function(){ $(el).remove() },500) };
 
@@ -190,17 +155,20 @@ var koSettings = function(){
 	
 	self.preflist = {tooltipclass:'', undolength:'', autosaveint:'autosave', onlaunch:'', userid:'keepuser', zoomlevel:'keepzoom', colorscheme:'', maskcolor:'', maskletter:'', anccolor:'', ancletter:'', boxborder:'', font:'', windowanim:'', allanim:'', mintop:'', hidetop:'mintop', minlib:'', ladderlib:'', skipversion:'', checkupdates:'local', bundlestart:'local', scalebar:''};
 	
-	self.saveprefs = function(){ //store preferences to harddisk
+	self.saveprefs = function(){ //store preferences for future sessions (to localStorage and user account)
+		if(!storage()) return;
 		$.each(self.preflist,function(pref,checkpref){
 			if(!checkpref || unwrap(self[checkpref])){ //check for enable/disable setting
 				if(typeof(self[pref])!='undefined') localStorage[pref] = JSON.stringify(unwrap(self[pref]));
 			}
 			else if(checkpref) localStorage.removeItem(pref);
 		});
+		syncStorage('upload');
 	};
 	
-	self.loadprefs = function(){
-		$.each(self.preflist,function(pref,checkpref){
+	self.loadprefs = function(){ //read preferences from localStorage
+		if(!storage()) return;
+		$.each(self.preflist, function(pref,checkpref){
 			if(localStorage[pref]){
 				if(checkpref && localStorage[checkpref] && !JSON.parse(localStorage[checkpref])) return true; //skip disabled settings
 				try{ var prefval = JSON.parse(localStorage[pref]); } catch(e) { var prefval = localStorage[pref]; }
@@ -217,7 +185,7 @@ var koSettings = function(){
 	self.userid.subscribe(function(newid){
 		if(newid){ //update url, library and account settings
 			window.history.pushState('','',self.urlroot()+newid);
-			if(self.keepuser()) localStorage['userid'] = newid;
+			if(self.keepuser()) storage('userid', newid);
 			communicate('getlibrary',{userid:newid});
 			communicate('checkuser',{userid:newid},{retry:true, parse:'JSON',success:function(resp){
 				self.username(resp.username||'anonymous');
@@ -232,8 +200,8 @@ var koSettings = function(){
 	self.keepuser = ko.observable(true); //save userID
 	self.keepuser.subscribe(function(keep){
 		var userid = self.userid();
-		if(keep && userid){ localStorage['userid'] = JSON.stringify(userid); if(self.urlid) self.urlid = ''; }
-		else if(!keep && !self.urlid) localStorage.removeItem('userid');
+		if(keep && userid){ storage('userid', userid); if(self.urlid) self.urlid = ''; }
+		else if(!keep && !self.urlid) storage('userid', null);
 	});
 	self.tmpuser = ko.observable(false);
 	self.username = ko.observable('');
@@ -274,7 +242,7 @@ var koSettings = function(){
 		clearInterval(self.intervalid);
 		if(val && self.autosaveint() && !librarymodel.openitem().shared){
 			if(exportmodel.savename()=='Untitled analysis') exportmodel.savename('Autosaved session');
-			if(~self.autosaveint().indexOf('minute')){
+			if(autosaveint().includes('minute')){
 				var int = parseInt(self.autosaveint());
 				if(isNaN(int)) int = 1;
 				self.intervalid = setInterval(savefile,int*60000);
@@ -284,7 +252,7 @@ var koSettings = function(){
 	self.launchopt = ['blank page','import dialog','demo data','last Library item','last session'];
 	self.onlaunch = ko.observable('');
 	self.onlaunch.subscribe(function(val){
-		if(~val.indexOf('last')){
+		if(val.includes('last')){
 			if(val=='last session'){
 				self.autosaveint(self.autosaveopt[0]);
 				self.autosave(true);
@@ -297,8 +265,9 @@ var koSettings = function(){
 		openitem = librarymodel.openitem();
 		keepuser = self.keepuser();
 		if(val && openitem && keepuser){
-		localStorage.openid = openitem.id;
-		localStorage.openfile = unwrap(openitem.outfile);
+			storage('openid', openitem.id);
+			storage('openfile', openitem.outfile);
+			syncStorage('upload');
 	}});
 	self.keepzoom = ko.observable(true); //save zoom level
 	//seq display settings
@@ -334,33 +303,39 @@ var koSettings = function(){
 		canvaslist = [];
 		makeImage('','cleanup','slowfade');
 		return true;
-	}).extend({throttle:500});
+	}).extend({rateLimit:{timeout: 200, method: "notifyWhenChangesStop"}});
 	//tree display settings
-	self.leaflabels = ['label'];
-	self.leaflabel = ko.observable('label');
+	self.leaflabels = ['name'];
+	self.leaflabel = ko.observable('name');
 	self.leaflabel.subscribe(function(newlabel){ //change tree leaflabel text
-		if(treesvg.data && $('#treewrap').css('display')!='none'){
-			$('#tree text').each(function(i,el){
+		if(!~self.leaflabels.indexOf(newlabel)) return; //invalid label
+		if(treesvg.data && dom.treewrap.css('display')!='none'){ //replace leaf labels
+			$('text', dom.names).each(function(i, el){
 				var tnode = treesvg.data.root.getById(parseInt(el.getAttribute('nodeid')));
-				el.textContent = tnode.nodeinfo[newlabel] || ' ';
+				if(tnode.type!='ancestral') el.textContent = newlabel in tnode.nodeinfo? tnode.nodeinfo[newlabel] : '';
 			});
+		} else if(self.leaflabels.length){ //replace leaf labels (no tree)
+			$('#names>span').each(function(i, el){
+				var leafname = el.getAttribute('nodename');
+				if(leafnodes[leafname] && leafnodes[leafname].nodeinfo) el.textContent = leafnodes[leafname].nodeinfo[newlabel] || '';
+			});	
 		}
 	});
-	self.nodelabels = ['none','label','branchlength'];
+	self.nodelabels = ['none','name','branchlength'];
 	self.nodelabel = ko.observable('none');
 	self.nodelabel.subscribe(function(newlabel){ //change tree nodelabel text
-		if(treesvg.data && $('#treewrap').css('display')!='none'){
-			$('#tree text').each(function(i,el){
+		if(treesvg.data && dom.treewrap.css('display')!='none'){
+			$('text', dom.tree).each(function(i,el){
 				var tnode = treesvg.data.root.getById(parseInt(el.getAttribute('nodeid')));
-				el.textContent = tnode.nodeinfo[newlabel] || ' ';
+				el.textContent = newlabel in tnode.nodeinfo? tnode.nodeinfo[newlabel] : '';
 			});
 		}
 	});
 	self.csizes = ['hidden',3,5,7,10];
 	self.csize = ko.observable(3);
 	self.csize.subscribe(function(newsize){
-		if(newsize=='hidden') $('#tree circle').css('display','none');
-		else $('#tree circle').css({r:newsize, display:''});
+		if(newsize=='hidden') $('circle', dom.tree).css('display','none');
+		else $('circle', dom.tree).css({r:newsize, display:''});
 	});
 	self.dendogram = ko.observable(false);
 	self.scalebar = ko.observable(true);
@@ -502,7 +477,7 @@ var koLibrary = function(){
 	};
 		
 	self.importitem = function(item, event, move){ //mark job as imported to library
-		if(!item.outfile() || move){ communicate('writemeta',{id:item.id,key:'imported',value:'never'}); }
+		if(!item.outfile() || move){ communicate('writemeta',{id:item.id, key:'imported', value:'never'}); }
 		else{ //also load to wasabi browser
 			getfile({id:item.id, file:item.outfile(), btn:event.target||false});
 		}
@@ -512,8 +487,9 @@ var koLibrary = function(){
 		if(!event) return;
 		event.stopPropagation();
 		var btn = event.currentTarget;
-		var menudata = {'Move to library':function(){ self.importitem(item, '', 'move') }}; 
-		if(item.st().str!='Failed') menudata['Delete'] = function(){ self.removeitem(item, btn.previousSibling, '', 'nodelay') };
+		var menudata = {'Move to library':{t:'Move job files to the library', click:function(){ self.importitem(item, '', 'move') }}}; 
+		if(item.st().str!='Failed') menudata['Delete'] = {t:'Remove job files', click:function(){ self.removeitem(item, btn.previousSibling, '', 'nodelay') }};
+		else menudata['Restart'] = {t:'Restart this job (resume pipeline)', click: function(){ communicate('restart', {id:item.id}, {btn:btn}); }};
 		tooltip('','',{target:btn, arrow:'top', data:menudata, style:'white', id:'jobmenu'});
 	};
 	
@@ -524,7 +500,7 @@ var koLibrary = function(){
 	
 	self.sharelink = function(item,file,url){ //generate sharing url
 		var urlstr = filestr = '';
-		if(file && typeof(file)=='string') filestr = ~file.indexOf('.')? '&file='+file : '&dir='+file;
+		if(file && typeof(file)=='string') filestr = file.includes('.')? '&file='+file : '&dir='+file;
 		if(url) urlstr = 'url='+url;
 		else if(item && item.id) urlstr = 'id='+item.id+filestr;
 		if(urlstr) urlstr = '?'+urlstr;
@@ -617,54 +593,78 @@ var koLibrary = function(){
 		return settingsmodel.ladderlib()? self.getpath(item.id).length-1:0;
 	}
 	
-	self.showfile = function(item, event, file){ //show logfile/library folder content from server
+	self.showfile = function(item, event, file){ //show logfile content or library folder filelist
 		var btn = $(event.target);
-		var logdiv = btn.closest('div.itemdiv').next('div.logdiv');
+		var filediv = btn.parents('div.windowcontent').find('div.logdiv[itemid="'+item.id+'"]');
 		var rotatearr = btn.prev('span.rotateable');
-		if(!logdiv.length){ //content div not yet created
-			logdiv = $('<div class="insidediv logdiv">');
-			btn.closest('div.itemdiv').after(logdiv);
+		if(!filediv.length){ //content div not yet created
+			filediv = $('<div class="insidediv logdiv" itemid="'+item.id+'">');
+			btn.closest('div.'+(item.name?'itemdiv':'row')).after(filediv);
 		}
 		
-		if(logdiv.css('display')=='none'){ //show content div
+		if(filediv.css('display')=='none'){ //show content div
 			if(rotatearr.length) rotatearr.addClass('rotateddown');
-			logdiv.slideDown();
-			if($('span',logdiv).length) return false; //use cache
+			filediv.slideDown();
+			if($('span', filediv).length) return false; //use cache
 		}
 		else{ //hide content div
 			if(rotatearr.length) rotatearr.removeClass('rotateddown');
-			logdiv.slideUp();
+			filediv.slideUp();
 			return false;
 		}
 
-		if(file){ //show logfile content
-			getfile({id:item.id, file:file, btn:logdiv, noimport:true});
+		if(typeof(file)=='string'){ //fileurl => download file content to filediv (logfile)
+			getfile({id:item.id, file:file, btn:filediv, noimport:true});
 		}
-		else{ //show library folder content
-		  communicate('getdir',{id:item.id},{success: function(data){
-			var files = JSON.parse(data);
-			var str = '';
-			var outfile = item.outfile?item.outfile().split(','):''; //mark the results file in filelist
-			$.each(files,function(fname,fsize){ //build filelist html
-				if(isNaN(fsize)) return true; //skip folders
-				str += '<div class="row">';
-				if(~outfile.indexOf(fname)){
-					str += '<span title="Main data file" style="color:darkred;cursor:default">'+fname+'</span>';
-				}
-				else str += fname;
-				str += '<span class="note">'+numbertosize(fsize,'byte')+'</span>'+self.shareicon(item,fname);
-				if(~fname.indexOf('.xml')||~fname.indexOf('.fa')||~fname.indexOf('.tree')||~fname.indexOf('.nwk')){
-					var setmeta = !~outfile.indexOf(fname)? 'communicate(\'writemeta\',{id:\''+item.id+'\',key:\'outfile\',value:\''+
-					fname+'\'});' : '';
-					str += '<a class="button" style="right:60px" title="Open this file'+(setmeta?' (and make it the default output file)':'')+
-					'" onclick="'+setmeta+'getfile({id:\''+item.id+'\',file:\''+fname+'\',btn:this})">Open</a>';
-				}
-				str += '<a class="button" onclick="dialog(\'export\',{exporturl:\''+settingsmodel.userid()+
-				'?type=text&getanalysis='+item.id+'&file='+fname+'\'})" title="View file content">View</a></div>';
-			});
-			if(!str) str = '<span class="note">No files in this folder</span>';
-			logdiv.html(str);
-		  }});
+		else{ //show analysis folder filelist
+			var showfilelist = function(data){
+				var files = typeof(data)=='string'? JSON.parse(data) : data;
+				var outfiles = item.outfile? item.outfile() : ''; //anlaysis resultfiles
+				if(outfiles.length && typeof(outfiles)=='string') outfiles = outfiles.split(',');
+				var sub = item.id.indexOf('/')+1; //is subfolder?
+				var rootid = sub? item.id.substring(0, sub-1) : item.id; //analysis id
+				$.each(files, function(fname, finfo){ //build filelist html
+					var fpath = sub? item.id.substring(sub)+'/'+fname : fname; //relative filepath
+					var row = $('<div class="row">');
+					var span = $('<span>'+fname+'</span>');
+					if(typeof(finfo)=='object'){ //folder
+						span.addClass('action').attr('title','Browse data files');
+						span.click(function(e){ librarymodel.showfile({id:rootid+'/'+fpath}, e, finfo); });
+						row.append('<span class="rotateable">&#x25BA;</span>').append(span);
+					} else { //file
+						var isoutfile = outfiles && ~outfiles.indexOf(fname);
+						if(isoutfile){
+							span.attr('title','Main data file').css({color:'darkred', cursor:'default'})
+						}
+						row.append(span).append('<span class="note">'+numbertosize(finfo,'byte')+'</span>');
+						if(!sub){ //functions for the top-level analysis files
+							row.append(self.shareicon(item, fname));
+							if(fname.substring(fname.indexOf('.')).indexOf(['.xml','.fa','.fasta','.tree','.nwk','.phy'])){ //importable file
+								var openbtn = $('<a class="button" style="right:60px">Open</a>');
+								openbtn.attr('title', 'Open this file'+(!isoutfile?' (and make it the default output file)':''));
+								openbtn.click(function(){ //import button
+									if(!isoutfile) communicate('writemeta', {id:rootid, key:'outfile', value: fname}); //set as new outfile
+									getfile({id:rootid, file:fname, btn:this});
+								});
+								row.append(openbtn);
+							}
+						}
+						var viewbtn = $('<a class="button" title="View file content">View</a>');
+						viewbtn.click(function(){ //show file content button
+							dialog('export', {exporturl: settingsmodel.userid()+'?type=text&getanalysis='+rootid+'&file='+fpath});
+						});
+						row.append(viewbtn);
+					}
+					filediv.append(row);
+				});
+				if(!Object.keys(files).length) filediv.append('<span class="note">No files in this folder</span>');
+			};
+			
+			if(typeof(file)=='object'){ //show cached filelist (subfolder)
+				showfilelist(file);
+			} else { //download & show filelist
+				communicate('getdir', {id:item.id}, {success: showfilelist});
+			}
 		}
 		return false;
     }//showfile()
@@ -691,7 +691,7 @@ var koLibrary = function(){
 		var folders = [];
 		$.each(serverdata.library(), function(i,item){ if(item.folder) folders.push({id:item.id,name:item.name()}) });
 		return folders;
-	}).extend({throttle:500});
+	}).extend({rateLimit:{timeout: 100, method: "notifyWhenChangesStop"}});
 	
 	self.sortopt = [{t:'Name',v:'name'},{t:'Created',v:'created'},{t:'Opened',v:'imported'},{t:'Updated',v:'saved'}];
 	self.sortkey = ko.observable('name');
@@ -704,7 +704,10 @@ var koLibrary = function(){
 			if(!item.parentid) item.parentid = ko.observable('');
 			if(!item.info) item.info = ko.observable('');
 			if(!item.saved) item.saved = ko.observable('Never');
-			if(!item.imported && !item.status) item.imported = ko.observable(item.created()); //!job && !library?
+			if(!item.imported){
+				if(item.status) return true; //skip jobs
+				else item.imported = ko.observable(item.created()); //!job && !library?
+			}
 			if(item.folder){
 				if(!item.opendataset) item.opendataset = ko.observable('');
 				if(!item.opendataset.getSubscriptionsCount()){
@@ -724,28 +727,27 @@ var koLibrary = function(){
 			for(var i=dirpath.length-1; i>0; i--){ viewitems.unshift(self.getitem(dirpath[i])); }
 		}
 		return viewitems;
-	}).extend({throttle:200});
+	}).extend({rateLimit:{timeout: 50, method: "notifyWhenChangesStop"}});
 	
 	self.autoimport = '';
 	self.parselog = function(item){
-		var logline = item.log(), params = item.parameters;
-		var alignst = logline.match(/# ?\((\d+)\/(\d+)\)/), html = logline;
-		if(item.running()){
+		var logline = item.log(), html = '';
+		if(item.running()){ //parse console output
 			if(!logline) html = 'Waiting for feedback...';
-			else if(alignst){
-				var iter = logline.match(/iteration \d/), iters = params.match(/iterate=\d/);
-				if(iter&&iters){ var i = iter[0]+' of '+iters[0]+'. ', d = parseInt(iters[0]); }else{ var i='', d=1; }
-				var t = i+'Aligning sequence '+alignst[1]+' of '+alignst[2];
-				var perc = Math.round(((alignst[1]-1)/alignst[2])*(100/d));
-				var mouseover = 'onmouseover="tooltip(false,\''+t+'\',{id:\'logtip\',arrow:\'bottom\',target:this,norefresh:true,autohide:2000})"';
-				html = 'Aligning: <span class="progressline" style="width:250px" '+mouseover+'>'+
-				'<span class="bar" style="width:'+perc+'%"></span></span>';
+			else{
+				var line = logline.length>30? logline.substring(0,40)+'...' : logline;
+				var progress = logline.match(/(\d+) ?\/ ?(\d+).*$/);
+				if(progress){
+					var perc = parseInt((progress[1]/progress[2])*100);
+					line = '<span class="bar" style="width:'+perc+'%" title="'+logline+'"></span>';
+				}
+				html = 'Progress: <span class="progressline" style="width:250px">'+line+'</span>';
 			}
 		} else {
 			if(item.st().str=='Completed') html = 'Job done on '+msectodate(item.completed())+'. Ready to import.';
 			else if(item.st().inf){
 				html = 'Job failed: '+item.st().inf;
-				if(~logline.indexOf('Cputime limit')){
+				if(logline.includes('Cputime limit')){
 					var timelimit = settingsmodel.jobtimelimit? settingsmodel.jobtimelimit+'-hour':'time';
 					html = 'Job ran over '+timelimit+' limit. Reduce the input dataset.';
 		}}}
@@ -757,16 +759,17 @@ var koLibrary = function(){
 		var sortk = 'created';
 		itemsarray.sort(function(a,b){ a=unwrap(a[sortk]); b=unwrap(b[sortk]); return a&&b? a>b?1:-1 :0; });
 		$.each(itemsarray, function(i, item){ //pull job items from library data
-			try{ if(item.imported()) return true; }catch(e){ console.log('Job ID '+item.id+': '+e); } //skip imported items
-			if(!item.status) return true; //not a job
-			if(!item.st){ item.st = ko.computed(function(){ //process status changes
-				var status = item.status(); //status: 1|2|0|'errormsg'
+			try{ if(unwrap(item.imported)) return true; }catch(e){ console.log('Skipped job: '+item.id+': '+e); } //skip imported items
+			if(!item.status||item.status()==='') return true; //not a job or not yet queued
+			if(!item.st){ item.st = ko.computed(function(){ //track status changes
+				var status = item.status(); //status = 1|2|0|'errormsg'
 				var translate = {1: [0,'Queued',''], 2: [1,'Running',''], 0: [2,'Completed',''], NaN: [3,'Failed',status]};
 				var rt = translate[parseInt(status)] || translate[NaN];
 				var ret = {'nr':rt[0], 'str':rt[1], 'inf':rt[2]};
 				if(ret.nr==2 && self.autoimport && item.id==self.autoimport && item.outfile()){ //autoimport finished job
+					console.log('autoimport');
 					setTimeout(function(){ getfile({id:item.id,btn:$('#job_'+item.id+' a.itembtn'),file:item.outfile()}) }, 500);
-				} else if(ret.nr==3 && ~item.parameters.indexOf('-updated')){
+				} else if(ret.nr==3 && item.program=='prank' && ~item.parameters.indexOf('-updated')){
 					model.treealtered(true); //realign failed => revert tree status
 				}
 				return ret;
@@ -775,7 +778,7 @@ var koLibrary = function(){
 			viewitems.push(item);
 		});
 		return viewitems;	
-	}).extend({throttle:200});
+	}).extend({rateLimit:{timeout: 100, method: "notifyWhenChangesStop"}});
 	
 	self.runningjobs = ko.pureComputed(function(){
 		var jlist = self.jobsview(), count = 0;
@@ -872,15 +875,15 @@ var koModel = function(){
 			communicate('checkserver'); //re-check
 		} else { setTimeout(function(){communicate('getlibrary')},700); }
 	});
-	self.helsinki = Boolean(~window.location.hostname.indexOf('helsinki.fi')||~window.location.hostname.indexOf('wasabiapp.org'));
+	self.helsinki = Boolean(window.location.hostname.includes('helsinki.fi')||window.location.hostname.includes('wasabiapp.org'));
 	if(self.helsinki) settingsmodel.joblimit = 5;
 	self.version = {local:currentversion, remote:ko.observable(0), lastchange:''};
 	//rendering parameters
 	self.zlevels = [1, 3, 5, 8, 11, 15, 20]; //zoom level = box width (px)
 	self.zoomlevel = ko.observable(5); //index of the zlevel array
 	self.zoomlevel.subscribe(function(val){
-		if(settingsmodel.keepzoom()) localStorage.zoomlevel = JSON.stringify(val); //store new zoom level
-		if(settingsmodel.nodelabel()!='none') $('#tree text').css('font-size', parseInt(self.boxh()*0.8)); //resize tree labels
+		if(settingsmodel.keepzoom()) storage('zoomlevel', val); //store new zoom level
+		if(settingsmodel.nodelabel()!='none') $('text', dom.tree).css('font-size', parseInt(self.boxh()*0.8)); //resize tree labels
 	});
 	self.zoomperc = ko.pureComputed(function(){
 		var l = self.zoomlevel(), lc = self.zlevels.length-1;
@@ -915,16 +918,6 @@ var koModel = function(){
 		var label = v? 'del.' : 'gap';
 		canvaslabels['-'] = label; canvaslabels['_'] = label;
 	});
-	//alignment parameteres (alignment window)
-	self.gaprate = ko.pureComputed(function(){ return self.isdna()? 0.025 : 0.005; });
-	self.gapext = ko.pureComputed(function(){ return self.isdna()? 0.75 : 0.5; });
-	self.transopt = ko.pureComputed(function(){
-		var opts = [{t:'codons',v:'codon',p:'codons'}];
-		if(self.seqtype()=='RNA') opts.push({t:'mt protein',v:'mttranslate',p:'mt-translate'});
-		else opts.push({t:'protein',v:'translate',p:'translate'});
-		return opts;
-	});
-	self.iterate = ko.observable(false);
 	//sequence + tree statistics (info window)
 	self.minseqlen = ko.observable(0);
 	self.minseqlength = ko.pureComputed(function(){ return numbertosize(self.minseqlen(),self.seqtype()); });
@@ -934,11 +927,11 @@ var koModel = function(){
 	self.totalseqlength = ko.pureComputed(function(){ return numbertosize(self.totalseqlen(),self.seqtype()) });
 	self.alignlen = ko.observable(0);
 	self.alignlength = ko.pureComputed(function(){ return numbertosize(self.alignlen()) });
-	self.alignheight = ko.pureComputed(function(){ return self.visiblerows().length }).extend({throttle: 100});
+	self.alignheight = ko.pureComputed(function(){ return self.visiblerows().length }).extend({rateLimit:{timeout: 30, method: "notifyWhenChangesStop"}});
 	self.seqcount = ko.observable(0);
 	self.leafcount = ko.observable(0);
 	self.nodecount = ko.observable(0);
-	self.hiddenlen = ko.pureComputed(function(){ return self.alignlen()-self.visiblecols().length; }).extend({throttle: 200});
+	self.hiddenlen = ko.pureComputed(function(){ return self.alignlen()-self.visiblecols().length; }).extend({rateLimit:{timeout: 50, method: "notifyWhenChangesStop"}});
 	self.hiddenlength = ko.pureComputed(function(){ return numbertosize(self.hiddenlen(),self.seqtype()) });
 	self.treesource = settingsmodel.tree;
 	self.seqsource = settingsmodel.seq;
@@ -948,14 +941,15 @@ var koModel = function(){
 	self.selmodes = ['default','columns','rows'];
 	self.selmode = ko.observable(self.selmodes[0]);
 	self.setmode = function(mode){ self.selmode(mode); toggleselection(mode); };
-	//content for top toolbar menus. Consumed by topmenu()
-	self.filemenu = [{txt:'Library',act:'library',icn:'files',inf:'Browse library of past analyses',req:['online']},
+	//content for top toolbar menus (used by topmenu())
+	self.filemenu = [
+		{txt:'Library',act:'library',icn:'files',inf:'Browse library of past analyses',req:['online']},
 		{txt:'Import',act:'import',icn:'file_add',inf:'Open a dataset in Wasabi'},
 		{txt:'Export',act:'export',icn:'file_export',inf:'Convert current dataset to a file',req:['data']},
 		{txt:'Save',act:'save',icn:'floppy',inf:'Save current dataset to analysis library',req:['data','online']},
 		{txt:'Share',act:'share',icn:'link',inf:'Share current dataset',req:['data','online','sharing']},
 		{txt:'Info',act:'info',icn:'file_info',inf:'View summary info about current dataset',req:['data']}];
-	self.toolsmenu = [{txt:'PRANK aligner',act:'align',icn:'prank',inf:'Realign current sequences using Prank',req:['seq','online']},
+	self.toolsmenu = [
 		{txt:'Hide gaps',act:'seqtool',icn:'seq',inf:'Collapse sequence alignment columns',req:['seq']},
 		{txt:'Edit tree',act:'treetool',icn:'prune',inf:'Edit, annotate or prune current tree',req:['tree']},
 		{txt:'Translate',act:'translate',icn:'book_open',inf:'Translate sequence data',req:['seq']},
@@ -1000,7 +994,7 @@ var koModel = function(){
 		
 		if(!msgarr.length && $("#jobstatus").length) setTimeout(function(){closewindow('jobstatus')}, 1000); //close empty status window
 		return str;
-	}).extend({throttle: 200});
+	}).extend({rateLimit:{timeout: 100, method: "notifyWhenChangesStop"}});
 	//undo stack
 	self.dnasource = ko.observable(''); //container for source cdna
 	self.treebackup = ''; //container for source tree
@@ -1102,7 +1096,7 @@ var koExport = function(){
 		
 		if(hasseq && hastree){
 			catarr.push({name:'Sequence+tree', formats:[{name:'HSAML', variants:[{name:'HSAML', ext:['.xml'], 
-			desc:'XML format which supports additional data from PRANK alingments. Click for more info.', url:'http://prank-msa.googlecode.com'} ]} ]});
+			desc:'XML format which supports additional data from PRANK/PAGAN alingments. Click for more info.', url:'http://wasabiapp.org/software/prank'} ]} ]});
 		}
 		
 		$.each(catarr, function(i,cat){ cat.formats.push({name:'NEXUS', variants:[{name:'NEXUS', ext:['.nex']}]}); });
@@ -1172,8 +1166,8 @@ var koTools = function(){
 	self.countgaps = function(){ //setup: count gaps in alignment columns
 		var l = s = cc = '', gaps = [], rows = model.visiblerows(), cols = model.visiblecols();
 		self.gapcount = []; self.conscount = [];
-		if(~self.gaptype().indexOf('in')){ model.seqtype()=='codons'? gaps.push('...',':::') : gaps.push('.',':'); }
-		if(~self.gaptype().indexOf('del')){ model.seqtype()=='codons'? gaps.push('---','___') : gaps.push('-','_'); }
+		if(self.gaptype().includes('in')){ model.seqtype()=='codons'? gaps.push('...',':::') : gaps.push('.',':'); }
+		if(self.gaptype().includes('del')){ model.seqtype()=='codons'? gaps.push('---','___') : gaps.push('-','_'); }
 		for(var c=model.alignlen(); c--;){ self.gapcount[c] = self.conscount[c] = 0; }
 		$.each(rows, function(n,name){
 			setTimeout(function(){
@@ -1218,7 +1212,7 @@ var koTools = function(){
 			}, 100);
 		}
 		return colestimate;
-	}).extend({throttle:500});
+	}).extend({rateLimit:{timeout: 300, method: "notifyWhenChangesStop"}});
 	self.hidecolperc = ko.computed(function(){ return parseInt(self.hidecolcount()/self.gapcount.length*100) });
 	
 	//tree editing tool
@@ -1308,7 +1302,7 @@ var koTools = function(){
 				tagval = parseFloat(tagval);
 				if(isNaN(tagval)) self.statustxt('Invalid value for branch length!');
 			}
-			else if(~tag.indexOf('color')&&~tagval.indexOf(',')&&!~tagval.indexOf('rgb')){
+			else if(tag.includes('color') && tagval.includes(',') && !tagval.includes('rgb')){
 				tagval = 'rgb('+tagval+')';
 			}
 			if(self.statustxt()) return;
@@ -1361,7 +1355,6 @@ var koTools = function(){
 }; //koTools
 var toolsmodel = new koTools();
 
-
 //== Utility functions ==//
 //prettyformat a number
 function numbertosize(number,type,min){ //prettyformat a number
@@ -1386,7 +1379,6 @@ function numbertosize(number,type,min){ //prettyformat a number
     }
 };
 
-
 //convert datestamps to  dates
 function msectodate(msec){
 	msec = unwrap(msec);
@@ -1395,7 +1387,6 @@ function msectodate(msec){
 	return ('0'+t.getDate()).slice(-2)+'.'+('0'+(t.getMonth()+1)).slice(-2)+'.'+t.getFullYear().toString().substr(2)+
 	' at '+t.getHours()+':'+('0'+t.getMinutes()).slice(-2);
 }
-
 
 //parse URL parameters as Object{"param"="val"|["val1","val2"]}
 function parseurl(url){
@@ -1409,23 +1400,21 @@ function parseurl(url){
 		else { console.log("urlparse error: skipped "+varpair); return true; }
 		v.split(',').forEach(function(val){ //valuelist or repeated urlparams => multiple values (array)
 		try{ val = JSON.parse(val); }catch(e){} //convert non-string value
-		if(~key.indexOf('url')){ urlvars.url = urlvars.url? urlvars.url.concat(val) : [val]; }
+		if(key.includes('url')){ urlvars.url = urlvars.url? urlvars.url.concat(val) : [val]; }
 		else{ urlvars[key] = urlvars[key]? [urlvars[key]].concat(val) : val; }
 		});
 	});
 	return urlvars;
 }
 
-
 //url => <a>
 var urlregex = /(https?\:\/\/|www\.)+(\w+\.)+[^\s\\]+/ig;
-function makeurl(url,title,regextitle){  //with urlregex: (urlmatch, parenth1, parenth2)
+function makeurl(url, title, regextitle){  //params with urlregex: (urlmatch, parenth1, parenth2)
 	if(!url) return '';
 	else if(url.substr(0,4)=='www.') url = 'http://'+url;
 	title = regextitle||!title?url:title; 
 	return '<a href="'+url+'" target="_blank">'+title+'</a>';
 }
-
 
 /* Server communication functions */
 //send and receive(+save) data from local server fn(str,obj,[str|obj])
@@ -1459,7 +1448,7 @@ function communicate(action, senddata, options){
 	if(typeof(options.restorefunc)=='function') retryfunc = options.restorefunc;
 	var restorefunc = function(){ //restore original button function
 		if(options.btn){
-			if(!~options.btntxt.indexOf('spinner')) options.btn.innerHTML = options.btntxt||'Retry';
+			if(!options.btntxt.includes('spinner')) options.btn.innerHTML = options.btntxt||'Retry';
 			options.btn.title = options.btntitle||'Click to retry';
 			$(options.btn).off('click').click(retryfunc);
 		}
@@ -1500,7 +1489,7 @@ function communicate(action, senddata, options){
 		afterfunc = function(){ closewindow(options.btn) };
     } else if(typeof options.after=='function') afterfunc = options.after;
     
-    var changelib = ['writemeta','terminate','save','startalign','newdir','rmdir','movedir'];
+    var changelib = ['writemeta','terminate','restart','save','run','newdir','rmdir','movedir'];
     var libaction = changelib.indexOf(action)+1;
     var userfree = ['checkserver','errorlog','createuser','geturl'];
     var nonuseraction = userfree.indexOf(action)+1;
@@ -1531,7 +1520,7 @@ function communicate(action, senddata, options){
     var parseResp = function(data, isJSON){ //check and parse Wasabi server response
 		var errmsg = '', resp = data;
 		try{ resp = JSON.parse(data); }catch(e){ if(isJSON) errmsg = 'JSON parse error: '+e; }
-		if(~data.indexOf('Error response')){ errmsg = data.match(/Message:(.+)/im)[1]; }
+		if(data.includes('Error response')){ errmsg = data.match(/Message:(.+)/im)[1]; }
 		if(errmsg){
 			console.log(action+' response error: '+errmsg);
 			resp = false;
@@ -1553,104 +1542,145 @@ function communicate(action, senddata, options){
 				} else options.btn.innerHTML = '<img src="images/spinner.gif" class="icn"/>';
 			}
 		},
-	success: function(rawdata){
-		response = parseResp(rawdata, options.parse||'');
-		restdelay = 500;
-		if(options.saveto){ //save data from server
-			if(typeof(options.saveto)=='string'){ //save to 'serverdata' array
-				if(typeof(serverdata[options.saveto])=='function'){ //map to datamodel
-					ko.mapping.fromJS(response, serverdata[options.saveto]);
-					serverdata[options.saveto].remove(undefined);
-				} else { serverdata[options.saveto] = response; } //plain copy
-				
+		success: function(rawdata){
+			response = parseResp(rawdata, options.parse||'');
+			restdelay = 500;
+			if(options.saveto){ //save data from server
+				if(typeof(options.saveto)=='string'){ //save to 'serverdata' array
+					if(typeof(serverdata[options.saveto])=='function'){ //map to datamodel
+						ko.mapping.fromJS(response, serverdata[options.saveto]);
+						serverdata[options.saveto].remove(undefined);
+					} else { serverdata[options.saveto] = response; } //plain copy
+					
+				}
+				else if(typeof(options.saveto)=='function'){ options.saveto(response); }//save to an observable
 			}
-			else if(typeof(options.saveto)=='function'){ options.saveto(response); }//save to an observable
-		}
-		else if(options.btn && !successfunc){ //show feedback on button
-			if(!response) return;
-			if(typeof(response)=='string' && !options.successtxt){ options.btn.innerHTML = response; restdelay = 3000; }
-			else if(response.file) options.btn.href = resp.file;
-			if($(options.btn).css('opacity')==0) $(options.btn).css('opacity',1); //show downloadlink_btn
-		}
-		if(options.btn && options.successtxt){ options.btn.innerHTML = options.successtxt; restdelay = 3000; }
-		
-		if(parseResp(rawdata) && !options.aftersync){ //no errors
-			if(successfunc) successfunc(options.parse?response:rawdata); //custom successfunc (data processing/import)
-			if(action!='checkserver' && model.offline()) model.offline(false);
-			if(options.restore) setTimeout(restorefunc, restdelay); //restore original button state
-		}
-		if(afterfunc){
-			var aftdelay = typeof(options.after)=='string'? 1000 : 500; //close window
-			setTimeout(function(){ afterfunc(options.parse?response:rawdata); }, aftdelay); //follow-up (data sync)
-		}
-	},
-	timeout: options.timeout||0,
-	error: function(xhrobj,status,msg){
-		if(status!="abort"){
-			if(status=="timeout" && options.fabtn){ closewindow(options.btn); }
-		  if(msg){ //server responded with error
-		  	if(~msg.indexOf('nodename nor servname provided')) msg = 'Faulty URL or no internet';
-		  	if(model.helsinki){ //for public Wasabi, log&send errors
-		  		var date = new Date();
-		  		date = date.toISOString();
-		  		date = date.substr(0,date.lastIndexOf('.'));
-		  		var optstr = JSON.stringify(senddata);
-		  		if(optstr.length>60) optstr = optstr.substring(0,57)+'...';
-		  		var errorstr = ' *'+date+' "'+msg+'" when requesting "'+action+'" with '+optstr;
-		  		model.errors(model.errors()+errorstr); //notify user
-		  		if(action!='errorlog') communicate('errorlog',{errorlog:errorstr}); //send error to server
-		  	}
-		  	console.log('Wasabi server responded to "'+action+'" with error: '+msg);
-		  	errorfunc(msg+'');
-		  }
-		  else{ //no response
-				if(options.retry){ //allow 2 retries
-					options.retry = options.retry=='take2'? false : 'take2';
-					setTimeout(retryfunc, 2000); return;
-				} else { //probably a server exception
-					msg = 'Server communication error ("'+action+'" failed).<br>Strange stuff may follow...';
-					console.log('No server response with '+action);
-					if(action!='checkserver') communicate('checkserver'); //ping server
-					errorfunc(msg);
+			else if(options.btn && !successfunc){ //show feedback on button
+				if(!response) return;
+				if(typeof(response)=='string' && !options.successtxt){ options.btn.innerHTML = response; restdelay = 3000; }
+				else if(response.file) options.btn.href = resp.file;
+				if($(options.btn).css('opacity')==0) $(options.btn).css('opacity',1); //show downloadlink_btn
+			}
+			if(options.btn && options.successtxt){ options.btn.innerHTML = options.successtxt; restdelay = 3000; }
+			
+			if(parseResp(rawdata) && !options.aftersync){ //no errors
+				if(successfunc) successfunc(options.parse?response:rawdata); //custom successfunc (data processing/import)
+				if(action!='checkserver' && model.offline()) model.offline(false);
+				if(options.restore) setTimeout(restorefunc, restdelay); //restore original button state
+			}
+			if(afterfunc){
+				var aftdelay = typeof(options.after)=='string'? 1000 : 500; //close window
+				setTimeout(function(){ afterfunc(options.parse?response:rawdata); }, aftdelay); //follow-up (data sync)
+			}
+		},
+		timeout: options.timeout||0,
+		error: function(xhrobj,status,msg){
+			if(status!="abort"){
+				if(status=="timeout" && options.fabtn){ closewindow(options.btn); }
+			  if(msg){ //server responded with error
+			  	if(msg.includes('nodename nor servname provided')) msg = 'Faulty URL or no internet';
+			  	if(model.helsinki){ //for public Wasabi, log&send errors
+			  		var date = new Date();
+			  		date = date.toISOString();
+			  		date = date.substr(0,date.lastIndexOf('.'));
+			  		var optstr = JSON.stringify(senddata);
+			  		if(optstr.length>60) optstr = optstr.substring(0,57)+'...';
+			  		var errorstr = ' *'+date+' "'+msg+'" when requesting "'+action+'" with '+optstr;
+			  		model.errors(model.errors()+errorstr); //notify user
+			  		if(action!='errorlog') communicate('errorlog',{errorlog:errorstr}); //send error to server
+			  	}
+			  	console.log('Wasabi server responded to "'+action+'" with error: '+msg);
+			  	errorfunc(msg+'');
+			  }
+			  else{ //no response
+					if(options.retry){ //allow 2 retries
+						options.retry = options.retry=='take2'? false : 'take2';
+						setTimeout(retryfunc, 2000); return;
+					} else { //probably a server exception
+						msg = action+ 'failed: Unexpected server hangup!';
+						console.log('No server response with '+action);
+						if(action!='checkserver') communicate('checkserver'); //ping server
+						errorfunc(msg);
+					}
 				}
 			}
-		}
-		else if(options.btn){
-			options.btn.innerHTML = '<span class="label red" title="'+msg+'">Aborted</label>';
-			setTimeout(restorefunc,3000);
-		}
-		
-		if(afterfunc && typeof(options.after)!='string') setTimeout(function(){ afterfunc(msg||'','error'); }, 500); //follow-up (data resync)
-	},
-	xhr: function(){
-			var xhr = $.ajaxSettings.xhr();
-			if(options.btn){ //show file transfer feedback
-				xhr.tick = 1;
-				var desc = 'Downloading';
-				var listenfunc = function(d){
-				if(d.total && !(xhr.tick%2)){
-					var perc = parseInt(d.loaded/(d.total/100));
-					options.btn.innerHTML = '<span class="progressline"><span class="bar" style="width:'+perc+'%">'+
-					'<span class="title">'+desc+'</span></span></span>';
+			else if(options.btn){
+				options.btn.innerHTML = '<span class="label red" title="'+msg+'">Aborted</label>';
+				setTimeout(restorefunc,3000);
+			}
+			
+			if(afterfunc && typeof(options.after)!='string') setTimeout(function(){ afterfunc(msg||'','error'); }, 500); //follow-up (data resync)
+		},
+		xhr: function(){
+				var xhr = $.ajaxSettings.xhr();
+				if(options.btn){ //show file transfer feedback
+					xhr.tick = 1;
+					var desc = 'Downloading';
+					var listenfunc = function(d){
+					if(d.total && !(xhr.tick%2)){
+						var perc = parseInt(d.loaded/(d.total/100));
+						options.btn.innerHTML = '<span class="progressline"><span class="bar" style="width:'+perc+'%">'+
+						'<span class="title">'+desc+'</span></span></span>';
+					}
+					xhr.tick++;
+				};
+				if(action=='geturl'||action=='update'){ //listen for file download progress
+					xhr.addEventListener('progress',listenfunc,false);
+				} else if(xhr.upload){ //listen for file upload progress
+					desc = 'Uploading';
+					xhr.upload.addEventListener('progress',listenfunc,false);
 				}
-				xhr.tick++;
-			};
-			if(action=='geturl'||action=='update'){ //listen for file download progress
-				xhr.addEventListener('progress',listenfunc,false);
-			} else if(xhr.upload){ //listen for file upload progress
-				desc = 'Uploading';
-				xhr.upload.addEventListener('progress',listenfunc,false);
-			}
-			}
-		return xhr;
-	},
-	data: formdata,
-	dataType: "text",
-    cache: false,
-    contentType: false,
-    processData: false
-  }); //ajax
+				}
+			return xhr;
+		},
+		data: formdata,
+		dataType: "text",
+	    cache: false,
+	    contentType: false,
+	    processData: false
+	}); //ajax
 }
+
+//read/write to localStorage
+function storage(key, data){
+	//check availability (e.g. private window)
+	try{ var s = window.localStorage; s.setItem('t','t'); s.removeItem('t'); }
+	catch(e){ return false; }
+	//store/retrieve items
+	if(key && typeof(data)!='undefined'){
+		if(data===null) s.removeItem(key);
+		else{
+			if(typeof(data)=='function') data = unwrap(data);
+			s.setItem(key, JSON.stringify(data));
+		}
+	} else if(key){ try{ return JSON.parse(s.getItem(key)); }catch(e){ return; }}
+	return true;
+}
+
+//sync localStorage data with user account
+function syncStorage(flag){
+	if(!storage()||!settingsmodel.userid()) return false;
+	//upload local settings to server
+	if(typeof(flag)=='string'){
+		var local = {};
+		for(var i=0; i<localStorage.length; i++){
+			local[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
+		}
+		return communicate('writemeta', {key:'localStorage', value:JSON.stringify(local)});
+	}
+	//read settings from server
+	getfile({file: 'getanalysis?id='+settingsmodel.userid(), success: function(meta){
+		try{ var remote = JSON.parse(meta); }
+		catch(e){ console.log('Invalid metadata: '+meta); return false; }
+		if(typeof(remote.localStorage)=='object'){ //server has session data
+			for(k in remote.localStorage){
+				try{ localStorage.setItem(JSON.stringify(remote.localStorage[k])) }catch(e){}
+			}
+			settingsmodel.loadprefs();
+		}
+		if(typeof(flag)=='function') flag(); //follow-up
+	}});
+}		
 
 //Save current (opened) MSA data to server (library)
 function savefile(btn){
@@ -1681,7 +1711,7 @@ function savefile(btn){
 					}
 					else{
 						if(settingsmodel[n]) n = "settingsmodel."+n;
-						try{ settings[n] = ~n.indexOf(".")? eval(n+"()") : n; }
+						try{ settings[n] = n.includes(".")? eval(n+"()") : n; }
 						catch(e){ console.log("Skipped save setting "+n+": "+e); }
 					}
 				});
@@ -1694,159 +1724,29 @@ function savefile(btn){
 	return false;
 }
 
-//submit a background job to Wasabi server (Prank aligner + plugins)
+//update alignment (via Prank plugin)
 function sendjob(options){
-	var datalimit = settingsmodel.datalimit, joblimit = settingsmodel.joblimit;
-	//check quotas
-	if(datalimit){
-		var bplimit = datalimit*100000;
-		if(model.totalseqlen()>bplimit){
-			dialog('notice','Your sequence data size exceeds the server limit of '+numbertosize(bplimit,'bp')+
-			'.<br>Please reduce the input dataset size and try again.');
-			return false;
-		}
-		else if(parseInt(settingsmodel.dataperc())>98){
-			dialog('notice','The '+numbertosize(datalimit,'byte')+' server space for your analysis library is used up.'+
-			'<br>Please delete <a onclick="dialog(\'library\')">some</a> or <a onclick="dialog(\'settings\')">all</a> analyses and try again.');
-			return false;
-		}
-	}
-	else if(joblimit && librarymodel.runningjobs()>=joblimit){
-		dialog('notice','You already have the maximum of '+joblimit+' jobs running.'+
-		'<br>Terminate or wait for a job to finish before launching a new one.');
-		return false;
-	}
-	
-	//construct payload to server
-	var senddata = {};
-	senddata.name = options.name||exportmodel.savename()||'Remote job';
-	senddata.writemode = exportmodel.savetarget().type;
-	if(librarymodel.openid()) senddata.id = librarymodel.openid();
-	
-	var nodeinfo = {};
-	$.each(leafnodes, function(name,node){ if(node.ensinfo&&node.type!='ancestral') nodeinfo[name] = node.ensinfo; });
-	if(!$.isEmptyObject(nodeinfo)) senddata.nodeinfo = nodeinfo;
-	if(!$.isEmptyObject(model.ensinfo())) senddata.ensinfo = model.ensinfo();
-	
-	var alignbtn = $(options.btn);
-	alignbtn.unbind('click'); //prevent multiple clicks
-	alignbtn.click(closewindow);
-	alignbtn.attr('title','Click to close the window');
-	
-	var action = 'startalign'
-	var optdata = {btn:alignbtn[0]};
-	
-	if(options.plugin){ //process plugin interface input form
-		var optform = $(options.form).clone();
-		var plugin = plugins[options.plugin];
-		var useopenseq = false;
-		var params = [];
-		
-		//input elements cleanup
-		optform.find('select, input:not([name]), input[type=file], input[type=checkbox]:not(:checked)').remove(); //remove dummy inputs
-		optform.find('input').filter(function(){ return this.value=="false"||!this.value.trim().length; }).remove(); //remove empty inputs
-		optform.find('input[type=checkbox]').val('true'); //normalize checkbox input values
-		
-		//process inputs
-		var makeIDs = plugin._makeids; //convert taxanames to IDs (if enabled)
-		var nameIDs = {}, endID = '', IDnames = {}, filenames = {}; //file converter helpers
-		optform.find('input').each(function(){
-			var optname = this.name.replace(/^\W+/,'');
-			var tname = this.getAttribute('trackname');
-			var fformat = this.getAttribute('fileformat');
-			var popt = plugin[tname||optname]; //option in the datamodel
-			if(!popt){ console.log(tname); console.log(this); return true; }
-			
-			if(fformat){ //input file parameter: add filecontent
-				var fformat = popt.fileformat;
-				var fcont = popt.container? popt.container()[0].imported : false; //user-supplied file
-				
-				//add input file content from plugin container
-				if(~popt().indexOf('tree')){ //make tree file
-					var exportopt = {nameids:nameIDs, container:fcont};
-				} else {
-					var exportopt = {makeids:makeIDs, nameids:nameIDs, includehidden:exportmodel.includehidden(), startid:endID, container:fcont};
-					if(!fcont) useopenseq = true; //option uses currently imported sequence
-				}
-				
-				var exported = parseexport(fformat, exportopt); //generate file
-				if(fcont) popt.container([]); //clear file input
-				if(makeIDs){ nameIDs = exported.nameids; endID = exported.endid; } //keep track of generated taxa IDs
-				
-				if(fformat == 'original') fformat = fcont? (fcont.ftype.split(':')[1].trim()||'text'):'text';
-				var fname = 'input_'+(tname&&!/trackName/.test(tname)? tname : popt()); //filename: predefined or from data type
-				if(!filenames[fname]) filenames[fname] = 1;
-				else fname += ++filenames[fname]; //avoid filename clash
-				if(!~fname.indexOf('.')) fname += exportmodel.fileexts[fformat]||'.txt'; //file extension
-				senddata[fname] = exported.file||exported; //add filecontent to payload ("filename" = filecontent)
-				this.value = fname; //option value = "filename"
-			}
-			
-			var valuesep = optname.length?plugin._valuesep:'';
-			if(~this.value.indexOf(' ')) this.value = '"'+this.value+'"'; //space in value
-			if(this.value.length){ //add parameter to the list
-				var param = (optname.length?this.name:'')+(this.value=='true'?'':valuesep+this.value);
-				params.push(param); //param = paramname (flag) | paramvalue (positional) | paramname=paramvalue
-			}
-		});
-		
-		if(makeIDs){ //keep track of generated taxaIDs
-			$.each(nameIDs, function(name,id){ IDnames[id] = name; });
-			senddata.idnames = IDnames;
-		}
-		if(!useopenseq){ delete senddata.nodeinfo; delete senddata.ensinfo; } //sequence metadata not needed
-		
-		plugin._log('Parsed command: '+plugin._program+' '+params.join(' '));
-		
-		//add plugin parameters to senddata
-		senddata.params = params.join('|'); //send parameters as "param1|param2 val2|..."
-		options.form = false;
-		//options.form = optform[0]; //send parameters as key/value form data
-		//senddata.valuesep = valuesep;
-		senddata.program = plugin._program;
-		senddata.path = plugin._path;
-		senddata.outfile = unwrap(plugin._outfile);
-		senddata.name = unwrap(plugin._libraryname);
-	}
-	else{ //(manual or auto) prank alignment
-		var exportdata = parseexport('fasta',{makeids:true,includehidden:exportmodel.includehidden()}); //{file:fastafile,nameids:{name:id}}
-		senddata.fasta = exportdata.file;
-		var idnames = {}, lastid = '';
-		$.each(exportdata.nameids, function(name,id){ idnames[id] = name; lastid = id; });
-		if(!$.isEmptyObject(treesvg) && (!options.form || !options.form['newtree']['checked'])) senddata.newick = parseexport('newick',{tags:true,nameids:exportdata.nameids});
-		senddata.dots = true;
-		if(options.keepalign) senddata.keep = true;
-		if(options.usecodons) senddata.codon = true;
-		if(!options.form) senddata.name = 'Updated '+senddata.name;
-		senddata.idnames = idnames;
-	}
-	
-	if(options.form) optdata.form = options.form;
-	
-	var successfunc = optdata.success = function(resp){
-		alignbtn.html('Job sent');
-		try{ var data = JSON.parse(resp); }catch(e){ var data = {}; }
-		if(!options.form) librarymodel.autoimport = data.id||'';
-		setTimeout(function(){
-			if(model.treealtered()) model.treealtered(false);
-			closewindow(alignbtn); //close alignment setup winow
-		},2000);
-	};
-	
-	var itemcount = serverdata.library().length;
-	optdata.error = function(msg){
-		if(~msg.indexOf('response')){ //no reponse. Check if job sent.
-			setTimeout(function(){
-				var newcount = serverdata.library().length;
-				if(newcount>itemcount) successfunc();
-			},2000);
-		}
-	};
-	optdata.timeout = 4000;
-	
-	communicate(action, senddata, optdata); //send payload to server
-	_paq.push(['trackEvent', 'align', options.plugin||'prank']); //record event
-	return false;
+	if(!Pline.plugins.PRANK){ console.log('Prank plugin missing!'); return; }
+	var senddata = {name: 'Updated '+exportmodel.savename()};
+	var plugindata = {name: senddata.name};
+	//generate input files from current alignment/tree
+	var exportdata = parseexport('fasta', {makeids:true, includehidden:exportmodel.includehidden()}); //{file:fastafile,nameids:{name:id}}
+	plugindata.idnames = {};
+	$.each(exportdata.nameids, function(name, id){ plugindata.idnames[id] = name; });
+	plugindata.parameters = '-d=input.fasta';
+	plugindata.infile = 'input.fasta';
+	senddata['input.fasta'] = exportdata.file;
+	if(!$.isEmptyObject(treesvg)){ //add current tree
+		senddata['input.tree'] = parseexport('newick',{tags:true,nameids:exportdata.nameids});
+		plugindata.parameters += ' -t=input.tree';
+		plugindata.infile += ',input.tree';
+	} else plugindata.parameters += ' -newtree';
+	//add parameters
+	plugindata.parameters += ' -dots -keep -once -o=out';
+	if(options.usecodons) plugindata.parameters += ' -codon';
+	if(options.keepalign) plugindata.parameters += ' -keep';
+	//send to Wasabi server
+	Pline.plugins.PRANK.sendJob({payload:Object.assign(plugindata, senddata), btn:options.btn, plugin:Pline.plugins.PRANK});
 }
 
 //check for a new version of a backend service
@@ -1898,7 +1798,7 @@ function getfile(opt){
     var download = function(fileopt){ //GET file > import/successfunc()
       if(!fileopt) fileopt = {};
       var filename = fileopt.file || opt.file || opt.name || "";
-      if(~filename.indexOf(',')){ //download 2 files (from library) > import
+      if(filename.includes(',')){ //download 2 files (from library) > import
 	      var files = filename.split(',');
 	      filename = fileopt.file = opt.file = files[0];
 	      fileopt.success = function(data){
@@ -1927,15 +1827,15 @@ function getfile(opt){
 			if(opt.fileurl){ opt.id=''; srcurl=opt.fileurl; source='web address'; }
 			setTimeout(function(){ parseimport({source:source, id:opt.id, importbtn:opt.btn, name:opt.name, importurl:srcurl}) }, 300);
 			if(settingsmodel.keepid()){
-				localStorage.openid = opt.id;
-				localStorage.openfile = filename;
+				storage('openid', opt.id);
+				storage('openfile', filename, 'sync');
 			}
 		}
 		else if(opt.btn && opt.btn.prop('tagName')=='DIV') opt.btn.html('<pre>'+data+'</pre>'); //display filecontents inside a div
 	  },
 	  error: function(xhrobj,status,msg){
 		if(status=="abort"){ msg = "Download cancelled"; }
-		if(model.offline() && !~fileurl.indexOf(window.location.host)){ //cross-domain request
+		if(model.offline() && !fileurl.includes(window.location.host)){ //cross-domain request
 			if(!trycount){ fileopt.datatype = 'jsonp'; } //fallback to jsonp
 			else{ msg = 'The URL source does not support cross-domain download.'; }
 		}
@@ -1991,7 +1891,7 @@ function getfile(opt){
 			};
 			var metaerror = function(e){ //no meta.txt
 				if(!e) e = 'No response';
-				if(typeof(e)=='string' && ~e.indexOf('Invalid library ID')){
+				if(typeof(e)=='string' && e.includes('Invalid library ID')){
 					console.log('Invalid analysis ID: '+opt.id);
 					showerror('Analysis ID <b>'+opt.id+'</b> was not found in server.<br>'+
 					'The source dataset may have been deleted or the sharing URL may be faulty.');
@@ -2122,7 +2022,14 @@ function checkfiles(filearr, options){
 			};
 			seticon(i,'spinner');
 			
-			if(file.id){ //wasabi sharing ID
+			if(file instanceof File){ //local file
+				var reader = new FileReader(); 
+				reader.onload = function(evt){
+					loadfile(evt.target.result);
+				}
+				try{ reader.readAsText(file); }catch(e){ showerror('Cannot read local textfile: '+e); }
+			}
+			else if(file.id){ //wasabi sharing ID
 				getfile({id:file.id, file:file.file, i:file.i, error:showerror, noimport:options.noimport, btn:seticon(i)});
 				return false; //skip filecheck, import dataset in getfile()
 			}
@@ -2140,12 +2047,8 @@ function checkfiles(filearr, options){
 			else if(file.text){ //plain text
 				loadfile(file.text);
 			}
-			else{ //local file
-				var reader = new FileReader(); 
-				reader.onload = function(evt){
-					loadfile(evt.target.result);
-				}
-				try{ reader.readAsText(file); }catch(e){ showerror('Cannot read local textfile'); }
+			else{
+				showerror('Unknown input data type'); console.log('Unknown input data type:'); console.log(file);
 			}
 		});
 	}
@@ -2153,20 +2056,21 @@ function checkfiles(filearr, options){
 	
 	//step 2: peek loaded files: check for datatype //
 	var peekfiles = function(){
-		if(options.nocheck || options.container){ closewindow(infowindow); } //import to (plugin) container
-		else{
-			if(!options.nocheck){
-			  $.each(container(), function(i, item){
-				item.type = parseimport({filenames:[item.name], mode:'check'});
+		if(!options.nocheck){ //check the datatype
+		  $.each(container(), function(i, item){
+			item.type = parseimport({filenames:[item.name], container:container, mode:'check'});
+			if(!options.silent){
 				if(item.type) seticon(item.i,'tick'); //item.type = "sequence"|"tree"|false
 				else{
 					displayerror("Can't recognize file "+(i+1));
 					rejected.push(item.i);
 				}
-			  });
 			}
-			importfiles();
+		  });
 		}
+		
+		if(options.container) closewindow(infowindow); //imported to (plugin) file container
+		else importfiles(); //import to Wasabi
 	}
 	
 	//step 3: import files//
@@ -2201,12 +2105,12 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	var ensinfo = options.ensinfo || {};
 	if(options.id){ //item imported from library. Get import metadata.
 		var metadata = options.metadata || serverdata.import;
-		if(metadata.id && metadata.id==options.id){ //preloaded importmeta.txt
-			idnames = metadata.idnames || {};
-			nodeinfo = metadata.nodeinfo || {};
-			ensinfo = metadata.ensinfo || {};
-			visiblecols = metadata.visiblecols || [];
-			importsettings = metadata.settings || {};
+		if(metadata.id && metadata.id==options.id){ //restore metadata from importmeta.txt
+			idnames = metadata.idnames || {}; //taxaid=>orig. taxaname
+			nodeinfo = metadata.nodeinfo || {}; //taxa/treenodes metadata
+			ensinfo = metadata.ensinfo || {}; //ens. dataset id
+			visiblecols = metadata.visiblecols || []; //collapsed cols
+			importsettings = metadata.settings || {}; //other display settings
 		}
 	}
 	serverdata.import = {};
@@ -2214,16 +2118,14 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	
 	var parsename = function(name, option){
 		name = name.trim(name);
-		if(!$.isEmptyObject(idnames)){
-			var mapname = name.toLowerCase();
-			if(idnames[mapname]) name = idnames[mapname];
-		}
+		if(idnames[name]) name = idnames[name]; //restore original taxaname from the exported taxaID
 		//if(~name.indexOf('#')) name = 'Node '+name.replace(/#/g,''); //replace error-prone Prank symbols
 		if(option=='nospace') name = name.split(' ')[0];
 		name = name.replace(/_/g,' ');
-		if(option!='skipcheck'){
+		if(option!='skipcheck'){ //check for duplicate taxanames
 			var oldname = name;
-			while(Tsequences[name]){ name += '1'; }
+			var n = 0;
+			while(Tsequences[name]){ name = oldname+' '+n; n++; }
 			if(oldname!=name) notes.push('Duplicate sequence name "'+oldname+'" renamed to "'+name+'".');
 		}
 		return name;
@@ -2378,7 +2280,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 			if(!$.isEmptyObject(Tidnames)) idnames = Tidnames; //map treename=>seqname (from HSAML)
 		}
 		Ttreedata = treetxt;
-		if(format=='phyloxml' && ~treetxt.indexOf('<mol_seq')){ //sequences in tree data
+		if(format=='phyloxml' && treetxt.includes('<mol_seq')){ //sequences in tree data
 			if(!$.isEmptyObject(Tsequences)) seqoverwrite = true;
 			Tseqsource = filename;
 		}
@@ -2390,10 +2292,13 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		if(/\.tre/.test(a)) return 1; else if(/\.tre/.test(b)) return -1;
 		return /\.ne?x/.test(a)? -1: /\.xml/.test(a)? /\.ne?x/.test(b)? 1:-1 : /\.ph/.test(a)? /\.ne?x|\.xml/.test(b)? 1:-1 : /\.ne?x|\.xml|\.ph/.test(b)? 1: 0;
 	});
-
+	
 	var abort = false;
-	$.each(filenames,function(i,filename){  //detect fileformat
-		var file = container.get(filename).data, marr = false;
+	$.each(filenames, function(i, filename){  //detect fileformat
+		var file = container.get(filename), marr = false;
+		if(!file){ errors.push("Missing data for file"+filename); return true; }
+		file = file.data;
+		if(typeof(file)=='function') console.log(file());
 		var fileheader = file.substr(0,2000);
 
 		if(typeof(file)=='object' && file.hasOwnProperty('data')){ //Ensembl JSON object
@@ -2402,9 +2307,9 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		}
 		else if(typeof(file)!='string'){ errors.push("Unrecognized data type in "+filename); return true; }
 		else if(/^<.+>$/m.test(fileheader)){ //xml
-			if(~file.indexOf("<phyloxml")){ //phyloxml tree (+seq)
+			if(file.includes("<phyloxml")){ //phyloxml tree (+seq)
 				var firstbl = file.indexOf("<phylogeny")+10;
-				if(~file.indexOf("<phylogeny",firstbl)){ //multiblock phyloXML
+				if(file.includes("<phylogeny",firstbl)){ //multiblock phyloXML
 					if(options.ensinfo && options.ensinfo.type && options.ensinfo.type.split('/')[0]=='alignment' && options.ensinfo.id){
 						var refspecies = options.ensinfo.id.split('/')[0];
 					} else if(options.name){ var refspecies = options.name.split('/')[0] } else { var refspecies = 'homo_sapiens' };
@@ -2417,7 +2322,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 							var seqloc = $(this).children('sequence').children('location').text();
 							if(taxafullname && seqloc){
 								alnbl.spcount++;
-								if(~taxaname.indexOf(refspecies)){ //the block's query species
+								if(taxaname.includes(refspecies)){ //the block's query species
 									alnbl.spname = taxafullname;
 									alnbl.loc = seqloc;
 									try{
@@ -2519,22 +2424,27 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 	
 	//process & count sequences
 	var process_seq = function(){
-			var maxseqlen = 0, minseqlen = Tsequences[seqnames[0]].length, totallen = 0;
-			var longestseq = '', hasdot = false, alignlen = 0, tmpseq, seqlen;
-			for(var n=0;n<seqnames.length;n++){ //count sequence lengths
-				tmpseq = Tsequences[seqnames[n]].join('');
-				if(!hasdot && ~tmpseq.indexOf('.')) hasdot = true;
-				if(tmpseq.length > alignlen) alignlen = tmpseq.length;
-				tmpseq = tmpseq.replace(/[-_.:]/g,''); seqlen = tmpseq.length; totallen += seqlen;
-				if(seqlen > maxseqlen){ maxseqlen = seqlen; longestseq = tmpseq; }
-				if(seqlen < minseqlen){ minseqlen = seqlen; }
-			}
-			var dnachars = new RegExp('['+alphabet.DNA.join('')+'U?!'+']','ig');
-			var trimseq = longestseq.replace(dnachars,''); //check if a sequence is (mostly) dna
-			var type = trimseq.length<longestseq.length*0.2? 'DNA' : 'protein';
-			if(type=='DNA') if(~longestseq.search(/U/i)) type = 'RNA';
-			return {type:type, hasdot:hasdot, maxseqlen:maxseqlen, minseqlen:minseqlen, totallen:totallen, alignlen:alignlen};
-		};
+		var maxseqlen = 0, minseqlen = Tsequences[seqnames[0]].length, totallen = 0;
+		var longestseq = '', randseq = '', hasdot = false, unmask = false, alignlen = 0, tmpseq, seqlen;
+		for(var n=0;n<seqnames.length;n++){ //count sequence lengths
+			tmpseq = Tsequences[seqnames[n]].join('');
+			if(n==0 && tmpseq == tmpseq.toLowerCase()) unmask = true; //check if all seq. is lowercase
+			if(unmask) Tsequences[seqnames[n]] = tmpseq.toUpperCase().split(''); //unmask all sequences
+			if(tmpseq.length > alignlen) alignlen = tmpseq.length;
+			tmpseq = tmpseq.replace(/[-_.:]/g,'');
+			seqlen = tmpseq.length;
+			totallen += seqlen;
+			if(seqlen > maxseqlen){ maxseqlen = seqlen; longestseq = tmpseq; }
+			else if(!randseq) randseq = tmpseq;
+			if(seqlen < minseqlen){ minseqlen = seqlen; }
+		}
+		if(~randseq.indexOf('.')) hasdot = true; //check for insertion symbol
+		var dnachars = new RegExp('['+alphabet.DNA.join('')+'U?!'+']','ig');
+		var trimseq = longestseq.replace(dnachars,''); //check if a sequence is (mostly) dna
+		var type = trimseq.length<longestseq.length*0.2? 'DNA' : 'protein';
+		if(type=='DNA') if(~longestseq.search(/U/i)) type = 'RNA';
+		return {type:type, hasdot:hasdot, maxseqlen:maxseqlen, minseqlen:minseqlen, totallen:totallen, alignlen:alignlen};
+	};
 		
 	var seqstats = seqnames.length? process_seq() : {};
 	
@@ -2596,6 +2506,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		model.noanc(false);
 		model.dnasource('');
 		model.ensinfo(ensinfo);
+		if(ensinfo) settingsmodel.leaflabel('species'); //change default taxalabel for ensembl trees
 		
 		var newcolors = false;
 		if(seqnames.length){ //fill sequence data globals
@@ -2614,11 +2525,17 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				
 		if(!treesvg.data && seqnames.length){ //no tree: fill tree placeholders
 			var visrows = [];
+			var leaflabels = {};
+			settingsmodel.leaflabels = ['name'];
 			$.each(seqnames,function(indx,seqname){
-				leafnodes[seqname] = {name:seqname};
-				if(nodeinfo[seqname]) leafnodes[seqname].ensinfo = nodeinfo[seqname];
+				leafnodes[seqname] = {name:seqname, nodeinfo:{name: seqname}};
+				if(nodeinfo[seqname]){ //restore leafnodes metadata & register labels
+					Object.assign(leafnodes[seqname].nodeinfo, nodeinfo[seqname]);
+					Object.keys(nodeinfo[seqname]).forEach(function(label){ leaflabels[label] = 1; });
+				}
 				visrows.push(seqname); 
 			});
+			Object.keys(leaflabels).forEach(function(label){ settingsmodel.leaflabels.push(label); });
 			model.visiblerows(visrows);
 			model.leafcount(seqnames.length);
 		}
@@ -2627,7 +2544,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		dom.tree.empty(); dom.names.empty(); dom.scalebar.empty();
 		
 		var redrawopt = {firstrun:true};
-		$.each(importsettings,function(sn,s){ //restore library-item-specfic state settings
+		$.each(importsettings, function(sn,s){ //restore library-item-specfic state settings 
 			if(sn=="model.seqtype" && s=="codons" && model.isdna()){ //translate dna=>codons
 				Tsequences = {};
 				$.each(sequences,function(name,seqarr){
@@ -2642,7 +2559,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 				model.seqtype("codons");
 			}
 			if(sn=="position") redrawopt.position = s;  //scroll position
-			else if(~sn.indexOf(".") && eval(sn)) eval(sn+"("+JSON.stringify(s)+")");  //new model value
+			else if(sn.includes(".") && eval(sn)) eval(sn+"("+JSON.stringify(s)+")");  //new model value
 		});
 		
 		if(options.id){ //(shared) library dataset
@@ -2659,7 +2576,7 @@ function parseimport(options){ //options{dialog:jQ,update:true,mode}
 		
 		if(options.source){ //data source > model
 			var src = options.source;
-			var sourcetype = src=='localread'||src=='upload'? 'local computer' : ~src.indexOf('import')? 'analysis library' : src=='download'? options.importurl? 'web address' : 'text input' : src;
+			var sourcetype = src=='localread'||src=='upload'? 'local computer' : src.includes('import')? 'analysis library' : src=='download'? options.importurl? 'web address' : 'text input' : src;
 			model.sourcetype(sourcetype);
 		}
 		librarymodel.importurl = options.importurl||'';
@@ -2705,7 +2622,7 @@ function ensemblid(ensdata){
 	}
 	//process data
 	try{ ensdata = JSON.parse(ensdata); } catch(e){
-		if(~ensdata.indexOf('BaseHTTP')) ensdata = {error:'Server communication error.'};
+		if(ensdata.includes('BaseHTTP')) ensdata = {error:'Server communication error.'};
 		else ensdata = {error:'No match. Try different search.'};
 	}
 	if($.isArray(ensdata) && !ensdata.length) ensdata = {error:'No match. Try different search.'};
@@ -2735,7 +2652,7 @@ function ensemblimport(){
 		setTimeout(function(){ ensbtn.innerHTML = 'Import'; $('#enserror').fadeOut(); },4000);
 		return false;
 	}
-	var urlopt = ~idformat.indexOf('homology')? '?content-type=application/json' : '?content-type=text/x-phyloxml';
+	var urlopt = idformat.includes('homology')? '?content-type=application/json' : '?content-type=text/x-phyloxml';
 		
 	if(ensemblmodel.isblock()){
 		ensid = ensid.replace(/-/,'..')
@@ -2747,12 +2664,12 @@ function ensemblimport(){
 		urlopt += ';method='+ensemblmodel.blocktype().type+';species_set_group='+ensemblmodel.blockset().name.toLowerCase();
 		if(ensemblmodel.mask()) urlopt += ';mask='+ensemblmodel.mask();
 	} else {
-		if(~idformat.indexOf('homology')){
+		if(idformat.includes('homology')){
 			urlopt += ';type='+ensemblmodel.homtype();
 			if(ensemblmodel.target()) urlopt += ';target_species='+ensemblmodel.target();
 		}
 		else{
-			if(!~ensid.indexOf('GT')) idformat = 'genetree/member/id/';
+			if(!ensid.includes('GT')) idformat = 'genetree/member/id/';
 		}
 		urlopt += ';sequence='+ensemblmodel.seqtype();
 	}
@@ -2762,12 +2679,12 @@ function ensemblimport(){
 	
 	var urlstring = ('http://rest.ensembl'+ensemblmodel.genomes()+'.org/'+idformat+ensid+urlopt).replace(/ /g,'+');
 	var processdata = function(ensdata){
-		try{ ensdata = JSON.parse(ensdata); } catch(e){ if(~ensdata.indexOf('BaseHTTP')) return showerror('Server communication error.'); }
+		try{ ensdata = JSON.parse(ensdata); } catch(e){ if(ensdata.includes('BaseHTTP')) return showerror('Server communication error.'); }
 		if(typeof(ensdata)=='object'){ //JSON => gene homology data
 			if(!ensdata.data) return showerror('Received data is in unexpected format.');
 			importedFiles.push({name:ensid+'.json', data:ensdata, type:'seq:json'});
 		} else { //XHTML => genetree & alignments data
-			if(!~ensdata.indexOf('phyloxml')) return showerror('Received data is in unexpected format.');
+			if(!ensdata.includes('phyloxml')) return showerror('Received data is in unexpected format.');
 			importedFiles.push({name:ensid+'.xml', data:ensdata, type:'seq:phyloxml tree:phyloxml'});
 		}
 		setTimeout(function(){ parseimport({source:'Ensembl',importbtn:$(ensbtn),importurl:urlstring,ensinfo:{type:idformat,id:ensid}}) },600);
@@ -2779,8 +2696,21 @@ function ensemblimport(){
 
 //Output file parsing
 function parseexport(filetype, options){
-	var usemodel = false;
+	
 	if(typeof(filetype)=='object'){ if(!options) options = filetype; filetype = ''; }
+	if(options && options.exporturl){ //show a server file content in exportwindow (already opened)
+		if(!$('#export').length) return;
+		$.get(options.exporturl, function(txt){ $('#exportpaper').text(txt); }, 'text');
+		$('#export').addClass('flipped');
+		$('#export a.backbtn').css('display','none');
+		exportmodel.fileurl(options.exporturl);
+		var urlfile = parseurl(options.exporturl).file || '';
+		exportmodel.filename(urlfile.substring(urlfile.indexOf('/')+1));
+		exportmodel.fileext('');
+		return;
+	}
+	
+	var usemodel = false;
 	if(!filetype && !options){ //use input from export window
 		usemodel = true;
 		exportmodel.fileurl('');
@@ -2793,6 +2723,7 @@ function parseexport(filetype, options){
 	} else if(!options) var options = {};
 
 	if(filetype=='extended newick'){ filetype = 'newick'; options.tags = true; }
+	if(filetype=='HSAML') options.makeids = true; //generate new taxanames
 	var nameids = options.nameids||{};
 	var seqsource = options.usedna&&translateseq('protein','check')? model.dnasource() : sequences;
 	var treesource = treesvg.data;
@@ -2800,10 +2731,12 @@ function parseexport(filetype, options){
 	var datatype = options.datatype || exportmodel.category().name || 'sequence tree';
 	datatype = datatype.toLowerCase();
 	
-	var leafnames = [], visiblecols = model.visiblecols();
-	$.each(leafnodes,function(leafname,obj){ if(obj.type!='ancestral') leafnames.push(leafname) });
-	var names = options.includeanc? Object.keys(sequences) : leafnames;
-	var specount = names.length, ntcount = options.includehidden? model.alignlen() : model.visiblecols().length;
+	var leafnames = [];
+	var visiblecols = model.visiblecols();
+	$.each(leafnodes, function(leafname,obj){ if(obj.type!='ancestral') leafnames.push(leafname) }); //visible leaf taxanames
+	var names = options.includeanc? Object.keys(sequences) : leafnames; //all taxanames with sequence
+	var specount = names.length;
+	var ntcount = options.includehidden? model.alignlen() : model.visiblecols().length;
 	
 	if(typeof(options.container)=='object'){ //IO=>plugin file container
 		seqsource = options.container.sequences;
@@ -2816,15 +2749,28 @@ function parseexport(filetype, options){
 		if(ntcount){ for(var c=ntcount; c--;) visiblecols[c] = c; }
 	}
 	
-	var parsename = function(name){ //simplify seq. names
-		if(options.makeids || filetype=='HSAML') return '';
-		var pat = {'space':'\\s','digit':'\\d'};
-		var exp = new RegExp(options.truncsymbol?(pat[options.truncsymbol]||'[^A-Za-z0-9 ]'):'');
-		var ind = name.match(exp); ind = ind? ind.index : 0;
-		var maxlen = parseInt(options.trunclen) || 0;
-		var len = ind && (!maxlen||ind<maxlen)? ind : maxlen;
-		name = name.replace(/\s+/g, '_');
-		return len? name.substring(0,len) : name;
+	var namecount = {};
+	var seqcount = options.startind || 0;
+	var parsename = function(name){ //format seq. names for export
+		if(options.makeids){ //generate names
+			seqcount++;
+			name = 'sequence'+seqcount;
+		} else { //use current names
+			var pat = {'space':'\\s','digit':'\\d'};
+			var exp = new RegExp(options.truncsymbol?(pat[options.truncsymbol]||'[^A-Za-z0-9 ]'):'');
+			var ind = name.match(exp); ind = ind? ind.index : 0;
+			var maxlen = parseInt(options.trunclen) || 0;
+			var len = ind && (!maxlen||ind<maxlen)? ind : maxlen;
+			name = name.replace(/\s+/g, '_'); //cnovert spaces
+			if(len) name = name.substring(0,len); //truncate if needed
+			if(namecount[name]){ //avoid duplicates
+				namecount[name]++;
+				name = name.slice(0,-1)+namecount[name];
+			} else {
+				namecount[name] = 1;
+			}
+		}
+		return name;
 	};
 	
 	//sequence letter replacements
@@ -2846,25 +2792,21 @@ function parseexport(filetype, options){
 		return regex? seqstr.replace(regex,translate) : seqstr;
 	};
 	
-	if(filetype!='newick'){ //seq data => Map seq names
-		var seqi=0, parenti=0, tempid='';
-		if(options.startid) seqi = parseInt(options.startid.replace(/\D+/,''));
-		$.each(names,function(j,name){
-			//if(~leafnames.indexOf(name)){ seqi++; tempid = truncname || 'sequence'+seqi; }
-			//else { parenti++; tempid = truncname || 'parent'+parenti; }
-			seqi++;
-			tempid = parsename(name) || 'seq'+seqi;
-			nameids[name] = tempid; 
+	if(filetype!='newick'){ //for sequence output file
+		$.each(names, function(j, name){ //format taxanames for leafs (input sequences)
+			nameids[name] = parsename(name); //input taxanames assumed to be unique (tree<=>seq match)
 		});
 	}
 	
 	//output newick
-	var parsetree = function(){ return treesource? treesource.root.write(options.tags, !Boolean(options.includeanc), nameids) : ''; };
+	var parsetree = function(){
+		return treesource? treesource.root.write(options.tags, !Boolean(options.includeanc), nameids) : '';
+	};
 	
 	
 	var seqline = '';
 	if(filetype=='fasta'){
-		$.each(names,function(j,name){
+		$.each(names, function(j,name){
 			output += '>'+(nameids[name]||name)+"\n";
 			seqline = parseseq(name);
 			for(var c=0;c<seqline.length;c+=50){ output += seqline.substr(c,50)+"\n"; }
@@ -2875,11 +2817,11 @@ function parseexport(filetype, options){
 		if(~datatype.indexOf('tree')) output += "<newick>\n"+parsetree()+"</newick>\n";
 		
 		output += "<nodes>\n"; var isleaf;
-		$.each(names,function(j,name){
+		$.each(names, function(j,name){
 			isleaf = ~leafnames.indexOf(name);
 			seqline = parseseq(name);
 		var xmlnode = isleaf? "\t<leaf " : "\t<node ";
-		xmlnode += "id=\""+(nameids[name]||name)+"\" name=\""+name+"\">\n\t\t<sequence>\n\t\t"+seqline+"\n\t\t</sequence>\n"+(isleaf?"\t</leaf>\n":"\t</node>\n");
+		xmlnode += "id=\""+(nameids[name]||name)+"\" name=\""+(dispnames[name]||name)+"\">\n\t\t<sequence>\n\t\t"+seqline+"\n\t\t</sequence>\n"+(isleaf?"\t</leaf>\n":"\t</node>\n");
 		output += xmlnode;
 		});
 		output += "</nodes>\n";
@@ -2935,20 +2877,16 @@ function parseexport(filetype, options){
 		} else filename = exportmodel.filename()+exportmodel.fileext();
 		$('#exportpaper').text(output);
 		$('#export').addClass('flipped');
-		if(!model.offline()) communicate('makefile',{filename:filename.replace(' ','_'),filedata:output},{saveto:exportmodel.fileurl});
+		if(!model.offline()) communicate('makefile', {filename:filename.replace(' ','_'), filedata:output}, {saveto:exportmodel.fileurl});
 	}
-	else if(options.exporturl){ //export server file to exportwindow
-		$.get(options.exporturl,function(txt){$('#exportpaper').text(txt)},'text');
-		$('#export').addClass('flipped');
-		exportmodel.fileurl(options.exporturl);
-		exportmodel.filename(parseurl(options.exporturl).file||'');
-	}
-	if(options.exporturl || options.snapshot || options.exportdata) $('#export a.backbtn').css('display','none');
 	
-	if(options.makeids) output = {file:output, nameids:nameids, endid:tempid};
+	if(options.snapshot || options.exportdata) $('#export a.backbtn').css('display','none');
+	
+	output = {file:output};
+	if(options.makeids){ output.nameids = nameids; output.endid = seqcount; }
 	if(options.container){ delete options.container.sequence; delete options.container.tree; }
 	
-	_paq.push(['trackEvent','export',filetype]); //record event
+	_paq.push(['trackEvent', 'export', filetype||'fileview']); //record event
 	return output;
 }
 
@@ -3032,7 +2970,7 @@ function makeColors(){
 			symbols[s+'_anc'] = {fgcolor: m||!newc?sym.fgcolor:afc, bgcolor: m||!newc?sym.bgcolor:shadecolor(sym.bgcolor,ancc)};
 			canvassymbols[s+'_anc'] = anclc?sym.masked:s;
 		}); 
-	} else { $.each(Object.keys(symbols),function(j,s){ if(~s.indexOf('_anc')) symbols[s] = canvassymbols[s] = false; }); }
+	} else { $.each(Object.keys(symbols),function(j,s){ if(s.includes('_anc')) symbols[s] = canvassymbols[s] = false; }); }
 	makeCanvases();
 }
 
@@ -3064,6 +3002,32 @@ function mixcolors(color,mix){
 	return "rgb("+r+","+g+","+b+")";
 }
 
+//convert leafnode metadata to obj. for pop-up menu
+function leafinfo(info){
+	var skip = treesvg.data? [] : ['bootstrap'];
+	var infomenu = {};
+	if(Object.keys(model.ensinfo()).length && info.species){ //show ensembl metadata in the leafinfomenu
+		infomenu['<span class="note">Species</span> '+info.species] = '';
+		if(info.gene_id){
+			infomenu['<span class="note">Gene</span> '+
+			'<a href="http://www.ensemblgenomes.org/id-gene/'+info.gene_id+
+			'" target="_blank" title="View in Ensembl">'+(info.gene||info.gene_id)+'</a>'] = '';
+		}
+		if(info.accession){
+			var ispr = /ENS\w+P\d+/.test(info.accession); //accession could be protein or transcript ID
+			var istr = /ENS\w+T\d+/.test(info.accession);
+			infomenu['<span class="note">'+(ispr?'Protein':istr?'Transcript':'Accession')+'</span> '+
+			'<a href="http://www.ensemblgenomes.org/id/'+info.accession+
+			'" target="_blank" title="View in Ensembl">'+info.accession+'</a>'] = '';
+		}
+		skip.push('scientific_name','id','species','gene','accession');
+	}
+	$.each(info, function(title, val){ //display all datafields
+		if(!~skip[title]) infomenu['<span class="note">'+title.capitalize().replace('_',' ')+'</span> '+val] = ''; 
+	});
+	return infomenu;
+}
+
 //(re)render sequence & tree canvas
 var zoomtimer = 0;
 function redraw(options){
@@ -3082,7 +3046,7 @@ function redraw(options){
 	
 	if(options.firstrun){ //new data imported: prepare tree area
 		if(treesvg.data){ //make tree SVG
-			var svg = $("#tree>svg,#names>svg");
+			var svg = $("#tree>svg, #names>svg");
 			svg.mousedown(function(e){ //handle nodedrag on tree
 				e.preventDefault();
 				var draggedtag = e.target.tagName;
@@ -3103,16 +3067,16 @@ function redraw(options){
 						}
 			}); } });
 		} else { //no tree: make tree/leafname placeholders	
-			$.each(model.visiblerows(),function(n, name){
-				var leafname = leafnodes[name].ensinfo? leafnodes[name].ensinfo.species : name;
-				var nspan = $('<span style="height:'+model.boxh()+'px;font-size:'+model.fontsize()+'px;cursor:pointer">'+leafname+'</span>');
+			$.each(model.visiblerows(), function(n, name){
+				var leafname = leafnodes[name].nodeinfo? leafnodes[name]['nodeinfo'][settingsmodel.leaflabel()] || name : name;
+				var nspan = $('<span style="height:'+model.boxh()+'px;font-size:'+model.fontsize()+'px;cursor:pointer" nodename="'+name+'">'+leafname+'</span>');
 				
 				var hovertimer;
 				nspan.mouseenter(function(){ //show full leaf name on mouseover
 					n = model.visiblerows.indexOf(name); //recheck leaf nr
 					rowborder({y:n*model.boxh()},'keep'); //show row highlight
 					hovertimer = setTimeout(function(){ //show hidden part of name
-						var cssobj = {'font-size': model.fontsize()+'px', 'top': nspan.offset().top+'px', 'left': $("#right").position().left-16+'px'};
+						var cssobj = {'font-size': model.fontsize()+'px', 'top': nspan.offset().top-2+'px', 'left': $("#right").position().left-16+'px'};
 						$label.css(cssobj);
 						$labelspan.css('margin-left',0-dom.names.innerWidth()+6+'px'); $labelspan.text(leafname);
 						$label.fadeIn(100);
@@ -3122,23 +3086,21 @@ function redraw(options){
 					clearTimeout(hovertimer);
 					$label.fadeOut(100); 
 				});
-				//seq. name menu
+				//leaf node pop-up menu
 				nspan.click(function(){
-					var ens = leafnodes[name].ensinfo, mtitle = '';
-					var nmenu = {'Delete': {t:'Remove this sequence', icon:'trash', 
-						click:function(){ model.visiblerows.remove(name); delete leafnodes[name]; delete sequences[name]; nspan.remove(); redraw(); }}};
-					if(ens){ //show ensembl metadata in the menu
-						mtitle = ens.genetype;
-						if(ens.taxaname) nmenu['<span class="note">Taxa</span> '+ens.taxaname] = '';
-						if(ens.cladename&&ens.species) nmenu['<span class="note">Gene</span> '+
-						'<a href="http://www.ensembl.org/'+ens.species.replace(' ','_')+
-						'/Gene/Summary?g='+ens.cladename+'" target="_blank" title="View in Ensembl">'+ens.cladename+'</a>'] = '';
-						if(ens.accession&&ens.species) nmenu['<span class="note">Protein</span> '+
-						'<a href="http://www.ensembl.org/'+ens.species.replace(' ','_')+'/Transcript/ProteinSummary?p='+
-						ens.accession+'" target="_blank" title="View in Ensembl">'+ens.accession+'</a>'] = '';
-					}
-					setTimeout(function(){ tooltip('', mtitle, {clear:true, arrow:'top', data:nmenu, 
-						target:{ x:$("#names").offset().left, y:nspan.offset().top, width:$("#names").width(), height:model.boxh()}, style:'black' }) },100);
+					var leafmenu = {'Delete': {t:'Remove this sequence', icon:'trash', 
+						click:function(){
+							model.visiblerows.remove(name);
+							delete leafnodes[name]; delete sequences[name];
+							nspan.remove(); redraw();
+					}}};
+					var info = leafnodes[name].nodeinfo||{};
+					var infomenu =  leafinfo(info); //leafnode metadata
+					var infotitle = Object.keys(model.ensinfo()).length? 'Ensembl' : 'Info';
+					leafmenu['<span class="svgicon" title="View metadata">'+svgicon('info')+'</span>'+infotitle] = {submenu:infomenu};
+					setTimeout(function(){ tooltip('', '', {clear:true, arrow:'top', data:leafmenu, 
+						target:{ x:dom.names.offset().left, y:nspan.offset().top-6, width:dom.names.width(), height:model.boxh()},
+						style:'leafmenu' }) }, 100); //show the menu
 				});
 				
 				dom.names.append(nspan);
@@ -3148,7 +3110,7 @@ function redraw(options){
 	
 	var newheight = model.visiblerows().length ? model.visiblerows().length*model.boxh() : model.leafcount()*model.boxh();
 	if(model.boxw()<4){ dom.treewrap.addClass('minimal'); } else { dom.treewrap.removeClass('minimal'); }
-	if(!options.zoom){ dom.treewrap.css('height',newheight); $("#names svg").css('font-size',model.fontsize()+'px'); }
+	if(!options.zoom){ dom.treewrap.css('height',newheight); $('svg', dom.names).css('font-size',model.fontsize()+'px'); }
 	if(dom.treewrap.css('display')=='none') dom.treewrap.css('display','block');
 	
 	var renderseq = function(){ //draws sequence canvas
@@ -3195,8 +3157,8 @@ function redraw(options){
 		dom.treewrap.animate({height:newheight, top:top},
 			{duration:300, complete: function(){ zoomtimer = setTimeout(function(){ renderseq(); }, 300);}
 		});
-		if(!$.isEmptyObject(treesvg)) $("#names svg").css('font-size',model.fontsize()+'px');
-		else $("#names span").css({height:model.boxh(),'font-size':model.fontsize()+'px'});
+		if(!$.isEmptyObject(treesvg)) $('svg', dom.names).css('font-size',model.fontsize()+'px');
+		else $('span', dom.names).css({height:model.boxh(),'font-size':model.fontsize()+'px'});
 	}
 	else { //keep current sequence position after rerender
 		dom.seq.empty().append('<div id="rborder" class="rowborder">'); 
@@ -3420,7 +3382,7 @@ function movenode(drag,movednode,movedtype){
 	dom.seq.stop(1).animate({marginTop: scrollto}, 1000, 'linear');
 	vertdragger.stop(1).animate({top: (0-scrollto)/draggerscale}, 1000, 'linear');
 	}        
-	function stop(){ $('#treewrap,#seq,#verticalDragger .dragger').stop(1); clearInterval(drawtimer); }
+	function stop(){ $('#treewrap, #seq, #verticalDragger .dragger').stop(1); clearInterval(drawtimer); }
 	$.each(['up','down'],function(i,dir){ //set up hoverable scrollbuttons
 		var scrolldiv = $('<div class="treescroll '+dir+'" style="width:'+($("#right").offset().left-30)+'px">'+(dir=='up'?'\u25B2':'\u25BC')+'</div>');
 		$("#page").append(scrolldiv);
@@ -3442,7 +3404,7 @@ function movenode(drag,movednode,movedtype){
 		}
 		else if (drag && targettype=='DIV' && evnt.target.id=='treebin'){ if(movednode){ movednode.remove(); } refresh(); }
 		movednode.highlight(false);
-		$("#left,#right,#namesborderDragline").removeClass('dragmode');
+		$("#left, #right, #namesborderDragline").removeClass('dragmode');
 		$("div.treescroll").remove(); stop();
 		if(drag) helper.remove();
 		$("#page").unbind('mousemove'); hidetooltip();
@@ -3489,7 +3451,7 @@ function topmenu(e, btn, menuid){
 	$.each(modeldata, function(i, rdata){
 		var row = {};
 		if (typeof(rdata)=='string'){
-			menudata[rdata] = {};
+			menudata[rdata] = {class:'inactive'};
 			return true;
 		}
 		else if(menuid == 'undostack'){
@@ -3497,23 +3459,28 @@ function topmenu(e, btn, menuid){
 			row.txt = rdata.name;
 			row.icon = rdata.type;
 			row.t = rdata.info;
-			row.css = {backgroundColor: rdata==model.activeundo.data()?'#ffcc66':'' };
+			if(rdata==model.activeundo.data()) row.css = {'background-color':'#ddd'};
 			row.click = function(){ model.selectundo(rdata) };
 		} else {
-			row.icon = rdata.icn;
-			row.t = rdata.inf;
+			row.icon = rdata.icn||'';
+			row.t = rdata.inf||'';
 			row.click = typeof(rdata.act)=='function'? rdata.act : function(){ dialog(rdata.act) };
 			row.css = rdata.css||'';
 			if(rdata.req){ //conditional menu items
 				$.each(rdata.req, function(r,req){
 					if(!has[req]){ //requirement missing => make inactive
 						row.click = req=='online'? function(){dialog('jobstatus')} : '';
+						row.class = 'inactive';
 						return false;
 					}
 			});}
 		}
 		if(!row.click && !rdata.keep) return true; //remove inactive items
-		menudata[rdata.txt] = row;
+		if(rdata.group){ //add as submenu item
+			if(!menudata[rdata.group]) menudata[rdata.group] = {submenu:{}};
+			menudata[rdata.group]['submenu'][rdata.txt] = row;
+		}
+		else{ menudata[rdata.txt] = row; } //add menu item
 	});
 	if(!Object.keys(menudata).length) title = 'No items';
 	//build the menu
@@ -3688,7 +3655,7 @@ function tooltip(evt, title, options){
       else{ //list-type menu: {click/over/out:func(), icon:'svgicn', txt:'txt', t:'title', css/class:'css', add:'html', submenu:[items]}
 		menutooltip = true;
     	var ul = $('<ul>');
-		$.each(options.data, function(txt, obj){  //{item}||[items]: 'txt'||'txt':func()||'txt':item||'txt':[items]
+		$.each(options.data, function(txt, obj){  //'txt'|{item}|[items]|'txt':func()|'txt':item|'txt':[items]
 			if(typeof(obj)=='undefined') return true;
 			var li = $('<li>');
 			if(!obj) obj = {};
@@ -3699,12 +3666,9 @@ function tooltip(evt, title, options){
 			if(obj.submenu){
 				var smenu = Object.keys(obj.submenu);
 				if(!smenu.length) return true; //skip empty submenus
-				if(smenu.length==1){ txt = smenu[0]; obj = obj.submenu[txt]; if(obj.txt) txt = obj.txt; } //un-nest 1-item submenu
-				else { //nested submenu
-					txt += ' <span class="right">\u25B8</span>';
-					li.addClass('arr');
-					li.mouseenter(function(evt){ tooltip(evt,'',{target:li[0], data:obj.submenu, style:options.style||'', treetip:treetip}) });
-				}
+				txt += ' <span class="right">\u25B8</span>';
+				li.addClass('arr');
+				li.mouseenter(function(evt){ tooltip(evt,'',{target:li[0], data:obj.submenu, style:options.style||'', treetip:treetip}) });
 			}
 			
 			var t = obj.t?'title="'+obj.t+'">':'>';
@@ -3714,7 +3678,7 @@ function tooltip(evt, title, options){
 			if(typeof(obj.click)=='function'){
 				li.click(function(e){ e.stopPropagation(); hidetooltip(); obj.click(); });
 				if(treetip && !obj.noref) li.click(refresh); //treemenu click followup
-			} else if(!obj.submenu){ obj.class = obj.class||'inactive'; } //plain text menu item
+			}
 			if(obj.over) li.mouseenter(obj.over);
 			if(obj.out) li.mouseleave(obj.out);
 			if(obj.add) li.append(obj.add);
@@ -3795,41 +3759,10 @@ function hidetooltip(include,exclude,nodeid){
 }
 
 //make arrow+title for collapsible section in dialog windows
-function expandtitle(options){
-	var arrow = $('<span class="rotateable">&#x25BA;</span>'), infospan = '';
-	var titlespan = $('<span class="action" title="'+(options.desc||'Click to toggle content')+'">'+(options.title||'View/hide')+'</span>');
-	if(options.info){
-		infospan = $('<span class="note" style="display:none;margin-left:20px">'+options.info+'</span>');
-		options.onshow = function(){infospan.fadeIn()};
-		options.onhide = function(){infospan.fadeOut()};
-	}
-	titlespan.click(function(){
-		var content = options.target||$(this).parent().next(".insidediv");
-		if(arrow.hasClass('rotateddown')){
-			arrow.removeClass('rotateddown');
-			if(options.minh) content.animate({height:options.minh});
-			else content.slideUp();
-			if(typeof(options.onhide)=='function') options.onhide();	
-		}
-		else{
-			arrow.addClass('rotateddown');
-			if(options.maxh){
-				if(isNaN(options.maxh)) options.maxh = content[0].scrollHeight;
-				content.animate({height:options.maxh});
-			}
-			else content.slideDown();
-			if(typeof(options.onshow)=='function') options.onshow();
-		}
-	});
-	var titlediv = $('<div>').append(arrow,titlespan);
-	if(options.info) titlediv.append(infospan);
-	if(options.inline) titlediv.css({'display':'inline-block','margin-left':'5px'});
-	if(typeof(options.css)=='object') titlediv.css(options.css);
-	return titlediv;
-}
+var expandtitle = Pline.makeSection; //import the function from Pline library
 
 //Generate pop-up dialog windows
-function makewindow(title,content,options){ //(string,array(,obj{flipside:'front'|'back',backfade,btn:string|jQObj|array,id:string},jQObj))
+function makewindow(title, content, options){ //(string,array(,obj{flipside:'front'|'back',backfade,btn:string|jQObj|array,id:string},jQObj))
 	if(!options) options = {};
 	if(!$.isArray(content)) content = [content];
 	var animate = settingsmodel.windowanim();
@@ -3881,17 +3814,14 @@ function makewindow(title,content,options){ //(string,array(,obj{flipside:'front
 	var headerdiv = $('<div class="windowheader"></div>');
 	if(options.header){ $.each(options.header,function(i,val){ headerdiv.append(val) }); }
 	if(options.icn){
-		if(options.plugin){ var imgsrc = '?plugin='+options.plugin+'&file='+options.icn; }
-		else{
-			var imgsrc = options.icn;
-			if(imgsrc.charAt(imgsrc.length-4)!='.') imgsrc += '.png';
-			if(imgsrc.substr(0,6)!='images/') imgsrc = 'images/'+imgsrc;
-		}
+		var imgsrc = options.icn;
+		if(imgsrc.charAt(imgsrc.length-4)!='.') imgsrc += '.png';
+		if(imgsrc.substr(0,6)!='images/' && imgsrc.charAt(0)!='?') imgsrc = 'images/'+imgsrc;
 		title = '<img class="windowicn" src="'+imgsrc+'"> '+title;
 	}
 	titlediv.html(title);
 	$.each(content,function(i,item){ contentdiv.append(item); });
-	windowdiv.append(headerdiv,contentdiv,titlediv,closebtn);
+	windowdiv.append(headerdiv, contentdiv, titlediv, closebtn);
 	if(options.hidden) windowdiv.css('display','none');
 	$(container||"#page").append(windowdiv); //add window to webpage
 	
@@ -3948,7 +3878,7 @@ function dialog(type,options){
 	if(!options) options = {};
 	//window laready created. bring it to front.
 	if($('#'+type).length){ $('#'+type).trigger('mousedown');  return; }
-// file/data import window
+	// file/data import window
 	if(type=='import'){
 		if(!options) options = {};
 		var alt = options.mode || options.noimport || options.container;
@@ -3991,7 +3921,7 @@ function dialog(type,options){
 		var idbtn = $('<a class="button" style="margin:5px">Open</a>');
 		idbtn.click(function(){
 			var val = idinput.val();
-			if(!val || ~val.indexOf(' ') || val.length<6 || val.length>20) return true;
+			if(!val || val.includes(' ') || val.length<6 || val.length>20) return true;
 			options.source = 'download';
 			checkfiles([{name:'Wasabi analysis', id:val}], options);
 		});
@@ -4054,7 +3984,7 @@ function dialog(type,options){
 				var val = $(input).val();
 				if(val.length<15) return true;
 				if(val.match(/^https?\:\/\//)){
-					if(~val.indexOf(window.location.host) && ~val.indexOf('id=')){ //wasabi shareurl
+					if(val.includes(window.location.host) && val.includes('id=')){ //wasabi shareurl
 						urlarr.push(parseurl(val));
 					} else { urlarr.push({url:val}); } //external url
 				} else { urlarr.push({name:'Text input', text:val}); } //raw data	
@@ -4071,7 +4001,7 @@ function dialog(type,options){
 			makewindow("Import data",[],{backfade:false,flipside:'back',icn:'import.png',id:winid});
 		},1000);
 	}
-// import multiblock ensembl alignment (selection dialog)
+	// import multiblock ensembl alignment (selection dialog)
 	else if(type=='alnblocks'){
 		var content = '<div>Imported data contains multiple alignment blocks.<br>Select the one to import.<br><br>'+
 		'<span class="buttongroup" data-bind="foreach:alnblocks">'+
@@ -4084,7 +4014,7 @@ function dialog(type,options){
 		var importwindow = makewindow("Import alignment block", content, {icn:'import.png', id:type, btn:importbtn});
 		ko.applyBindings(ensemblmodel, importwindow[0]);
 	}
-// file export window	
+	// file export window	
 	else if(type=='export'){
 		exportmodel.filename(exportmodel.savename().replace(' ','_'));
 		var flipexport = function(){
@@ -4100,7 +4030,10 @@ function dialog(type,options){
 		}
 		
 		var hasancestral = treesvg.data && treesvg.data.root.children.length==3?true:false;
-		var frontcontent = $('<div class="sectiontitle" style="min-width:320px"><img src="images/file.png"><span>File</span></div>'+
+		var frontcontent = $('<!-- ko ifnot: categories().length -->'+
+		'<span class="note">Error: no data to export! Import a dataset first.</span><!-- /ko -->'+
+		'<!-- ko if: categories().length -->'+
+		'<div class="sectiontitle" style="min-width:320px"><img src="images/file.png"><span>File</span></div>'+
 		'<span class="cell">Data<hr><select data-bind="options:categories, optionsText:\'name\', value:$data.category"></select></span>'+
 		'<span class="cell" data-bind="fadevisible:category().formats.length,with:category">Format<hr><span data-bind="visible:formats.length==1,text:formats[0].name"></span><select data-bind="visible:formats.length>1, options:formats, optionsText:\'name\', value:$parent.format"></select></span>'+
 		'<span class="cell" data-bind="with:format,fadevisible:format().variants.length>1">Variant<hr><select data-bind="options:variants, optionsText:\'name\', value:$parent.variant"></select></span> '+
@@ -4111,16 +4044,16 @@ function dialog(type,options){
 		'<br><br><div class="sectiontitle"><img src="images/gear.png"><span>Options</span></div>'+
 		(hasancestral?'<input type="checkbox" data-bind="checked:includeanc"> Include ancestors':'')+
 		//'  <input type="checkbox" data-bind="visible:curitem().interlace,checked:interlaced"><span class="label" title="Interlace sequence data rows" data-bind="visible:curitem().interlace">Interlaced</span>'+
-		'<div data-bind="slidevisible:~category().name.indexOf(\'Seq\')">'+
+		'<div data-bind="slidevisible:category().name.includes(\'Seq\')">'+
 		'<input type="checkbox" data-bind="checked:includehidden">Include hidden columns<br>'+
 		'&nbsp;&nbsp;Mark masked sequence with <select data-bind="options:maskoptions,value:masksymbol"></select></div>'+
-		'<br data-bind="visible:!~category().name.indexOf(\'Seq\')">&nbsp;&nbsp;Cut names to first <select data-bind="options:[\'\',\'space\',\'digit\',\'punct.\'],value:truncsymbol"></select>, max. <input type="text" class="num" data-bind="value:trunclen" style="margin-top:5px">letters</div>');
+		'<br data-bind="visible:!category().name.includes(\'Seq\')">&nbsp;&nbsp;Cut names to first <select data-bind="options:[\'\',\'space\',\'digit\',\'punct.\'],value:truncsymbol"></select>, max. <input type="text" class="num" data-bind="value:trunclen" style="margin-top:5px">letters</div>');
 		
 		var makebtn = $('<a class="button orange" data-bind="visibility:format">Make file</a>');
 		makebtn.click(function(){ parseexport(); });
 		var frontwindow = makewindow("Export data",frontcontent,{icn:'export.png',id:type,flipside:'front',btn:makebtn,nowrap:true});
 		
-		var backcontent = $('<div class="sectiontitle"><img src="images/file.png"><span data-bind="text:filename()+(~filename().indexOf(\'.\')?\'\':fileext())"></span></div>'+
+		var backcontent = $('<div class="sectiontitle"><img src="images/file.png"><span data-bind="text:filename()+(filename().includes(\'.\')?\'\':fileext())"></span></div>'+
 		'<div class="insidediv" style="max-width:400px;max-height:150px;overflow:auto"><div id="exportpaper" class="paper"></div></div>');
 		var backbtn = $('<a class="button backbtn" style="padding-left:17px;margin-top:25px"><span style="vertical-align:2px">&#x25C0;</span> Options</a>');
 		backbtn.click(function(){ flipexport(); exportmodel.filename(exportmodel.savename().replace(' ','_')); });
@@ -4131,22 +4064,23 @@ function dialog(type,options){
 		ko.applyBindings(exportmodel,$('#'+type)[0]);
 		if(options) parseexport(options);
 	}
-// save data to library	
+	// save data to library	
 	else if(type=='save'){
 		var content = 'Store current data as <span data-bind="visible:savetargets().length==1,text:savetarget().name"></span><select data-bind="visible:savetargets().length>1, options:savetargets, optionsText:\'name\', value:savetarget"></select> analysis in the library.<br><br>'+
 		'<span data-bind="fadevisible:savetarget().type!=\'overwrite\'">Name: <input type="text" class="hidden" id="savename" title="Click to edit" value="'+exportmodel.savename()+'"></span>';
-		var opttitle = expandtitle({title:'Store visualisation settings', desc:'Attach optional metadata'}).css('margin-top','5px');
+		var opttitle = expandtitle({title:'Store visualisation settings', desc:'Save the current settings'});
 		var optdiv = $('<div class="insidediv" style="display:none;margin-bottom:0"><form id="saveform" onsubmit="return false">'+
 		'<input type="checkbox" name="model.zoomlevel" id="zlbox"> zoom level '+
 		'<input type="checkbox" name="position" onclick="getElementById(\'zlbox\').checked=this.checked"> alignment position<br>'+
 		'<input type="checkbox" name="colorscheme,boxborder,font,maskcolor,maskletter,anccolor,ancletter"> sequence colors'+
-		//(model.dnasource()&&!model.isdna()?'<input type="checkbox" name="model.seqtype"> sequence translation':'')+
+		'<input type="checkbox" name="leaflabel,nodelabel"> taxa labels<br>'+
+		'<span data-bind="visible:model.dnasource()&&!model.isdna()"><input type="checkbox" name="model.seqtype"> sequence translation</span>'+
 		'</form></div>');
 		var savebtn = $('<a class="button orange" onclick="savefile(this)">Save</a>');
 		var savewindow = makewindow("Save to libray",[content,opttitle,optdiv],{icn:'save.png', id:type, btn:savebtn});
 		ko.applyBindings(exportmodel,savewindow[0]);
 	}
-// stats about current data
+	// stats about current data
 	else if(type=='info'){
 		var lib = librarymodel;
 		var sharelink = ~model.sourcetype().indexOf('local')? '':lib.shareicon(lib.openitem(),'','source data',lib.importurl);
@@ -4169,66 +4103,16 @@ function dialog(type,options){
 		'<ul data-bind="with:ensinfo"><!-- ko if: type==\'homology\' -->'+
 		'<li>Homologs to <span data-bind="text:species"></span> gene '+
 		'<a data-bind="attr:{href:\'http://www.ensembl.org/\'+species.replace(\' \',\'_\')+\'/Gene/Summary?g=\'+id,target:\'_blank\',title:\'View in Ensembl\'},text:id"></a></li>'+
-		'<!-- /ko --><!-- ko if: ~type.indexOf(\'genetree\') -->'+
-		'<li>Genetree <a data-bind="attr:{href:\'http://www.ensembl.org/\'+(~id.indexOf(\'ENSGT\')?\'Multi/GeneTree?gt=\':\'Gene/Summary?g=\')+id,target:\'_blank\',title:\'View in Ensembl\'},text:id"></a></li>'+
-		'<!-- /ko --><!-- ko if: ~type.indexOf(\'alignment\') -->'+
+		'<!-- /ko --><!-- ko if: type.includes(\'genetree\') -->'+
+		'<li>Genetree <a data-bind="attr:{href:\'http://www.ensembl.org/\'+(id.includes(\'ENSGT\')?\'Multi/GeneTree?gt=\':\'Gene/Summary?g=\')+id,target:\'_blank\',title:\'View in Ensembl\'},text:id"></a></li>'+
+		'<!-- /ko --><!-- ko if: type.includes(\'alignment\') -->'+
 		'<li>EPO alignment: <span data-bind="text:id.replace(\'/\',\': \').replace(\'_\',\' \')"></span></li>'+
 		'<!-- /ko --></ul></div>';
 		
 		var dialogwindow = makewindow("Data information",[list,enslist],{btn:'OK',icn:'info.png',id:type});
 		ko.applyBindings(model,dialogwindow[0]);
 	}
-// start new Prank alignment job
-	else if(type=='align'){
-		var nameinput = $('<input type="text" class="hidden" value="'+exportmodel.savename()+'" title="Click to edit">');
-		var namespan = $('<span class="note">Descriptive name: </span>').append(nameinput);
-		var opttitle = expandtitle({title:'Alignment options', desc:'Click to toggle options', info:'Hover option labels for description'});
-		var tunetitle = expandtitle({title:'Fine-tuning', desc:'Click to toggle additional parameters', css:{'margin-top':'5px'}});
-		var treecheck = $.isEmptyObject(treesvg)?'checked="" disabled=""':''; //new tree needed
-		var writetarget = (exportmodel.savetargets().length>1? '<span class="label" title="Specify the saving place for the new analysis in the library, relative the to the input '+
-		'(currently open) analysis">Save as</span> <select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select>':
-		'The result will be saved as new root')+' analysis in the <a onclick="dialog(\'library\')">library</a>.<br>';
-		exportmodel.savetarget(exportmodel.savetargets()[0]); //default: child||silbing||root
-		
-		
-		var optform = $('<form id="alignoptform" onsubmit="return false">'+writetarget+'<br>'+
-		(model.hiddenlen()?'<input name="includehidden" type="checkbox" data-bind="checked:exportmodel.includehidden">'+
-			'<span class="label" title="Align also '+model.hiddenlen()+' collapsed sequence columns">include collapsed columns</span>':'')+'<hr>'+
-		'<input type="checkbox" name="newtree" '+treecheck+'><span class="label" title="Create a new NJ tree to guide the sequence alignment process (uncheck to use the current tree)">create a guidetree</span>'+
-		'<br><input type="checkbox" checked="checked" name="anchor"><span class="label" title="Use Exonerate anchoring to speed up alignment">alignment anchoring</span> '+
-		'<br><input type="checkbox" name="iterate" data-bind="checked:iterate"><span class="label" title="Iterating re-alignment cycles can improve tree phylogeny. Uncheck this option to keep the input tree intact">'+
-			'iterate alignment for</span> <select name="rounds"><option>2</option><option>3</option><option>4</option><option selected="selected">5</option></select> cycles'+
-		'<br><div class="sectiontitle small"><span class="grey">or</span></div>'+
-		'<input type="checkbox" name="keep"><span class="label" title="Keep current alignment intact and just add sequences for ancestral nodes">keep current alignment</span></form>');
-		var tunediv = $('<div class="insidediv numinput" style="display:none;margin-bottom:0">'+
-		'<input type="checkbox" checked="checked" name="F"><span class="label" title="Force insertions to be always skipped. Enabling this option is generally beneficial but may cause an excess of gaps if the guide tree is incorrect">trust insertions (+F)</span>'+
-		'<br><input type="checkbox" name="nomissing"><span class="label" title="Do not treat gaps as missing data. Use +F for terminal gaps">no missing data</span>'+
-		'<div class="sectiontitle small"><span>alignment model parameters</span></div>'+
-		'<div data-bind="visible:isdna"><input type="checkbox" name="translate">'+
-		  '<span class="label" title="Translate and align cdna with protein or codon model">align as</span>'+
-		    ' <select name="translateto" data-bind="options:transopt,optionsText:\'t\',optionsValue:\'v\'"></select>'+
-			'<br><span class="label" title="Default values are empirical, based on the input data">dna base frequencies</span>'+
-			' <input type="text" name="A" placeholder="A"><input type="text" name="C" placeholder="C"><input type="text" name="G" placeholder="G"><input type="text" name="T" placeholder="T">'+
-			'<br><span class="label" title="Transition/transversion rate ratio in substitution model">K</span> <input type="text" name="kappa" class="num" placeholder="2">'+
-			' <span class="label" title="Purine/pyrimidine rate ratio in substitution model">P</span> <input type="text" name="rho" class="num" placeholder="1"></div>'+
-		'<span class="label" title="Gap opening rate">gap opening</span> <input type="text" name="gaprate" style="width:45px" data-bind="attr:{placeholder:gaprate}">'+
-			' <span class="label" title="Gap extension probability">gap extension</span> <input type="text" name="gapext" data-bind="attr:{placeholder:gapext}" style="width:40px">'+
-		'<div data-bind="visible:iterate" class="sectiontitle small"><span class="label" title="The optimization score is used to assess an alignment iteration result">optimization scoring</span></div>'+
-		'<div data-bind="visible:iterate"><span class="label" title="Indel penalties for alginment scoring (with substitution penalty as 1)">indels with length</span> 1:'+
-		  '<input type="text" name="ind1" placeholder="6" class="num"> 2:<input type="text" name="ind2" placeholder="8" class="num"> 3:<input type="text" name="ind3" placeholder="9" class="num"> 4+:<input type="text" name="ind4" placeholder="10" class="num"></div>'+
-		'<hr><span class="label" title="Specifing a seed number allows reproducing alignment results">random number seed</span> <input type="text" name="seed">'+
-		'<br><input type="checkbox" name="uselogs"><span class="label" title="Slow, but may be needed for very large number of sequences">use log space</span></div>');
-		optform.append(tunetitle,tunediv);
-		var optdiv = $('<div class="insidediv" style="display:none">').append(optform);
-		
-		var alignbtn = $('<a class="button orange">Start alignment</a>');
-		alignbtn.click(function(){ sendjob({form:$('form',optdiv)[0],btn:alignbtn,name:nameinput.val()}); });
-		
-		var dialogwindow = makewindow("Make alignment",['Current sequence data will be aligned with <a href="http://prank-msa.googlecode.com" target="_blank">Prank</a> aligner.<br><hr>',namespan,opttitle,optdiv,'<br>'],{id:type, btn:alignbtn, icn:'icon_prank', nowrap:true});
-		
-		ko.applyBindings(model,dialogwindow[0]);
-	}
-// notifications & submitted job status window
+	// notifications & submitted job status window
 	else if(type=='jobstatus'){
 		communicate('getlibrary'); //refresh data
 		var sections = [];
@@ -4252,7 +4136,7 @@ function dialog(type,options){
 			if(model.noaccount()) realignbtn.text('Account required!');
 			else sendjob({btn:realignbtn, keepalign:$('#keepalign').val(), usecodons:$('#usecodons').val()});
 		});
-		realignnotif.append(realignbtn,'<br>',writetarget,'<hr>');
+		realignnotif.append(realignbtn,'<hr>');
 		
 		var offlinenotif = $('<div data-bind="visible:offline" class="sectiontext"><b>Wasabi is offline</b><br>'+
 		'The Wasabi server is currently out of reach, so some functions may not work.<br>'+
@@ -4301,7 +4185,7 @@ function dialog(type,options){
 		skipbtn.click(function(){ settingsmodel.skipversion(newver); settingsmodel.saveprefs(); });
 		updatebtn = $('<a class="button square orange" data-bind="visible:settingsmodel.autoupdate" title="Auto-update Wasabi">Update</a>');
 		updatebtn.click(function(){ communicate('update','',{btn:updatebtn, success:function(resp){
-			if(~resp.indexOf('Updated')){
+			if(resp.includes('Updated')){
 				updatebtn.text('Update complete');
 				setTimeout(function(){ model.version.remote(model.version.local); closewindow('all'); }, 2000);
 				setTimeout(function(){ makewindow('Wasabi updated','Wasabi is now updated to version '+newver+
@@ -4326,22 +4210,23 @@ function dialog(type,options){
 		'<span class="note">Status:</span> <span data-bind="text:st().str, css:{red:st().str==\'Failed\',label:st().inf},'+
 		'attr:{title:st().inf}"></span><br>'+
 		'<span class="note">Program:</span> <span class="label" data-bind="text:program,attr:{title:parameters}"></span>'+
-		'<a class="button itembtn" data-bind="text:[\'Cancel\',\'Kill\',\'Open\',\'Delete\'][st().nr], css:{red:st().nr!=2},'+
+		'<a class="button itembtn" data-bind="text:[\'Cancel\',\'Stop\',\'Open\',\'Delete\'][st().nr], css:{red:st().nr!=2},'+
 		  'attr:{title:[\'Cancel job\',\'Terminate job\',\'Import and open the results\',\'Delete files\'][st().nr]},'+
 		  'click:st().nr==2?$parent.importitem:$parent.removeitem"></a>'+
-		'<a class="button itembtn round gear" title="Click for more options" style="right:0" data-bind="visible:!running(),'+
+		'<a class="button itembtn round gear" title="Click for more options" style="right:0;border-radius:26px" data-bind="visible:!running(),'+
 		  'click:$parent.jobmenu"><span class="svgicon" style="padding:4px">'+svgicon('gear')+'</span></a><br>'+
 		'<span class="note">Started:</span> <span data-bind="text:msectodate(unwrap(created))"></span><br>'+
 		'<span class="note">Job ID:</span> <span data-bind="text:id"></span><br>'+
+		'<span data-bind="visible:$data.step"><span class="note">Pipeline:</span> step <span data-bind="text:$data.step"></span></span><br>'+
 		'<span class="note">Feedback:</span> <span class="logline action" '+
-		  'data-bind="click:function(itm,evt){ $parent.showfile(itm,evt,itm.logfile) },'+
+		  'data-bind="click:function(itm,evt){ $parent.showfile(itm, evt, itm.logfile) },'+
 		  'attr:{title:\'Last update \'+msectodate(updated)+\'. Click for full log.\'},html:$parent.parselog($data)"></span>'+
 		'</div><div class="insidediv logdiv" style="display:none"></div><hr></div></div>');
 		ko.applyBindings(librarymodel, jobslist[0]); //bind html with data from the library datamodel
 		
 		makewindow("Status overview",[sections,jobslist],{id:type,icn:'status'});
 	}
-// analyses library
+	// analyses library
 	else if(type=='library'){
 	var afterf = options.after? {after:options.after} : {};	
 	communicate('getlibrary', '', afterf); //refresh data
@@ -4377,7 +4262,7 @@ function dialog(type,options){
 		var librarywindow = makewindow("Library of analyses",content,{id:type, header:header, icn:'library.png', nomaxw:true});
 		ko.applyBindings(librarymodel,librarywindow[0]);
     }
-// shortcut for error dialogs
+	// shortcut for error dialogs
 	else if(type=='error'||type=='warning'||type=='notice'){
 		if(typeof(options)!='object'||!options.msg) options = {msg: options};
 		if($('div.popupwindow').length>5 || (options.id && $('#'+options.id).length)){
@@ -4386,7 +4271,7 @@ function dialog(type,options){
 		if(options.msg) makewindow(type.charAt(0).toUpperCase()+type.slice(1), options.msg, {btn:'OK',icn:'warning',id:options.id});
 		else{ console.log('Empty error dialog:'); console.log(options); console.trace(); }
 	}
-// batch filter/collapse for sequence area
+	// batch filter/collapse for sequence area
 	else if(type=='seqtool'){
 		var content = $('<div class="spinnercover"><span>Counting gaps...</span></div>'+
 		'<div class="sectiontitle"><span>Filter alignment columns</span></div><div class="sectiontext">'+
@@ -4424,7 +4309,7 @@ function dialog(type,options){
 		ko.applyBindings(toolsmodel,dialogwindow[0]);
 		setTimeout(function(){toolsmodel.countgaps()},500);
 	}
-//batch edit/hide for tree area
+	//batch edit/hide for tree area
 	else if(type=='treetool'){
 		_paq.push(['trackEvent','tools','tree_editing']); //record event
 		
@@ -4444,7 +4329,7 @@ function dialog(type,options){
 		'<span class="note" data-bind="html:actnote[act()]"></span><br><br><b>③</b> Click "Apply" to edit the tree. Click "Cancel" when done with edits.'+
 		'<div style="color:red;height:20px;margin:10px 0 -30px 5px;" data-bind="text:statustxt,fadevisible:statustxt"></div></div>');
 		
-		var applybtn = $('<a class="button orange">Apply</a>');
+		var applybtn = $('<a class="button orange" title="Make the selected edit and redraw the tree">Apply</a>');
 		applybtn.click(toolsmodel.processTree);
 		var closefunc = function(){ clearselection(); toolsmodel.clearTree(); toolsmodel.prunemode = false; };
 		
@@ -4452,17 +4337,17 @@ function dialog(type,options){
 		clearselection(); model.selmode('rows'); toolsmodel.prunemode = true;
 		ko.applyBindings(toolsmodel, dialogwindow[0]);
 	}
-//system preferences
+	//system preferences
 	else if(type=='settings'){
-		var content = $('<div class="insidediv" style="margin:0;padding:5px;">');
-		content.append('<div class="row" style="width:380px" data-bind="visible:!model.offline()">'+
+		var content = $('<div class="insidediv" style="width:370px;margin:0;padding:5px;">');
+		content.append('<div class="row" data-bind="visible:!model.offline()">'+
 			'<span class="label" title="Session data is saved to analysis library">Autosave after every</span> <select data-bind="options:autosaveopt,value:autosaveint"></select>'+
 			'<a class="button toggle" data-bind="css:{on:autosave},click:toggle.bind($data,autosave)"><span class="light"></span><span class="text" data-bind="text:btntxt(autosave)"></span></a></div>'+
 		'<div class="row">Keep up to <select data-bind="options:[1,5,15,30],value:undolength"></select> <span class="label" title="Actions history enables to undo/redo previous data edits. With large datasets, it may affect the application performance.">actions in undo list</span>'+
 		'<a class="button toggle" data-bind="css:{on:undo},click:toggle.bind($data,undo)"><span class="light"></span><span class="text" data-bind="text:btntxt(undo)"></span></a></div>');
 		
 		var seqwrap = $('<div class="rowwrap" data-bind="visible:model.seqsource()">');
-		var seqrows = $('<div class="row">').append(expandtitle({title:'Colour sequences:', desc:'Click for additional settings', target:seqwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		var seqrows = $('<div class="row">').append(expandtitle({title:'Colour sequences:', desc:'Click for additional settings', target:seqwrap, minh:'34px', maxh:'auto', inline:true}));
 		seqrows.append(' <select data-bind="options:coloropt,value:colorscheme"></select> colour scheme<br>'+
 		//'<span class="note" data-bind="text:colordesc[colorscheme()]"></span><br>'+
 			'<span>Show letters in <select style="margin-top:10px" data-bind="options:fontopt,value:font"></select> with '+
@@ -4473,17 +4358,18 @@ function dialog(type,options){
 			'<select style="margin-top:10px" data-bind="options:anccolors,value:anccolor"></select> backg.</span>');
 		seqwrap.append(seqrows);
 		
-		var treewrap = $('<div class="rowwrap" data-bind="visible:model.treesource()">');
-		var treerows = $('<div class="row">').append(expandtitle({title:'Tree leaf labels:', desc:'Click for additional settings', target:treewrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		var treewrap = $('<div class="rowwrap" data-bind="visible:model.treesource()||leaflabels.length>1">');
+		var treerows = $('<div class="row">').append(model.treesource()? expandtitle({title:'Taxalabels:', desc:'Click for additional settings', target:treewrap, minh:'34px', maxh:'auto', inline:true}) : '<span>Taxalabels:</span>');
 		treerows.append(' <select data-bind="options:leaflabels,value:leaflabel"></select><br>'+
+			'<!-- ko if: model.treesource() -->'+
 			'<span>Tree node labels <select style="margin-top:10px" data-bind="options:nodelabels,value:nodelabel"></select></span><br>'+
 			'<span>Node spot size <select style="margin-top:10px" data-bind="options:csizes,value:csize"></select></span><br>'+
 			'Show scalebar <a class="button toggle" data-bind="css:{on:scalebar},click:toggle.bind($data,scalebar)">'+
-			'<span class="light"></span><span class="text" data-bind="text:btntxt(scalebar)"></span></a>');
+			'<span class="light"></span><span class="text" data-bind="text:btntxt(scalebar)"></span></a><!-- /ko -->');
 		treewrap.append(treerows);
 			
 		var launchwrap = $('<div class="rowwrap">');
-		var launchrows = $('<div class="row">').append(expandtitle({title:'When Wasabi launches:', desc:'Click for additional settings. These settings take effect after reloading the web page'+(settingsmodel.local?' and/or restarting Wasabi server':''), target:launchwrap, minh:'34px', maxh:'auto'}).css('display','inline-block'));
+		var launchrows = $('<div class="row">').append(expandtitle({title:'When Wasabi launches:', desc:'Click for additional settings. These settings take effect after reloading the web page'+(settingsmodel.local?' and/or restarting Wasabi server':''), target:launchwrap, minh:'34px', maxh:'auto', inline:true}));
 		launchrows.append(' open <select style="margin-bottom:10px" data-bind="options:launchopt,value:onlaunch"></select><br>'+
 			'Restore zoom level <a class="button toggle" data-bind="css:{on:keepzoom},click:toggle.bind($data,keepzoom)">'+
 			'<span class="light"></span><span class="text" data-bind="text:btntxt(keepzoom)"></span></a>');
@@ -4506,11 +4392,11 @@ function dialog(type,options){
 		}
 			
 		var uiwrap = $('<div class="rowwrap">');
-		var uirows = $('<div class="row">').append(expandtitle({title:'User interface:', desc:'Click for additional settings', target:uiwrap, minh:'34px', maxh:'171px'}).css('display','inline-block'));
+		var uirows = $('<div class="row">').append(expandtitle({title:'User interface:', desc:'Click for additional settings', target:uiwrap, minh:'34px', maxh:'171px', inline:true}));
 		uirows.append(' all animations <a class="button toggle" data-bind="css:{on:allanim},click:toggle.bind($data,allanim)">'+
 			'<span class="light"></span><span class="text" data-bind="text:btntxt(allanim)"></span></a><br>'+
 			'<span class="label" style="margin-top:10px" title="Disable window animations in case of blurry text">Dialog window animations</span>'+
-			'<a class="button toggle" style="margin-top:8px;" data-bind="css:{on:windowanim},click:toggle.bind($data,windowanim)"><span class="light"></span>'+
+			'<a class="button toggle" style="margin-top:10px;" data-bind="css:{on:windowanim},click:toggle.bind($data,windowanim)"><span class="light"></span>'+
 			'<span class="text" data-bind="text:btntxt(windowanim)"></span></a>');
 		uiwrap.append(uirows, '<div class="row">'+
 		    '<span class="buttonrow"><span class="label" title="Click on bottom-left edge of the top menubar to toggle its display mode">Thinner top menubar</span>'+
@@ -4523,21 +4409,24 @@ function dialog(type,options){
 			  '<a class="button toggle" data-bind="css:{on:ladderlib},click:toggle.bind($data,ladderlib)"><span class="light"></span><span class="text" data-bind="text:btntxt(ladderlib)"></span></a></span>'+
 		'</div>'+
 		'<div class="row"><span class="label" title="The analysis sharing links are only useful when Wasabi server is accessible to other computers">Library data sharing links</span>'+
-			'<a class="button toggle" data-bind="css:{on:sharelinks},click:toggle.bind($data,sharelinks)"><span class="light"></span><span class="text" data-bind="text:btntxt(sharelinks)"></span></a></div>');
+			'<a class="button toggle" style="margin-top:-3px" data-bind="css:{on:sharelinks},click:toggle.bind($data,sharelinks)"><span class="light"></span><span class="text" data-bind="text:btntxt(sharelinks)"></span></a></div>');
 		
 		content.append(launchwrap, seqwrap, treewrap, uiwrap);
-		content.append('<div class="row" data-bind="visible:userid"><span class="label" data-bind="attr:{title:\'User ID: \'+userid()}">User account</span> <span class="progressline" style="width:150px;margin-left:20px" '+
+		content.append('<div class="row" data-bind="visible:userid"><span class="label" data-bind="attr:{title:\'User ID: \'+userid()}">User account</span> <span class="progressline" style="width:140px;margin-left:20px" '+
 			'data-bind="visible:datalimit, attr:{title:dataperc()+\' of \'+numbertosize(datalimit,\'byte\')+\' server space in use\'}">'+
 			'<span class="bar" data-bind="style:{width:dataperc}"></span><span class="title" data-bind="html:\'Library size: \'+numbertosize(datause(),\'byte\')"></span></span>'+
 			'<a class="button toggle" style="margin-top:-2px;padding-bottom:2px" onclick="dialog(\'account\')">Settings</a><br><br>'+
 			'<span class="label" title="This web browser remembers and opens your account URL when you go to Wasabi web page. Disable on public computers">Remember me on this computer</span> '+
 			'<span class="svgicon share" style="margin-left:35px" title="View/share your account URL" onclick="dialog(\'share\',{library:true})">'+svgicon('link')+'</span>'+
-			'<a class="button toggle" data-bind="css:{on:keepuser},click:toggle.bind($data,keepuser)"><span class="light"></span><span class="text" data-bind="text:btntxt(keepuser)"></span></a></div>');
+			'<a class="button toggle" style="margin-top:-3px" data-bind="css:{on:keepuser},click:toggle.bind($data,keepuser)"><span class="light"></span><span class="text" data-bind="text:btntxt(keepuser)"></span></a></div>');
+			
+		var savebtn = $('<a class="button" title="Store the preferences. Or click "x" to keep the settings for this session only.">Save</a>');
+		savebtn.click(settingsmodel.saveprefs);
 				
-		var dialogwindow = makewindow('Settings',content,{id:type, icn:type, btn:'OK', closefunc:settingsmodel.saveprefs});
-		ko.applyBindings(settingsmodel,dialogwindow[0]);
+		var dialogwindow = makewindow('Settings', content, {id:type, icn:type, btn:savebtn});
+		ko.applyBindings(settingsmodel, dialogwindow[0]);
 	}
-//translate sequnces
+	//translate sequnces
 	else if(type=='translate'){
 		var header = '<div style="width:420px;margin-bottom:20px">Display the sequences as <span class="buttongroup">'+
 		'<a class="button left" onclick="translateseq(\'DNA\')" data-bind="css:{pressed:isdna,disabled:!dnasource()}">nucleotides</a>'+
@@ -4568,7 +4457,7 @@ function dialog(type,options){
 		makewindow("Importing cdna",[],{backfade:false,flipside:'back',icn:'import.png',id:type});
 		ko.applyBindings(model,windowdiv);
 	}
-//about/help/contact window
+	//about/help/contact window
 	else if(type=='about'){
 		var content = $('<div class="sectiontitle"><span class="label" title="Current version: '+model.version.local+'">About Wasabi</span></div><div class="sectiontext">'+
 		'Wasabi is a browser-based application for the visualisation and analysis of multiple alignment molecular sequence data.<br>'+
@@ -4585,7 +4474,7 @@ function dialog(type,options){
 		'You can contact us via our <a href="http://wasabiapp.org/feedback" target="_blank">feedback webpage &gt;&gt;</a></div>');
 		var dialogwindow = makewindow('About',content,{id:type, icn:'info', btn:'OK'});
 	}
-//welcome dialog for a new (previously) created user
+	//welcome dialog for a new (previously) created user
 	else if(type=='newuser'){
 		var expires = !isNaN(settingsmodel.useraccounts)? settingsmodel.useraccounts : '';
 		var note = unwrap(settingsmodel.tmpuser)?'Your temporary account is removed after 24 hours':expires?'Neglected user accounts are removed after '+expires+' days of last visit':'';
@@ -4602,7 +4491,7 @@ function dialog(type,options){
 		var dialogwindow = makewindow('Welcome',str,{id:type, icn:'info', btn:'OK'})[0];
 		ko.applyBindings(settingsmodel,dialogwindow);
 	}
-//user account settings window
+	//user account settings window
 	else if(type=='account'){
 		communicate('checkuser','',{parse:'JSON', retry:true, success:function(resp){settingsmodel.username(resp.username||'anonymous'); settingsmodel.usermail(resp.email||''); }});
 		var content = $('<div><div class="sectiontitle"><span>Wasabi user account</span></div><span data-bind="visible:datalimit">You currently use <span data-bind="text:dataperc"></span> of <span data-bind="html:numbertosize(datalimit,\'byte\')"></span> server disk space<br>allocated to your analysis library.<br></span><br>'+
@@ -4614,8 +4503,8 @@ function dialog(type,options){
 		var erasebtn = $('<a class="button red toggle">Erase data</a>');
 		erasebtn.click(function(){
 			if(erasebtn.text()!='Confirm'){ erasebtn.text('Confirm'); setTimeout(function(){ erasebtn.text('Erase data'); },3000); }
-			else{ communicate('rmdir', {id:settingsmodel.userid()},{btn:erasebtn, nosync:true, after:function(){
-				localStorage.removeItem('userid');
+			else{ communicate('rmdir', {id:settingsmodel.userid()}, {btn:erasebtn, nosync:true, after:function(){
+				storage('userid', null);
 				settingsmodel.userid('');
 				window.location = window.location.pathname;
 			}}); }
@@ -4635,12 +4524,12 @@ function dialog(type,options){
 		var windowdiv = makewindow('Account settings',content,{id:type, icn:'info', btn:[savebtn,'Cancel']})[0];
 		ko.applyBindings(settingsmodel,windowdiv);
 	}
-//display local error log content
+	//display local error log content
 	else if(type=='errorlog'){
 		var errorlog = '<div class="insidediv"><ul class="wrap"><li>'+model.errors().replace(/ \*/g,'</li><li>')+'</li></ul></div>';
 		makewindow('Error log',['Wasabi server errors:',errorlog],{id:type, icn:'info', btn:'OK'});
 	}
-//data sharing window
+	//data sharing window
 	else if(type=='share'){
 		var opt = options || {};
 		if(!opt.id) opt.id = librarymodel.openid();
@@ -4683,7 +4572,7 @@ function dialog(type,options){
 		setTimeout(function(){input[0].select()},500);
 		var email = $('<input style="width:183px" type="email" placeholder="e-mail address">');
 		var emailbtn = $('<a class="button square" style="margin-left:3px">Send</a>');
-		var sendmail = function(){ if(~email.val().indexOf('@')) communicate('sendmail',{email:email.val(),url:input.val()},{btn:emailbtn,restore:true}); }
+		var sendmail = function(){ if(email.val().includes('@')) communicate('sendmail',{email:email.val(),url:input.val()},{btn:emailbtn,restore:true}); }
 		emailbtn.click(sendmail);
 		content.push(input, '<div class="inputdesc">Press '+ckey+'+C to copy the link to clipboard</div>', shareopt);
 		if(settingsmodel.email) content.push('Share the link: ', email, emailbtn);
@@ -4691,737 +4580,270 @@ function dialog(type,options){
 		var windowdiv = makewindow('Share data',content,{id:type, icn:'info', btn:['OK',openbtn]})[0];
 		ko.applyBindings(settingsmodel,windowdiv);
 	}
-//plugin window
-	else if(plugins[type]){
-		var pmodel = plugins[type];
-		pmodel._submitted(false);
-		var html = pmodel.buildUI();
-		var pwindow = makewindow(pmodel._title, html.content, {id:type, btn:html.btn, icn:pmodel._icon.img, header:html.header, plugin:pmodel._path});
-		try{ ko.applyBindings(pmodel, pwindow[0]); }catch(e){
-			console.log('Wasabi plugin error when binding datamodel to HTML: '+e);
-			console.log("Plugin datamodel dump:"); console.log(pmodel);
+	//plugin window
+	else if(type=='plugin'){
+		var plugin = this; //passed from the menulauncher
+		if(!$('#plugins').length){ //make new window
+			var title = '<span data-bind="text:Pline.pipeline().length>1?title+\' pipeline\':title, attr:{title:program+\' \'+version}"></span>';
+			var icon = plugin.icon.img? '?plugin='+plugin.path+'&file='+plugin.icon.img : 'gear';
+			var pwindow = makewindow(title, '', {icn:icon, closefunc:Pline.clearPipeline, id:'plugins'});
+			try{ ko.applyBindings(plugin, $('div.windowtitle', pwindow)[0]); }catch(e){ console.log('Plugin title binding error: '+e); }
 		}
+		plugin.draw('#plugins .windowcontent'); //add plugin interface		
 	}
 	return false;
 }
+	
 
-//=== Wasabi plugins === //
-//plugins container
-var plugins = {};
-
-//datamodel for holding plugin state
-pluginModel = function(pdata, pname){
-	//builtin tracked values
-	this.sequence = model.seqtype;
-	this.tree = model.treesource;
-	//plugin state
-	this._errors = [];
-	this._submitted = ko.observable(false);
-	this._program = '';
-	this._version = '';
-	this._path = pname; //plugin json filepath
-	this._prefix = '-'; //parameter prefix
-	this._valuesep = ' '; //parameter/value separator
-	this._libraryname = ko.observable('my analysis');
-	this._makeids = false;
-	this._title = pname || 'Wasabi plugin';
-	this._icon = {};
-	this._outfile = '';
-	this._json = pdata;
-	this._debug = false;
-	this._selopt = {};
-	this._ready = false;
-	this.registerPlugin();
-};
-
-//construcor for creating plugin interface
-pluginModel.prototype = {
-	//API error feedback
-	_error: function(errtxt, iswarning){
-		var addtxt = iswarning?'warning':'error';
-		if(this._curopt){ addtxt += ' when parsing "'+this._curopt+'"'; }
-		var errtxt = this._title+' Wasabi plugin '+addtxt+': '+errtxt+'!';
-		if(!iswarning) this._errors.push(errtxt);
-		console.log(errtxt);
-		return '';
+//Extend the plugin system with Wasabi integration
+var wasabi_extensions = {
+	options: { //builtin options for all plugins
+		'imported sequence': model.seqsource,
+		'imported tree': model.treesource
 	},
 	
-	//log debug messages
-	_log: function(logtxt, optname){
-		if(!this._debug) return;
-		if(!optname) optname = this._curopt||'';
-		if(typeof(this._debug)=='string' && this._debug!=optname) return;
-		console.log(this._title+' plugin'+(optname?' => option "'+optname+'"' : '')+': '+logtxt);
+	settings: { //Pline settings
+		sendmail: 'pipelines', //enable notifications emails only for pipelines
+		email: settingsmodel.email && settingsmodel.usermail(),
+		makeids: false,
+		UIcontainer: '#plugins .windowcontent'
 	},
 	
-	//find option-bound observables
-	getOption: function(optname){
-		if(optname in this) return this[optname];
-		for(var trackname in this){ if(this[trackname].option && this[trackname].option == optname) return this[trackname]; }
-		this._log('getOption: option "'+optname+'" not found');
-		return false;
-	},
-	
-	//parse API keywords to Javascript (observables/logic/quoted text)
-	processValue: function(expr){
-		var self = this;
-		var inputexpr = expr;
-		var obsStr = function(name){ //detect a tracked option name (observable) => format for HTML
-			var html_str = typeof(self[name])=='function'? "$data['"+name+"']()" : false;
-			if(html_str){
-				if(!self._ready) self._log('condition/value is using tracked '+(self[name].option?'option':'name')+' "'+name+'"');
-				if(self[name].default) html_str = "("+html_str+"||$data['"+name+"'].default)"; //consider also the default value
-			}
-			return html_str;
-		};
-		var quote  = function(exp){ try{ JSON.parse(exp) }catch(e){ return "'"+exp+"'" }; return exp; } //quote strings
-		var api = {'is':'==', 'is equal to':'==', ' is disabled':'.disabled', ' is enabled':'.disabled==false', 'equals':'==', ' contains':'.indexOf(', 'is not':'!=', 'is less than':'<', 
-			'is more than':'>', 'not ':'!', 'no ':'!', 'invert ':'!', 'no':'false', 'off':'false', 'disable':'false', 
-			'yes':'true', 'on':'true', 'ticked':'true', 'checked':'true', 'selected':'true', 'and':'&&', 'or':'||', 'imported':''};
-
-		if(typeof(expr)=='string'){
-			expr = expr.trim();
-			var addtail = false, tail = '';
-			if(obsStr(expr)){ //input string is a tracked option name
-				expr = obsStr(expr);
-			}
-			else{  //find and parse quotes, API logic expressions, tracked names
-			  expr = expr.replace(/".+"|'.+'| is disabled| is enabled| contains|is equal to|is not|is less than|is more than|no |not |invert |[\w\-\.]+/g, 
-			  function(str_token, token_index){
-				if(str_token == ' contains') addtail = true; //add indexOf() closing bracket (to the next token)
-				else if(addtail){ tail = ')'; addtail = false; }
-				else tail = '';
-				
-				if(str_token.indexOf('"')==0){ //escaped double quotes => literal string (skip tracked name check)
-			  		return quote(str_token.replace(/"/g,""))+tail;
-			  	}
-			  	else if(str_token.indexOf("'")==0){ //single-quoted tracked name (may contain spaces)
-			  		var unquoted = str_token.replace(/'/g,"");
-			  		return (obsStr(unquoted) || str_token)+tail;
-			  	}
-			  	else if(str_token=="invert" && token_index>(expr.length-7) && self._curopt){ //invert the option's value
-			  		return "!"+obsStr(self._curopt)+tail;
-			  	}
-			  	else{ return (obsStr(str_token) || api[str_token] || quote(str_token))+tail; }
-			  });
-			}
-			expr = expr.replace(/' '/g, " ");
-			//if(!self._ready && inputexpr!=expr) self._log('processValue: '+inputexpr+' => '+expr);
-			return expr;
-		} else { return typeof(expr)=='undefined'? "" : JSON.stringify(expr); } //stringify numbers etc.
-	},
-
-	//Translate API conditional rules to Javascript ('yes/no/is not/{...}','result of rule',['upperLevelObsName'])
-	processRule: function(rule, result, rootvar){
-		if(typeof(result)=='undefined') result = "true";
-		var str = "";
-		
-		if($.isArray(rule)){ //[rule1,rule2,...] => apply sequentially
-			for(var i=0, tmp=''; i<rule.length; i++){
-				tmp = this.processRule(rule[i], result, rootvar);
-				if(i<rule.length-1) tmp = tmp.split(":")[0]+":";
-				str += tmp;
-			}
-		}
-		else if(typeof(rule)=='object'){ //unpack rule objects
-			if(Object.keys(rule).length>1){ //{rule1:res1,rule2:res2} => [{rule1:res1},{rule2:res2}]
-				var rulearr = [];
-				$.each(rule,function(subrule,subresult){ var ruleobj={}; ruleobj[subrule] = subresult; rulearr.push(ruleobj); });
-				str = this.processRule(rulearr, result, rootvar);
-			} else {  //{'rule':result}
-				varname = Object.keys(rule)[0];
-				varresult = rule[varname];  //if {"varname":{varval:result}} else {"varname":result}
-				if(typeof(varresult)=='object') str = this.processRule(varresult, result, varname);
-				else str = this.processRule(varname, varresult, rootvar);
-			}
-		}
-		else{  //translate preprocessed rule
-			if(typeof(rule)=='number'){ try{ return JSON.parse(rule); }catch(e){ self._error('processRule("'+rule+'") => '+e); return ""; }}
-			else if(typeof(rule)!='string'){ return JSON.stringify(rule); }
-			
-			rule = this.processValue(rule);
-			result = this.processValue(result);
-			rootvar = this.processValue(rootvar);
-							
-			var compare = function(rule){ //add '==' if needed (rule is rootvarValue)
-				return ~["!","=","<",">","~","."].indexOf(rule.charAt(0))? rule: "=="+rule;
-			}
-			str = rootvar? rootvar+compare(rule) : rule;
-			if(rootvar && ~str.indexOf(".indexOf")) str = "~"+str+")";
-			var negresult = (!result||result=="true")?"false":result=="false"?"true":"\'\'";
-			if(result!=="true" || rootvar) str += "?"+result+":"+negresult;
-		}
-		//if(rule && !rootvar && !this._ready) this._log(str);
-		return str;
-	},
-	
-	//rule string => processRule string => function
-	ruleFunc: function(rule, appendstr){
-		var funcstr = this.processRule(rule).replace(/\$data/g,"this").replace(/\w+\(\)/g,"this.$&")+(appendstr||'');
-		this._log(funcstr);
-		try{ var rfunc = new Function("return "+funcstr); }catch(e){ return this._error("Faulty rule function ("+e+"): "+rule+" => "+funcstr); }
-		//this._log('parsed rule function: '+funcstr);
-		return rfunc.bind(this);		
-	},
-
-	//Create a plugin interface (input) element
-	processOption: function(data, prefix, disable){
-		var self = this;
-		var firstrun = !self._ready; //first JSON parsing pass (datamodel setup)
-		var elems = []; //additional html elements
-		
-		if(self._selopt && !firstrun){ //second pass: add unregistered options
-			$.each(self._selopt, function(optname, optval){
-				if(!self[optname]){ //add as hidden options
-					self._log('New option "'+optname+'" = '+optval+' added from a selection list.');
-					self[optname] = ko.observable(optval);
-					elems.push('<input type="hidden" name="'+prefix+optname+'" data-bind="value:$data[\''+optname+'\']">');
-					self._json.options.push({"hidden":self._selopt[optname], "option":optname}); //add to input json for future passes
-				} else {
-					self._log('Option "'+optname+'" value was changed by a selection: \''+self[optname]()+'\' => '+optval);
-					self[optname](optval);
-				}
-			});
-			self._selopt = false;
-		}
-		
-		if(typeof(data)=='string'){ //string => user interface text
-			data = data.replace(urlregex, makeurl);
-			var box = $('<span>'+data+'</span>');
-			$("a", box).each(function(i,el){ if(this.hasAttribute("href")) this.setAttribute("target","_blank"); });
-			return box;
-		} else if (typeof(data)!='object') return '';
-		prefix = data.prefix||prefix||self._prefix; //(local|parent|global) prefix for the command-line arg
-		
-		var types = {"text":"", "string":"text", "textbox":"text", "number":"text", "int":"text", "float":"text", "bool":"checkbox", 
-			"tickbox":"checkbox", "switch":"checkbox", "checkbox":"", "hidden":"", "dirpath":"hidden", "select":"", "file":""};
-		var otype = data.type && (data.type in types)? data.type : "text"; //option input type
-		var classname = "";
-		
-		for(var k in data){
-			if(k in types){ //found {type:string} shorthand syntax
-				if(data.type) self._error('Duplicate attribute: "type":'+data.type+' overriden with shorthand type: "'+k+'"', 'warn');
-				else if(otype!="text") self._error('Duplicate attribute: shorthand type: "'+otype+'" overriden with another type: "'+k+'"', 'warn');
-				otype = k;
-				if(k=="file" && !data.source) data.source = data[k]; //fill in "source" attribute
-				else if((k=="hidden"||k=="output") && !("default" in data)) data.default = data[k]; //fill in "default"
-				else{
-					if(!("title" in data)) data.title = data[k]; //fill in "title"
-					if(!("option" in data) && !data.name && k!="select"){ //fill in "option"
-						if(data[k].match(/[^a-zA-Z0-9_-]/)) self._log('Cannot set "'+data[k]+'" as program argument name. Forgot to set "name" attribute?');
-						else data.option = data[k];
-		}}}} //for type
-		
-		if(!data.name){
-			data.name = data.option||"trackName"+Object.keys(self).length; //register tracking variable name (and store for future passes)
-		}
-		
-		//track option input value changes
-		var trackname = self._curopt = data.name;
-		if(!(trackname in self)){
-			self[trackname] = ko.observable('');
-			if(!firstrun) self._log('Trackname "'+data.name+'" has been created (again?) after the initial plugin setup.');
-		} else if(firstrun){ //repeating option/tracking name in JSON
-			self._log('Repeating option/name "'+data.name+'". Reusing the trackingvar.');
-		}
-		var trackvar = self[trackname];
-		var kovar = "$data['"+trackname+"']"; //tracker reference for html
-		
-		//auto-format numerical input
-		if(~["number","float","int"].indexOf(otype)){
-			trackvar.extend({format: otype});
-			classname = "num";
-		}
-		
-		//option value=dirpath+filename (full path in server)
-		if(firstrun && otype=="dirpath") data.default = "'./"+(data.default||data.value||'')+"'";
-		
-		//option type => html input type (text|checkbox|hidden|select|file)
-		if(types[otype]) otype = types[otype];
-		trackvar.otype = otype;
-		
-		//create input element
-		var el = $("<"+(otype=="select"?"select":"input")+">").attr("type", otype);
-		if(classname) el.addClass(classname);
-		
-		//format hidden options
-		if(otype=="hidden"){
-			if(!("default" in data)) data.default = data.value || true; //hidden option needs a value to be included
-			if(prefix=='>'){ //output filename
-				if(firstrun){
-					if(typeof(data.default)=='string' && data.default.length){
-						if(!self._outfile) self._outfile = data.default; //set as default output file
-						data.option = prefix+data.default; //change to positional param
-						data.default = true;
-					} else self._error('Add filename (as "default" attribute) for writing output stream to file (>filename).');
-				}
-				el.attr("trackname", trackname);
-			}
-		}
-		
-		//register named program parameter
-		if("option" in data){
-			if(!("option" in trackvar)){
-				if(~data.option.indexOf(' ')) self._error('Space found in option name: "'+data.option+'"');
-				if(/^\W/.test(data.option)) prefix = "";  //prefix already in the option name
-				trackvar.option = data.option;
-				trackvar.argname = prefix+data.option;
-			}
-			el.attr("name", trackvar.argname);
-		}
-		
-		//bind interface input to the tracked option value
-		kobind = (otype=="checkbox"?"checked":"value")+":"+kovar+", name:'"+trackname+"'";
-		if(data.fixed) kobind += ", disable:"+self.processRule(data.fixed); //fixed option value (disabled input)
-		
-		//log input value changes
-		if(self._debug){ trackvar.subscribe(function(newval){
-			self._log((data.option?'option "'+data.option:'input "'+trackname)+'" value changed to '+JSON.stringify(newval), trackname);
-		});}
-		
-		//build a selection list of options/values
-		if(otype=="select"){
-			if(!$.isArray(data.selection)){ self._error('"select" option needs the "selection" array'); data.selection = []; }
-			var selarr = trackname+"_selection";
-			if(!(selarr in self)){ //first pass: parse selection items from JSON
-				self[selarr] = []; //list of selection items
-				trackvar.syncopts = {};
-				self._log('parsing selection list with '+data.selection.length+' items');
-
-				for(var sindex in data.selection){ //parse selection list items
-					var seldata = data.selection[sindex]; //input: data for the list item
-					var selitem = {t:'', v:'', d:'', opt:{}}; //output: parsed list item
-					if(typeof(seldata)=='string' || typeof(seldata)=='number'){ selitem.t = selitem.v = seldata; } //item is string/number
-					else if(typeof(seldata)=='object'){ //parse item object
-						//fill in missing item attributes: "default"/"option"=>"title"=>"value"
-						var optval = typeof(seldata.option)=="string"? seldata.option : '';
-						var defval = typeof(seldata.default)=="number" || (typeof(seldata.default)=="string" && seldata.default!="yes")? seldata.default : '';
-						if(!("title" in seldata)) seldata.title = defval || optval || '';
-						else if(typeof(seldata.title)=='object'){ self._error('selection item "title" needs to be a string (not object)'); continue; }
-						if(!("value" in seldata)) seldata.value = seldata.title;
-						else if(typeof(seldata.value)=='object'){ self._error('selection item "value" needs to be a string (not object)'); continue; }
-						selitem.t = seldata.title; selitem.v = seldata.value; 
-						if(typeof(seldata.desc)=='string') selitem.d = seldata.desc; //list item description
-						if("default" in seldata && selitem.v){ trackvar.defaultval = selitem.v; trackvar(selitem.v); } //initially selected item
-						else if(selitem.v==='' && !("defaultval" in trackvar)) trackvar.defaultval = '';
-						
-						if(seldata.option){ //register other options set by the selection item
-							if(!$.isArray(seldata.option)) seldata.option = [seldata.option];
-							for(var optindex in seldata.option){
-								var selopt = seldata.option[optindex];
-								if(typeof(selopt)=='string'){ selitem.opt[selopt] = true; }
-								else if(typeof(selopt)=='object'){ $.extend(selitem.opt, selopt); }
-								else{ self._error('options in the selection item "option" attribute need to be either string or object'); continue; }
-							}
-							for(optname in selitem.opt){
-								trackvar.syncopts[optname] = ''; //store a linked option for value tracking
-								if(!(optname in self._selopt)) self._selopt[optname] = ''; //register all options from selection lists
-							}
-						}	
-					}else{ self._error('selection item needs to be string, number or object'); }
-					//add the selection item to the selection list
-					self[selarr].push(selitem);
-					self._log('added selection item: '+JSON.stringify(selitem));
-				} //foreach selection item
-				
-				if(!("defaultval" in trackvar)) self[selarr].unshift({t:"Choose option", v:""}); //unselected by default
-				if(Object.keys(trackvar.syncopts).length) self._log('Found linked options: '+Object.keys(trackvar.syncopts));
-				else trackvar.syncopts = false;
-				
-				//track the selected list item => change any linked options/description
-				trackvar.desc = ko.observable('');
-				trackvar.sindex = ko.computed(function(){
-					var selectedval = trackvar();
-					//self._log('selection "'+trackname+'" was changed to "'+selectedval+'"');
-					var selectedind = indexOfObj(self[selarr], 'v', selectedval);
-					if(selectedind<0) return selectedind; //setup run
-					var selecteditem = self[selarr][selectedind];
-					trackvar.desc(selecteditem.d); //set item description
-					if(trackvar.select_inprogress) return selectedind; //being changed by linked options
-					//push new values to linked options
-					trackvar.select_inprogress = true; //prevent selection=>options=>selection loop 
-					if(trackvar.restoreopt){ //restore the option values set by the previous selection
-						$.each(trackvar.restoreopt, function(optname,optv){ self.getOption(optname)(optv); });
-					}
-					trackvar.restoreopt = {};
-					$.each(selecteditem.opt, function(optname, newval){ //set option values linked to the selected item
-						self._log('selection "'+selectedval+'" is setting option: "'+optname+'" = '+newval);
-						var optobs = self.getOption(optname);
-						if(!optobs){ //missing option (first parsing run). postpone to second pass.
-							self._selopt[optname] = newval;
-							self._log('postponing for second pass: "'+optname+'" = '+self._selopt[optname]);
-						} else {
-							trackvar.restoreopt[optname] = optobs();  //store option original value
-							optobs(newval); //change linked option value
-						}
-					});
-					trackvar.select_inprogress = false;
-					return selectedind; //index of the selected item
-				});
-				
-				//set up user-extendable selection list
-				if(data.extendable){
-					trackvar.edit = ko.observable(false); //track edit state
-					trackvar.editSave = function(){
-						var editindex = trackvar.edit();
-						if(editindex===false){ //enable edit mode
-							trackvar.edit(trackvar.sindex());
-						} else { //save edits
-							if(editindex==-1){ //add new selection item
-								var newv = trackvar();
-								self[selarr].push({t:newv, v:newv});
-							} else { self[selarr][editindex].v = newv; }
-							trackvar.edit(false);
-						}
-					};
-					trackvar.rem = function(){ //remove a selection item
-						var editindex = trackvar.edit();
-						if(editindex==-1){ trackvar(self[selarr][sindex].t); }
-						else{ self[selarr].splice(editindex, 1); }
-						self[selarr].edit(false);
-					};
-				}	
-			} //selection items first pass
-			else if(trackvar.syncopts && !("syncfunc" in trackvar)){ //second pass: set up linked options=>selection items feedback
-				trackvar.syncfunc = ko.computed(function(){ //track value change in any of the linked options
-					for(var optname in trackvar.syncopts){ //check current option values
-						trackvar.syncopts[optname] = self[optname]();
-						if(trackvar.syncopts[optname]=='' && self[optname].otype=='text' && ("defaultval" in self[optname])){
-							trackvar.syncopts[optname] = self[optname].defaultval; //use default value for empty text inputs
-						}
-					}
-					if(trackvar.select_inprogress) return false;
-					//self._log('Checking selection list "'+trackname+'" for match to linked options: '+JSON.stringify(trackvar.syncopts));
-					var match = false;
-					var defaultsel = '';
-					$.each(self[selarr], function(sind, selitem){ //select an item if it matches its {option:value} set
-						if(!selitem.opt || !Object.keys(selitem.opt).length){
-							if("defaultval" in trackvar && trackvar.defaultval==selitem.v) defaultsel = selitem.v;
-							return true; //skip non-option items
-						}
-						match = true; //reset flag
-						$.each(selitem.opt, function(optname, optval){
-							if(!(optname in trackvar.syncopts)){
-								self._log('Unexpected linked option "'+optname+'" in selection "'+trackname+'"');
-								match = false; return false;
-							}
-							if(trackvar.syncopts[optname] != optval){ match = false; return false; }
-						});
-						if(match){ //selection item passed the filter
-							match = selitem;
-							return false;
-						}
-					});
-					if(match){ //set the selection to the matching list item
-						self._log('Found match to linked options '+JSON.stringify(match.opt)+'. Changing selection to '+match.v, trackname);
-						if(trackvar() != match.v){
-							trackvar.restoreopt = false;
-							trackvar.select_inprogress = true; //prevent selection=>option=>selection loop
-							trackvar(match.v);
-							trackvar.select_inprogress = false;
-						}
-					} else { //option values don't match any of the list items.
-						var cursel = self[selarr][trackvar.sindex()];
-						if(cursel.opt && Object.keys(cursel.opt).length){
-							self._log('No match to linked options: clearing selection', trackname);
-							trackvar(defaultsel);
-						} else self._log('No match to linked options: keeping current selection', trackname); //selected item has no linked options
-					}
-					return true;
-				});
-			} //selection items second pass (linked options feedback)
-			
-			elems.push(svgicon('info',{span:true, attr:'data-bind="visible:'+kovar+'.desc, attr:{title:'+kovar+'.desc}"'}));
-			
-			var dstr = "option";
-			if(data.extendable){ //editable selection list
-			  if(data.extendable=="configurations"){ dstr = 'preset'; data.title = "Saved options:"; }
-			  elems.unshift('<input data-bind="fadevisible:!isNaN('+kovar+'.edit()),value:'+kovar+'" style="width:180px" placeholder="Type new '+dstr+'"></input>'+
-			  '<a class="button small square" data-bind="click:'+kovar+'.editSave,text:isNaN('+
-				kovar+'.edit())?\'Edit\':\'Save\',attr:{title:isNaN('+kovar+'.edit())?\'Edit this '+dstr+'\':\'Save changes\'"></a> '+
-				'<a class="button small square" data-bind="visible:'+kovar+'.edit()>0,click:function(){'+kovar+'(\'\');'+kovar+'.edit(-1)}" title="Add new '+dstr+'">New</a>'+
-				'<a class="button small square red" data-bind="visible:!isNaN('+kovar+'.edit()),click:'+kovar+'.rem"  title="Remove this '+dstr+'">Remove</a>');	
-			}//if extendable
-			
-			kobind += ", options:"+selarr+", optionsValue:'v', optionsText:'t', valueAllowUnset:true";
-		}//if select
-		
-		if("default" in data){ kobind += ", default:"+self.processRule(data.default); } //set conditional default value (via custom binding)
-		
-		var existrule = data.enable||data.disable||disable;
-		if(existrule && !firstrun && !trackvar.disabled){ //second pass: (conditionally) enable/disable option
-			var rulefunction = self.ruleFunc(existrule);
-			trackvar.disabled = ko.computed(function(){
-				var isdisabled = rulefunction();
-				if(data.enable) isdisabled = !(isdisabled);
-				if(isdisabled) trackvar(otype!='hidden'&&("defaultval" in trackvar)?trackvar.defaultval:""); //reset disabled option's input value
-				return isdisabled;
-			});
-		}
-		
-		if(otype=="file"){
-		  var format = data.fileformat||"fasta";
-		  el.attr({"type":"hidden", "fileformat":format, "trackname":trackname});
-		  var source = data.source || "current sequence";
-		  
-		  if(source.substr(0,7)=="current"){ //data source: currently imported dataset
-			self._log('fileinput source: imported data');
-			el.attr("source", source);
-			if(!firstrun && !trackvar.fileformat){ //second pass: set up fileinput value
-			  trackvar.filetype = ko.computed(function(){ //file option value => 'seqtype'||'tree'||'seqtype tree'||false
-				var sourcetype = source.split(' ')[1]||'data', seq = self.sequence(), tree = self.tree()?'tree':'';
-				var fdatatype = sourcetype=='sequence'? seq : sourcetype=='tree'? tree : (seq||tree)?seq+' '+tree : '';
-				var isdisabled = trackvar.disabled&&trackvar.disabled();
-				var optvalue = isdisabled? false : fdatatype;
-				trackvar(optvalue); //change option value to imported filetype (or false if disabled)
-				return optvalue;
-			  });
-			  trackvar.fileformat = format;
-			}
-		  } else { //data source: user-supplied file
-			if(!trackvar.fileformat){
-				trackvar.fileformat = format;
-				trackvar.container = ko.observableArray([]);
-				trackvar.filename = ko.observable('');
-				trackvar.container.subscribe(function(newarr){
-				if(newarr.length && ('imported' in newarr[0]) && ('type' in newarr[0].imported)){
-					trackvar(newarr[0].imported.type);
-					trackvar.filename(newarr[0].name||'imported data');
-				} else trackvar('');
-				});
-				trackvar.container.get = function(name){ return ko.utils.arrayFirst(container(), function(item){ return item.name==name; }); };
-			}
-		    var container = trackvar.container;
-			
-			//option gets its value (data type) after file is supplied (from checkfiles())
-			if(~source.indexOf("filedrop")){ //filedrop area
-				var filedrag = $('<div class="filedrag">'+(data.title||'Drop file here')+'</div>');
-				filedrag.bind('dragover',function(evt){ //file drag area
-					filedrag.addClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-					evt.originalEvent.dataTransfer.dropEffect = 'copy';
-				}).bind('dragleave',function(evt){
-					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-				}).bind('drop',function(evt){
-					filedrag.removeClass('dragover'); evt.stopPropagation(); evt.preventDefault();
-					var origtxt = filedrag.text(), filehandle = evt.originalEvent.dataTransfer.files;
-					filedrag.text('Importing...');
-					setTimeout(function(){
-						checkfiles(filehandle, {onefile:true, silent:true, nocheck:format=="original", container:container});
-						setTimeout(function(){ filedrag.text(origtxt); }, 1000);
-					},100);
-				});
-			} else var filedrag = ''; 
-			if(~source.indexOf("import") || ~source.indexOf("fileselect")){ //import/select button
-				var impbtn = ~source.indexOf("import");
-				var or = $('<span style="display:inline-block;font-size:18px;">'+(filedrag?' or ':'')+'</span>');
-				var importbtn = $('<a class="button" style="vertical-align:0">'+(impbtn?'Import':'Select')+'</a>');
-				if(impbtn){
-					importbtn.click(function(e){ return dialog('import', {onefile:true, silent:true, nocheck:format=="original", container:container}); });
-				} else {
-					var fileinput = $('<input type="file" multiple style="display:none" name="upfile">');
-					fileinput.change(function(){ checkfiles(self.files, {onefile:true, silent:true, nocheck:format=="original", container:container}); });
-					or.append(fileinput);
-					importbtn.click(function(e){ fileinput.click(); e.preventDefault(); });
-				}
-			} else { var or = '', importbtn = ''; }
-			
-			var importdiv = $('<div data-bind="visible:!'+kovar+'()">').append(filedrag, or, importbtn);
-				
-			var filelist = $('<div data-bind="if:'+kovar+'">'+(data.desc||'Use file')+': <img class="icn" src="images/file.png"> <span data-bind="text:'+kovar+'.filename"></span></div>');
-			var filedel = $('<span class="svgicon action" title="Remove file" style="margin:0 5px;" data-bind="click:function(){'+kovar+'.container([])}">'+svgicon('close')+'</span>');
-			var fileview = $('<a class="button square small" title="View file content" data-bind="click:function(){dialog(\'export\',{exportdata:'+kovar+'.container()[0]})}">View</a>');
-			filelist.append(filedel, fileview);
-			elems.push(importdiv,filelist);
-		  }
-		}
-		
-		if(data.required || data.check){ //input validation
-			var rqch = data.required || data.check;
-			if(!firstrun && !trackvar.errmsg){ //second pass: add validator
-			  if(typeof(rqch)=='string'){ //string as message: show the message when no input value
-				trackvar.errmsg = ko.pureComputed(function(){
-					var defval = otype=='text'&&('defaultval' in trackvar)? trackvar.defaultval:'';
-					return trackvar()==='' && defval===''? rqch : '';
-				});
-			  } else {
-				if(typeof(rqch)=='object'){ //rule obj: evaluate key (rule), display the value (message)
-					var rqchrule = Object.keys(rqch)[0];
-					var retfunc = self.ruleFunc(rqchrule, "?'"+rqch[rqchrule]+"':''");
-				} else { var retfunc = self.ruleFunc(rqch); }
-				trackvar.errmsg = ko.pureComputed(retfunc);
-			  }
-			}
-			elems.push('<!-- ko if:'+(data.required?'$data._submitted()&&':'')+kovar+'.errmsg() --><p class="'+(data.required?'err':'note')+'msg" data-bind="text:'+kovar+'.errmsg"></p><!-- /ko -->');
-			kobind += ', style:{borderColor:'+kovar+'.errmsg()?\'red\':\'\'}';
-		}
-
-		el.attr("data-bind", kobind); //bind input element to option attributes and tracked values
-		
-		if(el.attr("type")!="hidden"){ //text label next to input element (except hidden/file inputs)
-			if(trackvar.argname) el.attr("title", trackvar.argname); //show command-line argument on input hover
-			var tspan = data.title? $('<span>'+data.title+'</span>') : ''; //add input label
-			if(data.desc){ if(tspan) tspan.addClass("label"); (tspan||el).attr("title", data.desc); } //show description on mouseover
-			if(tspan){ el = otype=='checkbox'? el.add(tspan) : tspan.add(el); }
-		}
-		
-		var box = $("<div>"); //wrap up the html
-		box.append(el); //include the input element
-		$.each(elems, function(i,elem){ box.append(elem) }); //include any additional html
-		if(data.enable||data.disable){ //option has enable/disable rule
-			var rulestr = self.processRule(data.enable||data.disable);
-			box.attr("data-bind","if"+(data.disable?"not":"")+":"+rulestr); //remove disabled input element
-		}
-		if("line" in data) box.css("display","inline-block");
-		if(firstrun) self._log('parsed option data: '+JSON.stringify(data));
-		self._curopt = '';
-		return box;
-	},
-	
-	//iterate through options data, convert to HTML
-	buildOptions: function(data, prefix, disable){
-		var self = this;
-		var UI = $('<div>');
-		if(!data) return self._error('empty option','warning');
-		if($.isArray(data.options)){ //(sub)group of options
-			if(data.prefix) prefix = data.prefix;
-			if(data.disable) disable = data.disable; //disable/enable group of options
-			else if(data.enable) disable = '!('+data.enable+')';
-			data.options.forEach(function(optdata){ UI.append(self.buildOptions(optdata, prefix, disable)); });
-			
-			//add interface container for options group
-			if("group" in data){
-				UI.addClass("insidediv numinput").css({"display":"none","margin-bottom":0});
-				UI = $('<div>').append(expandtitle({title:data.group||'Options', desc:'Click to toggle options', info:data.desc||'', inline:true, css:{'margin-top':'5px'}}), UI);
-			}
-			else if("section" in data){
-				UI.prepend('<div class="sectiontitle small">'+(data.section?'<span>'+data.section+'</span>':'')+'</div>');
-			}
-			else if("line" in data){
-				if(typeof(data.line)=='string') UI.prepend('<span>'+data.line.trim()+' <span>');
-				$('div',UI).css('display','inline-block');
-			}
-			
-			//hide/show group of options
-			if(data.enable||data.disable) UI.attr("data-bind","if"+(data.disable?"not":"")+":"+self.processRule(data.enable||data.disable));
-		} else { UI = self.processOption(data, prefix, disable); } //parse each option
-		return UI;
-	},
-	
-	//build the plugin window content (on menu item click)
-	buildUI: function(data){
-		if(!data) data = this._json;
-		var desc = data.desc? this.processOption(data.desc):''; delete data.desc;
-		var nameinput = $('<input type="text" class="hidden" data-bind="value:_libraryname" title="Click to edit">');
-		var namespan = $('<span class="note">Name the results: </span>').append(nameinput);
-		var writetarget = '<br><!-- ko if:exportmodel.savetargets().length>1 --><span class="label" title="Choose a library slot '+
-		'for the new analysis, relative the to the input (currently open) dataset">Save as</span> '+
-		'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select><!-- /ko -->'+
-		'<!-- ko if:exportmodel.savetargets().length==1 -->The result will be stored as new root<!-- /ko -->'+
-		' analysis in the <a onclick="dialog(\'library\')">library</a>.';
-		exportmodel.savetarget(exportmodel.savetargets()[0]);
-		var inclhidden = '<!-- ko if:model.hiddenlen --><br><input name="includehidden" type="checkbox" data-bind="checked: exportmodel.includehidden">'+
-		'<span class="label" data-bind="attr:{title:\'Include \'+model.hiddenlen()+\' collapsed alignment columns in analysis\'}">'+
-		'include hidden alignment columns</span><!-- /ko -->';
-		var header = $('<div class="insidediv incontent" style="white-space:nowrap">').append(namespan, writetarget, inclhidden);
-		
-		var optformUI = this.buildOptions(data);
-		var optform = $('<form id="'+this._title+'form" onsubmit="return false"></form>').append(optformUI);
-		var submitbtn = $('<a class="button orange" title="Launch '+this._program+'" data-bind="text:'+(data.submit?this.processRule(data.submit):'\'Send job\'')+'"></a>');
-		submitbtn.click($.proxy(function(){
-			this._submitted(true);
-			var errors = $("p.errmsg", optform);
-			if(errors.length){ //got form errors
-				var origtxt = submitbtn.text();
-				submitbtn.text("Check form errors!");
-				setTimeout(function(){ errors.filter(':hidden').parents('.insidediv').slideDown(); },1000);
-				setTimeout(function(){ submitbtn.text(origtxt); }, 2000);
-				return;
-			}
-			sendjob({form:optform[0], btn:submitbtn, name:nameinput.val(), plugin:this._title}); //send job
-		}, this));
-
-		return {header: desc, content:[header,optform], btn:submitbtn}; //DOM elements
-	},
-	
-	//prepare plugin
-	checkPlugin: function(){
-		//parse input
-		data = this._json;
-		if(!data) return this._error('input JSON missing');
-		if(typeof(data)=='string'){ //JSON or native JS
-			try{ data = JSON.parse(data); }
-			catch(err1){
-				try{ eval("data = "+data); }
-				catch(err2){
-					this._error('failed to parse plugin file as JSON (ignore if it\'s Javascript object): '+err1, 'warning');
-					return this._error('failed to parse plugin file as javascript object (giving up): '+err2);
-				}
-			}
-		}
-		if($.isArray(data)) data = {options:data};
-		else if(typeof(data)!='object') return this._error('plugin file in wrong format: '+typeof(data)+' (JSON/object/array expected)');
-		this._json = data;
-		
-		if(!data.program) return this._error('program name missing from JSON');
-		this._program = data.program;
-		if(data.debug) this._debug = data.debug;
-		if(data.version) this._version = data.version;
-		if(data.prefix) this._prefix = data.prefix;
-		if(data.translate_names) this._makeids = true;
-		if(data.libraryname) this._libraryname(data.libraryname);
-		if(data.disable){ data.pdisable = data.disable; delete data.disable; }
-		if(data.enable){ data.penable = data.enable; delete data.enable; }
-		this._title = data.name || data.program;
-		this._outfile = data.outfile || '';
-		//svg/image icons
-		var svgicon = "gear", icon = "../../images/gear.png", imgarr = [];
-		if(typeof(data.icon)=='string') imgarr = [data.icon];
-		else if($.isArray(data.icon)) imgarr = data.icon;
+	processPlugin: function(data){
+		if(data.translateTaxa) Pline.settings.makeids = true;
+		//add svg/image icons
+		var svgicon = "gear", icon = "../../images/gear.png";
+		var imgarr = Array.isArray(data.icon)? data.icon : [data.icon];
 		$.each(imgarr, function(i,imgstr){ //resolve image type (image/svg from dataURL/fileURL/svgname/svgpath)
 			if(typeof(imgstr)!='string') return true;
 			if(imgstr.substr(0,10)=='data:image'||~['.png','.jpg','.gif'].indexOf(imgstr.substr(-4))) icon = imgstr;
 			else svgicon = imgstr;
 		});
-		if(svgicon.length>10){ svgpaths[this._title] = svgicon; svgicon = this._title; } //long string. use as svgpath
-		else if(!svgpaths[svgicon]) svgicon = "gear"; //not a registered svgname. revert to default svg icon
-		this._icon = {img:icon, svg:svgicon};
-		
-		if(!data.options) return this._error('no options found');
-		return true;
+		if(svgicon.length>10){ svgpaths[this.id] = svgicon; svgicon = this.id; } //long string. use as svgpath
+		else if(!svgpaths[svgicon]) svgicon = "gear"; //not a registered svg icon name. revert to default svg icon
+		this.icon = {img:icon, svg:svgicon};
 	},
 	
-	//wire up
 	registerPlugin: function(){
-		this.checkPlugin();
-		if(this._errors.length){  //add error dialog to tools menu
-			console.log("Plugin datamodel dump:"); console.log(this);
-			this._icon.svg = 'error';
-			var errmsg = "<b>Plugin interface building failed for "+this._title+":</b><br><ul><li>"+this._errors.join("</li><li>")+"</li></ul>";
-			var menuclick = dialog.bind(this, "error", errmsg);
-			var menudesc = "This plugin failed to load. Click to see the errors.";
+		var plugin = this;
+		var data = plugin.json;
+		data.launcher = dialog.bind(this, 'plugin');
+		data.reqarr = [];
+		if(plugin.errors.length){ //JSON parsing failed. Show errors.
+			plugin.icon.svg = 'error';
+			data.launchtitle = "This plugin failed to load. Click to see the errors.";
 			if(data.pdisable) data.pdisable = false;
 			data.reqarr = [];
-		} else {  //add plugin to tools menu
-			var menuclick = this._title;
-			var menudesc = data.menudesc||"Launch plugin for "+this._program;
-			plugins[this._title] = this;
-			this.buildUI();
+		} else {  //add plugin to the menu
+			data.launchtitle = data.desc||"Run "+plugin.program;
+			data.reqarr = ['online'];
+			if("penable" in data){ if(data.penable) data.reqarr.push(data.penable); else data.pdisable = true; }
+		}
+		if(!data.pdisable){
+			//add plugin launcher to tools menu
+			model.pluginsmenu.push({txt:plugin.title, act:data.launcher, icn:plugin.icon.svg, inf:data.launchtitle, 
+				req:data.reqarr, keep:true, group:plugin.category});
+			//plugin list order: reverse alphabetical, followed by groups
+			model.pluginsmenu.sort(function(a,b){
+				if(a.group && b.group){
+					var g1 = a.group.toLowerCase();
+					var g2 = b.group.toLowerCase();
+					if(g1>g2) return 1;
+					else if(g1<g2) return -1;
+				}
+				a = a.txt.toLowerCase();
+				b = b.txt.toLowerCase();
+				return a>b? 1: a<b? -1: 0;
+			});
+		}
+	},
+	
+	processOption: function(data){
+		var trackvar = this.options[data.name];
+		if(trackvar.container){ //file option
+			trackvar.datatype = ko.observable(''); //file content type (sequence/tree)
+			trackvar.fileformat = ko.observable(data.format||false); //target fileformat
+			trackvar.container.subscribe(function(filearr){ //add datatype to imported files
+				if(filearr.length) trackvar.datatype(filearr[0].type?filearr[0].type.replace(/:\w+/g,''):'unknown');
+			});
+			trackvar.container.get = function(filename){ //for file importer
+				return ko.utils.arrayFirst(trackvar.container(), function(item){ return item.name==filename; });
+			};
 			
-			if(typeof(this._outfile)=='object'){ //conditional default output filename
-				this._outfile = ko.pureComputed(this.ruleFunc(data.outfile));
+			/*if(!pipeline && (source.includes('sequence')||source.includes('tree'))){ //data source: currently imported dataset
+			//generate datatype, filename and filetype from the imported dataset (available for the first pipeline step)
+			trackvar.datatype = ko.computed(function(){ //datatype = 'dna'|'protein'|'tree'|'(dna|protein) tree'
+				var datatype = source!='tree'?self.sequence.datatype():''; //datatype = 'dna'|'protein'|'codons'|''
+				if(source!='sequence'&&self.tree()) datatype += (datatype?' ':'')+'tree'; //datatype = 'tree'|seqtype+' tree'|''
+				if(format=='original') trackvar.fileformat(source=='sequence'?'fasta':source=='tree'?'newick':'phyloxml'); //filetype
+				trackvar('input_'+(source.includes(' ')?'data':datatype)); //filename = 'input_(datatype|"data")'+filetype_extension;
+				return datatype;
+			});*/
+
+			/*
+			parseOption()=>type=="file"=>trackvar.write():
+			if(!fname.includes('.')){ //add file extension
+				fname = label+(exportmodel.fileexts[trackvar.fileformat()] || '.txt');
 			}
-			var reqarr = ['online'];
-			if("penable" in data){ if(data.penable) reqarr.push(data.penable); else data.pdisable = true; }
+			renderOption():
+			var format = data.format || "original"; //target format for file converter
+			var source = data.source || "sequence"; //file source
+			el.attr({"fileformat":format, "source": source}); //format/source only affects the first step
+			*/
 		}
-		this._ready = true;
+	},
+	
+	//add info icon and library savetarget selector to the plugin interface header
+	processHeader: function(header){
+		if(this.step){ //a continuation pipeline step
+			var writetarget = '<br>Please select the correct input files in the options.';
+			var writenote = 'The data is stored as a child analysis of the previous step in the analysis library.';
+		} else { //standalone analysis / first pipeline step
+			var writetarget = '<br><!-- ko if:exportmodel.savetargets().length>1 --><span class="label" title="Choose a library slot '+
+			'for the new analysis, relative the to the input (currently open) dataset">Save as</span> '+
+			'<select data-bind="options:exportmodel.savetargets, optionsText:\'name\', value:exportmodel.savetarget"></select><!-- /ko -->'+
+			'<!-- ko if:exportmodel.savetargets().length==1 -->The data is stored as a new<!-- /ko -->'+
+			' analysis in the <a onclick="dialog(\'library\')">library</a>.'+
+			'<!-- ko if:model.hiddenlen --><br><input name="includehidden" type="checkbox" data-bind="checked: exportmodel.includehidden">'+
+			'<span class="label" data-bind="attr:{title:\'Include \'+model.hiddenlen()+\' collapsed alignment columns in analysis\'}">'+
+			'include hidden alignment columns</span><!-- /ko -->';
+			exportmodel.savetarget(exportmodel.savetargets()[0]);
+			var writenote = 'The currently open dataset is used for generating input files.';
+		}
+		var namespan = $("span:last-child", header);
+		namespan.append(svgicon('info',{span:true, attr:'title="'+writenote+'"'}));
+		return header;
+	},
+	
+	//use Wasabi importer to fetch data for fileinputs
+	selectFile: function(fileinput, filecontainer){
+		/*var readFile = function(files){
+			var reader = new FileReader(); 
+			reader.onload = function(e){
+				trackvar.container.push({name:files[0].name, data:e.target.result, i:0});
+			}
+			try{ reader.readAsText(files[0]); }catch(err){ self.error('Failed to read file: '+err); }
+		}
+		fileinput.change(function(){ readfile(this.files); });
+		//fileinput.click();*/
+		dialog('import', {onefile:true, silent:true, container:filecontainer});
+	},
+	
+	//change fileinput content to the required format
+	processInput: function(input, opt, payload){
+		var newformat = input.getAttribute('fileformat');
+		//file option: reformat the supplied/imported file (later added to payload)
+		if(newformat && !opt.filepath() && opt.filename() && opt.container && opt.container().length){
+			var file = opt.container()[0]; //filecontent
+			if(!file) return; //skip empty files
+			var makeIDs = Pline.settings.makeids; //translate taxanames to IDs
+			if(makeIDs && !payload.tmp) payload.tmp = {nameids: {}, endid: 0}; //temporary counters
+			
+			var exportopt = {container:file};
+			if(!opt.datatype().includes('tree')){ //sequence data
+				exportopt.includehidden = model.export.includehidden();
+				exportopt.startid = payload.tmp.endid; //keep indexing over multiple files
+			}
+			if(makeIDs) exportopt.nameids = payload.tmp.nameids;
+			
+			var exported = parseexport(newformat, exportopt); //generate new file
+			if(exported.nameids){ //share taxanames => taxaIDs map between files
+				payload.tmp.nameids = exported.nameids;
+				payload.tmp.endid = exported.endid;
+			}
+			
+			opt.container([exported.file]);  //replace the filecontent
+		}
+		return payload;
+	},
+	
+	//add metadata to the submitted plugin 
+	processPayload: function(payload){
+		if(Object.keys(payload.tmp.nameids).length){ //add taxaID => orig. taxaname mapping
+			payload.idnames = {};
+			$.each(payload.tmp.nameids, function(name, id){ payload.idnames[id] = name; });
+		}
+		delete payload.tmp;
+		return payload;
+	},
+	
+	//add metadata to the submitted job 
+	processJob: function(senddata){
+		senddata.writemode = exportmodel.savetarget().type;
+		if(librarymodel.openid()) senddata.id = librarymodel.openid();
 		
-		if(!data.pdisable){ //add plugin launcher to tools menu (and order by plugin name)
-			model.pluginsmenu.push({txt:this._title, act:menuclick, icn:this._icon.svg, inf:menudesc, req:reqarr, keep:true});
-			model.pluginsmenu.sort(function(a,b){return a.txt>b.txt?-1:a.txt<b.txt?1:0; });
+		if(payload.tmp.use_imported){ //Wasabi-imported MSA included in the submitted files. Add metadata.
+			var nodeinfo = {}; //collect metadata for imported MSA leafnodes
+			$.each(leafnodes, function(name,node){ if(node.nodeinfo && node.type!='ancestral') nodeinfo[name] = node.nodeinfo; });
+			if(!$.isEmptyObject(nodeinfo)) senddata.nodeinfo = nodeinfo;
+			if(!$.isEmptyObject(model.ensinfo())) senddata.ensinfo = model.ensinfo();
 		}
-		if(this._debug) console.log('=== '+this._program+' plugin ready ===');
+		
+		return senddata;
+	},
+	
+	//check user quotas before submitting
+	checkJob: function(){
+		var datalimit = settingsmodel.datalimit, joblimit = settingsmodel.joblimit;
+		if(datalimit){
+			var bplimit = datalimit*100000;
+			if(model.totalseqlen()>bplimit){
+				return 'Your sequence data size exceeds the server limit of '+numbertosize(bplimit,'bp')+
+				'.<br>Please reduce the input dataset size and try again.';
+			}
+			else if(parseInt(settingsmodel.dataperc())>98){
+				return 'The '+numbertosize(datalimit,'byte')+' server space for your analysis library is used up.'+
+				'<br>Please delete <a onclick="dialog(\'library\')">some</a> or <a onclick="dialog(\'settings\')">all</a> analyses and try again.';
+			}
+		}
+		else if(joblimit && librarymodel.runningjobs()>=joblimit){
+			return 'You already have the maximum of '+joblimit+' jobs running.'+
+			'<br>Terminate or wait for a job to finish before launching a new one.';
+		}
+		return false;
+	},
+	
+	sendJob: function(options){
+		if(Pline.sending) return;
+		Pline.sending = true;
+		
+		options.btn.click(closewindow);
+		options.btn.attr('title','Click to close the window');
+		var optdata = {btn: options.btn[0]};
+		
+		var senddata = options.payload||self.prepareJob()||{};
+		
+		var successfunc = optdata.success = function(resp){
+			options.btn.html('Job sent');
+			try{ var data = JSON.parse(resp); }catch(e){ var data = {}; }
+			if(!options.plugin){
+				librarymodel.autoimport = data.id||''; //autoimport updated alignment
+				if(model.treealtered()) model.treealtered(false);
+			}
+			setTimeout(function(){
+				closewindow(options.btn); //close sendjob window
+			}, 2000);
+		};
+		
+		var itemcount = serverdata.library().length;
+		optdata.error = function(msg){
+			if(msg.includes('response')){ //no reponse. Check if job sent.
+				setTimeout(function(){
+					var newcount = serverdata.library().length;
+					if(newcount>itemcount) successfunc();
+				},2000);
+			}
+		};
+		optdata.timeout = 4000;
+		optdata.after = function(){ Pline.sending = false; Pline.resetPlugins(); };
+		
+		communicate('run', senddata, optdata); //send payload to server
+		_paq.push(['trackEvent', options.pipeline?'pipeline':'plugin', options.plugin]); //record event
 	}
 };
+wasabi_extensions.options['imported sequence'].datatype = model.seqtype;
+wasabi_extensions.options['imported tree'].datatype = model.treesource;
+Pline.extend(wasabi_extensions);
 
 //== functions for sequence manipulation ==//
 //make or resize a sequence selection box
@@ -5558,15 +4980,15 @@ function clearselection(id){
 }
 
 //toggle coulmn/row selection mode
-function toggleselection(type,id,exclude){
+function toggleselection(type, id, exclude){
 	if(typeof(id)=='undefined') id=''; if(typeof(exclude)=='undefined') exclude='';
-	if(~type.indexOf('tmp') && model.selmode()!='default') return;
+	if(type.includes('tmp') && model.selmode()!='default') return;
 	if(type=='default'){ toggleselection('hide rows',id); type='hide columns'; } //actions for selection mode change
 	else if(type=='columns'){ toggleselection('hide rows',id); type='show columns'; }
 	else if(type=='rows'){ toggleselection('show rows',id); type='hide columns'; }
-	var divs = ~type.indexOf('rows')? $('div[id^="horicross'+id+'"]') : ~type.indexOf('columns')? $('div[id^="vertcross'+id+'"]') : $('div[id$="cross'+id+'"]');
+	var divs = type.includes('rows')? $('div[id^="horicross'+id+'"]') : type.includes('columns')? $('div[id^="vertcross'+id+'"]') : $('div[id$="cross'+id+'"]');
 	if(exclude) divs = divs.not('div[id$="cross'+exclude+'"]'); //filter out some divs
-	$(divs).each(function(){ if(~type.indexOf('show')) $(this).stop().fadeIn(200); else $(this).fadeOut(200); }); 
+	$(divs).each(function(){ if(type.includes('show')) $(this).stop().fadeIn(200); else $(this).fadeOut(200); }); 
 }
 
 //create content for sequence position info tooltip
@@ -5684,13 +5106,13 @@ function hiderows(selectionid){
 }
 
 //mask a MSA block
-function maskdata(action,selectionid){
-	var target = ~action.indexOf('rows')? 'rows' : ~action.indexOf('columns')? 'columns' : 'selections';
-	if(~action.indexOf('unmask')){ var symboltype = 'unmasked'; var flag = false; } else { var symboltype = 'masked'; var flag = 1; }
+function maskdata(action, selectionid){
+	var target = action.includes('rows')? 'rows' : action.includes('columns')? 'columns' : 'selections';
+	if(action.includes('unmask')){ var symboltype = 'unmasked'; var flag = false; } else { var symboltype = 'masked'; var flag = 1; }
 	registerselections(selectionid);
 	var undodata = {}, undodesc = '';
 	
-	if(~action.indexOf('all')){
+	if(action.includes('all')){
 		for(var name in sequences){ for(var c=0;c<sequences[name].length;c++) sequences[name][c] = symbols[sequences[name][c]][symboltype]; }
 	}
 	else if(action=='hidemaskedcols'){
@@ -5747,8 +5169,8 @@ function maskdata(action,selectionid){
 
 //undo/redo sequence manipulation actions
 function undoseq(seqtype, undodata, action){
-	if(~action.indexOf('mask')){ //(un)mask seq. areas/rows/columns
-		var symboltype = ~action.indexOf('unmask')? 'unmasked' : 'masked';
+	if(action.includes('mask')){ //(un)mask seq. areas/rows/columns
+		var symboltype = action.includes('unmask')? 'unmasked' : 'masked';
 		var columns = undodata._columns? undodata._columns : [];
 		for(name in undodata){
 			if(!sequences[name]) continue;
@@ -5761,8 +5183,8 @@ function undoseq(seqtype, undodata, action){
 			}
 		}
 	}
-	else if(~action.indexOf('show')){ showcolumns(undodata, false, seqtype); }
-	else if(~action.indexOf('hide')){ //rehide columns
+	else if(action.includes('show')){ showcolumns(undodata, false, seqtype); }
+	else if(action.includes('hide')){ //rehide columns
 		colflags = [];
 		var c = 0, i = 0; visiblecols = model.visiblecols();
 		$.each(undodata,function(i,range){
@@ -5776,8 +5198,8 @@ function undoseq(seqtype, undodata, action){
 		});
 		hidecolumns(false,'skipundo');
 	}
-	else if(~action.indexOf('add')){ addcolumns(undodata, seqtype); } //restore removed columns
-	else if(~action.indexOf('remove')){ removecolumns(translatecolumns(seqtype, model.seqtype(), undodata.removecols)); }
+	else if(action.includes('add')){ addcolumns(undodata, seqtype); } //restore removed columns
+	else if(action.includes('remove')){ removecolumns(translatecolumns(seqtype, model.seqtype(), undodata.removecols)); }
 	redraw();
 }
 
@@ -5971,8 +5393,6 @@ function seqmenu(selectid){
 var startupdone = false;
 function startup(response){
 	if(startupdone){ return false; } else { startupdone = true; }
-	var launchact = settingsmodel.onlaunch();
-	if(!launchact){ launchact = 'demo data'; settingsmodel.onlaunch('blank page'); } //first time launch in this browser
 	var urlstr = settingsmodel.urlvars, urlvars = parseurl(settingsmodel.urlvars);
 	setTimeout(function(){window.history.pushState('', '', window.location.pathname)}, 1000); //clear urlvars
 	
@@ -6031,34 +5451,46 @@ function startup(response){
 	} else { settingsmodel.checkupdates(false); }
 	if(data.autoupdate) settingsmodel.autoupdate = true;
 	
-	if((localStorage.zoomlevel && settingsmodel.keepzoom()) || urlvars.zoomlevel){ //custom zoomlevel
-		var zlevel = parseInt(urlvars.zoomlevel) || JSON.parse(localStorage.zoomlevel);
-		if(zlevel<1 || zlevel>=model.zlevels.length) zlevel = 1;
-		model.zoomlevel(zlevel);
+	//server-side domain limit for data import URLs
+	if(data.urldomain && data.urldomain.test(/\w+\.\w+/)) settingsmodel.urldomain = data.urldomain;
+	
+	//load data from url command or from last session
+	var restoreSession = function(){
+		if((localStorage.zoomlevel && settingsmodel.keepzoom()) || urlvars.zoomlevel){ //custom zoomlevel
+			var zlevel = parseInt(urlvars.zoomlevel) || storage('zoomlevel');
+			if(zlevel<1 || zlevel>=model.zlevels.length) zlevel = 1;
+			model.zoomlevel(zlevel);
+		}
+		
+		var launchact = settingsmodel.onlaunch();
+		if(!launchact){ launchact = 'demo data'; settingsmodel.onlaunch('blank page'); } //first time launch in this browser
+		
+		if(urlvars.id||urlvars.wasabiID||urlvars.share){ //import from library
+			getfile({id:urlvars.id||urlvars.wasabiID||urlvars.share, file:urlvars.file||'', dir:urlvars.dir||''});
+		}
+		else if(urlvars.file){ getfile({file:urlvars.file}); } //import local file
+		else if(urlvars.url){ //import remote file(s): urlvars.url = Array [url,url]
+			checkfiles(urlvars.url);
+		}
+		else if(settingsmodel.userid() && settingsmodel.keepid() && localStorage.openid && localStorage.openfile){
+			getfile({id:localStorage.openid, file:localStorage.openfile});  //reopen analysis from last session
+		}
+		else if(launchact=='demo data'){ getfile({id:'example', file:'out.xml'}); } //or load demo data (default)
+		else if(launchact=='import dialog'){ dialog('import'); } //show import dialog
+		
+		if(data.plugins){  //donwload & process plugins
+			$.each(data.plugins, function(i, jsonpath){
+				Pline.addPlugin('?plugin='+jsonpath, jsonpath.substring(0, jsonpath.lastIndexOf('/')));
+			});
+		}
 	}
 	
-	communicate('getlibrary');
-	
-	if(urlvars.id||urlvars.wasabiID||urlvars.share){ //import from library
-		getfile({id:urlvars.id||urlvars.wasabiID||urlvars.share, file:urlvars.file||'', dir:urlvars.dir||'', aftersync:true});
-	}
-	else if(urlvars.file){ getfile({file:urlvars.file, aftersync:true}); } //import local file
-	else if(urlvars.url){ //import remote file(s): urlvars.url = Array [url,url]
-		checkfiles(urlvars.url);
-	}
-	else if(launchact=='demo data'){ getfile({id:'example', file:'out.xml'}); } //or load demo data (default)
-	else if(settingsmodel.userid() && settingsmodel.keepid() && localStorage.openid && localStorage.openfile){ //or load last data
-		getfile({id:localStorage.openid, file:localStorage.openfile});
-	}
-	else if(launchact=='import dialog'){ dialog('import'); } //show import dialog
-	
-	if(data.plugins){  //donwload & process plugins
-		$.each(data.plugins, function(i,pluginname){
-			getfile({plugin:pluginname, throttle:true, success:function(pjson){ new pluginModel(pjson, pluginname); }});
-		})
-	}
-	
-	if(data.urldomain && data.urldomain.test(/\w+\.\w+/)) settingsmodel.urldomain = data.urldomain; //server-side domain limit for data import URLs
+	if(!settingsmodel.useraccounts()||settingsmodel.userid()){
+		communicate('getlibrary', '', {after: function(){
+			if(settingsmodel.useraccounts()) syncStorage(restoreSession);
+			else restoreSession();
+		}});
+	} else restoreSession();
 
 	if(settingsmodel.checkupdates()) checkversion(); //check for updates
 }
@@ -6109,11 +5541,11 @@ $(function(){
 		}
 	});
 	$("#namesborderDrag").hover(
-		function(){$("#names").css('border-color','#aaa')},
-		function(){$("#names").css('border-color','white')}
+		function(){dom.names.css('border-color','#aaa')},
+		function(){dom.names.css('border-color','white')}
 	);
 	
-	$("#names").mouseleave(function(e){ rowborder(e,'hide'); });
+	dom.names.mouseleave(function(e){ rowborder(e,'hide'); });
 	
 	//Add mouse click/move listeners to sequence window
 	dom.seqwindow.mousedown(function(e){
@@ -6154,7 +5586,7 @@ $(function(){
 		e.preventDefault(); //disable default right-click menu
 		if($.isEmptyObject(sequences)) return false;
 		var target = e.target.id==''? e.target.parentNode : e.target;
-		var actid = ~target.id.indexOf('selection')||~target.id.indexOf('cross')? target.id.substr(9) : '';
+		var actid = target.id.includes('selection')||target.id.includes('cross')? target.id.substr(9) : '';
 		model.activeid(actid);
 		tooltip(e,'',{data:seqmenu(),id:'seqmenu'}); //show popup menu
 	}); //seq. area right-click
@@ -6204,7 +5636,7 @@ $(function(){
 	var urlvars = window.location.search;
 	settingsmodel.loadprefs(); //load settings from localStorage
 	settingsmodel.urlvars = urlvars;
-	if(urlpath.length && !~urlpath.indexOf('.')) settingsmodel.urlid = urlpath; //launched with account URL
+	if(urlpath.length && !urlpath.includes('.')) settingsmodel.urlid = urlpath; //launched with account URL
 
 	var showbuttons = function(){ setTimeout(function(){
 		$('#top').removeClass('away');
@@ -6214,6 +5646,6 @@ $(function(){
 			$('#namesborderDragline').removeClass('dragmode');
 		}, 400); }});
 	}, 700); };
-	if(~window.location.host.indexOf('localhost')||window.location.protocol=='file:') settingsmodel.sharelinks(false);
+	if(window.location.host.includes('localhost')||window.location.protocol=='file:') settingsmodel.sharelinks(false);
 	communicate('checkserver',{userid:settingsmodel.urlid||settingsmodel.userid()||''},{success:startup, error:startup, after:showbuttons}); //ping server
 });
