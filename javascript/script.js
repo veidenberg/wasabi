@@ -1163,7 +1163,7 @@ var koTools = function(){
 	self.gaptype.subscribe(function(newg){ self.countgaps(); });
 	self.gapcount = [];
 	self.conscount = [];
-	self.countgaps = function(){ //setup: count gaps in alignment columns
+	self.countgaps = function(){ //count gaps in alignment columns
 		var l = s = cc = '', gaps = [], rows = model.visiblerows(), cols = model.visiblecols();
 		self.gapcount = []; self.conscount = [];
 		if(self.gaptype().includes('in')){ model.seqtype()=='codons'? gaps.push('...',':::') : gaps.push('.',':'); }
@@ -1179,16 +1179,19 @@ var koTools = function(){
 							else if(self.conscount[i] != s) self.conscount[i] = false;
 						} 
 				}); //note: takes time on large data
-				if(n==rows.length-1){ //counting finished
+				if(n==rows.length-1){ //counting finished => flag columns
 					$('#seqtool div.spinnercover').remove();
-					setTimeout(function(){  if(self.hidelimitperc()==10) self.hidelimitperc(9); else self.hidelimitperc(10); }, 16);
+					setTimeout(function(){ 
+						if(!self.hidelimitperc()) self.hidelimitperc(10); //set initial threshold
+						else self.filtercounts(); //just update column selections
+					}, 16);
 				}	
 			}, 16);
 		});
 	};
 	self.gaplen = ko.observable(0);
 	self.buflen = ko.observable(0);
-	self.hidecolcount = ko.computed(function(){ //preview result
+	self.filtercounts = function(){ //flag columns above the threshold gap count
 		var colestimate = 0, rows = model.visiblerows().length, threshold = self.hidelimit(), range = [], ranges = [];
 		var cons = self.hideconserved(), addcons='', dialog = $('#seqtool').length, action = self.hideaction();
 		var minlen = parseInt(self.gaplen()), buflen = parseInt(self.buflen());
@@ -1205,14 +1208,18 @@ var koTools = function(){
 			else if(range.length) processrange(c);
 		});
 		if(range.length) processrange(self.gapcount.length);
-		if(dialog){ //preview, mark columns
+		if(dialog){ //show the flagged columns with selections
 			setTimeout(function(){
 				colflags = []; clearselection(); if(model.selmode()!='columns') model.selmode('columns');
 				$.each(ranges,function(i,carr){ selectionsize('','',carr); for(var r=carr[0];r<carr[1];r++){ colflags[r] = 1; }});
 			}, 100);
 		}
 		return colestimate;
-	}).extend({rateLimit:{timeout: 300, method: "notifyWhenChangesStop"}});
+	};
+	//hidelimit() changed => recalculate column flags
+	self.hidecolcount = ko.computed(self.filtercounts).extend({
+		rateLimit: {timeout: 300, method: "notifyWhenChangesStop"}
+	});
 	self.hidecolperc = ko.computed(function(){ return parseInt(self.hidecolcount()/self.gapcount.length*100) });
 	
 	//tree editing tool
