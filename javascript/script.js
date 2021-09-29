@@ -2828,7 +2828,7 @@ function parseexport(filetype, options){
 			isleaf = ~leafnames.indexOf(name);
 			seqline = parseseq(name);
 		var xmlnode = isleaf? "\t<leaf " : "\t<node ";
-		xmlnode += "id=\""+(nameids[name]||name)+"\" name=\""+(dispnames[name]||name)+"\">\n\t\t<sequence>\n\t\t"+seqline+"\n\t\t</sequence>\n"+(isleaf?"\t</leaf>\n":"\t</node>\n");
+		xmlnode += "id=\""+(nameids[name]||name)+"\" name=\""+name+"\">\n\t\t<sequence>\n\t\t"+seqline+"\n\t\t</sequence>\n"+(isleaf?"\t</leaf>\n":"\t</node>\n");
 		output += xmlnode;
 		});
 		output += "</nodes>\n";
